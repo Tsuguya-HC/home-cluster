@@ -1,5 +1,9 @@
 operator:
   scanJobNamespace: trivy-system
+  # SBOMReport が 491件/246MB で etcd の大半を占めていたため無効化 (2026-08-08)
+  # ClusterVulnerabilityReport も併せて無効になるが、workload 単位の
+  # VulnerabilityReport は影響なし。SBOM が必要なら Harbor 側で保管する
+  sbomGenerationEnabled: false
 
 resources:
   requests:

@@ -26,7 +26,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: horenso
-          image: registry.infra.tgy.io/tools/horenso:latest@sha256:60031db4c16b0c3bc30e9a7163e2ff2bb82b8b4fb009100797003552d38c7057
+          image: registry.infra.tgy.io/tools/horenso:latest@sha256:82c1bd7438965e3154e603c38461a6a87bdfce4987d18f207e859de6e89a745a
           ports:
             - containerPort: 3000
               protocol: TCP

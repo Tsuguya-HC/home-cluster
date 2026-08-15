@@ -43,13 +43,16 @@ spec:
         - ports:
             - port: "8333"
               protocol: TCP
-    - toCIDR:
-        - 192.168.10.200/32
-        - 192.168.10.201/32
-        - 192.168.10.202/32
-        - 192.168.10.230/32
-        - 192.168.10.231/32
-        - 192.168.10.232/32
+    # Talos apid. A node's IP carries a node identity in Cilium
+    # (kube-apiserver for control planes, remote-node for workers, host for the
+    # node the pod runs on), and CIDR rules are never evaluated against those
+    # identities — so the toCIDR list this replaces silently matched nothing and
+    # every talosctl call from a workflow pod timed out. etcd-backup has always
+    # used toEntities, which is why it worked and upgrade-k8s did not.
+    - toEntities:
+        - kube-apiserver
+        - remote-node
+        - host
       toPorts:
         - ports:
             - port: "50000"

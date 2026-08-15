@@ -79,7 +79,7 @@ spec:
             readOnlyRootFilesystem: true
       containers:
         - name: kanidm
-          image: docker.io/kanidm/server:1.10.4
+          image: docker.io/kanidm/server:1.11.1
           args:
             - kanidmd
             - server

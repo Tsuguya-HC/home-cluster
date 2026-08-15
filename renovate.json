@@ -7,6 +7,19 @@
   "platformAutomerge": true,
   "automergeStrategy": "squash",
   "minimumReleaseAge": "3 days",
+  "osvVulnerabilityAlerts": true,
+  "vulnerabilityAlerts": {
+    "description": "A published CVE is a present risk; the cooldown exists to catch a hypothetical compromised release. Security updates therefore skip the age gate and the schedule. The merge policy is deliberately left to the update-type rules below, so a major security bump still gets read by a human.",
+    "minimumReleaseAge": null,
+    "schedule": ["at any time"],
+    "labels": ["security"]
+  },
+  "lockFileMaintenance": {
+    "description": "Almost every open alert here is a transitive dependency in .github/mcp/pr-review/package-lock.json, which no direct-dependency bump will ever fix. Automerged because the mcp CI job installs from the refreshed lock file and type-checks against it.",
+    "enabled": true,
+    "schedule": ["before 6am on monday"],
+    "automerge": true
+  },
   "argocd": {
     "managerFilePatterns": ["/apps/.+\\.yaml$/"]
   },

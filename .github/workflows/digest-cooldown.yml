@@ -1,21 +1,52 @@
 name: Digest cooldown
 
+# Renovate's minimumReleaseAge cannot gate docker updates honestly: digests
+# expose no releaseTimestamp at all (renovatebot/renovate#38656), and a tag
+# bump's timestamp comes from org.opencontainers.image.created, which whoever
+# pushed the image controls and can back-date. Both are delegated to this
+# action's own clock instead (gate-version-bumps), so renovate.json nulls
+# minimumReleaseAge for the docker datasource.
+#
+# pull_request_target, not pull_request: the workflow definition then comes
+# from main, so a PR cannot weaken the gate that is judging it. The action
+# never checks out or runs head-side code — it reads the diff over the API.
+
 on:
-  pull_request:
-    types: [opened, synchronize, reopened]
+  pull_request_target:
+    types: [opened, synchronize, reopened, labeled, unlabeled, edited]
   schedule:
     - cron: "23 * * * *"
   workflow_dispatch:
 
-permissions:
-  statuses: write
-  pull-requests: write
-  contents: read
+permissions: {}
+
+concurrency:
+  group: digest-cooldown-${{ github.event.pull_request.number || 'scan' }}
+  cancel-in-progress: false
 
 jobs:
   cooldown:
+    name: Digest cooldown
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      statuses: write        # post the digest-cooldown commit status
+      pull-requests: write   # store first-seen instants in a PR comment
+      contents: read         # read the diff
     steps:
-      - uses: Tsuguya/images/digest-cooldown@ca2a659df430a34540cba01b718106277b306a14 # main
+      - uses: Tsuguya/digest-cooldown@8cef1af948c0b09c5b1fd900deeb65bb3a7c8ba8 # v1.0.0
         with:
           cooldown-days: 3
+          # First-party registries: their digests are built and signed by our
+          # own pipeline, so the "detect an upstream compromise" premise the
+          # cooldown exists for does not apply.
+          skip-registries: registry.infra.tgy.io,ghcr.io/tsuguya
+          # Gate tag bumps on our clock too, not just pure digest bumps.
+          gate-version-bumps: true
+          # The self-hosted Renovate runs as our own GitHub App, so its PRs are
+          # NOT authored by renovate[bot]; the action's default would silently
+          # degrade every PR to the pure-digest-bump baseline.
+          gate-authors: tsuguya-home-cluster[bot]
+          # Report success on PRs with nothing to gate so this status can be a
+          # required check without deadlocking unrelated PRs.
+          always-report: true

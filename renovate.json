@@ -119,6 +119,17 @@
       "description": "Digest age gate is unenforceable (renovate#38656 for docker, no commit timestamp for action digests) and leaves renovate/stability-days pending forever; digest-cooldown workflow gates instead",
       "matchUpdateTypes": ["digest", "pinDigest"],
       "minimumReleaseAge": "0"
+    },
+    {
+      "description": "All docker age gating belongs to the digest-cooldown workflow, which runs on its own clock (gate-version-bumps). A tag bump's native timestamp comes from org.opencontainers.image.created, which whoever pushed the image controls and can back-date, so it is no more trustworthy than the absent digest timestamp.",
+      "matchDatasources": ["docker"],
+      "minimumReleaseAge": "0"
+    },
+    {
+      "description": "The digest-cooldown workflow is the gate itself: its action bumps get an independent PR and a human merge (pull_request_target with statuses/pull-requests write)",
+      "matchManagers": ["github-actions"],
+      "matchFileNames": [".github/workflows/digest-cooldown.yml"],
+      "automerge": false
     }
   ]
 }

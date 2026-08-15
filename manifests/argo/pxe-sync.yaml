@@ -27,6 +27,14 @@ spec:
   activeDeadlineSeconds: 600
   serviceAccountName: pxe-sync-executor
   entrypoint: main
+  # NFS 上の /pxe は uid 1000:gid 100 所有。workflowDefaults の 65532 では書けない
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 100
+    fsGroup: 100
+    seccompProfile:
+      type: RuntimeDefault
   arguments:
     parameters:
       - name: mode

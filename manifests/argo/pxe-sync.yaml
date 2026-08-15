@@ -127,8 +127,10 @@ spec:
           - |
             set -euo pipefail
 
-            TALHELPER_VERSION="v3.1.5"
-            SOPS_VERSION="v3.12.1"
+            # renovate: datasource=github-releases depName=budimanjojo/talhelper
+            TALHELPER_VERSION="v3.1.16"
+            # renovate: datasource=github-releases depName=getsops/sops
+            SOPS_VERSION="v3.13.3"
 
             echo "=== Installing talhelper ${TALHELPER_VERSION} ==="
             wget -qO- "https://github.com/budimanjojo/talhelper/releases/download/${TALHELPER_VERSION}/talhelper_linux_amd64.tar.gz" | tar xz -C /tmp

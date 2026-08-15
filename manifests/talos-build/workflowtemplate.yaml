@@ -187,7 +187,12 @@ spec:
           args:
             - |
               GITHUB_TOKEN=$(cat /github-token/token)
-              printf '{"auths":{"ghcr.io":{"auth":"%s"}}}' "$(printf '%s:%s' x-access-token "$GITHUB_TOKEN" | base64)" > /docker-config/config.json
+              # base64 は 76 文字ごとに改行を入れる。"x-access-token:" + GitHub App トークンは
+              # ちょうどその境界付近の長さで、トークンが数文字長いと config.json の文字列リテラルに
+              # 改行が混入して imager が "invalid character '\n' in string literal" で落ちる。
+              # BusyBox の base64 に -w オプションは無いので tr で除去する。
+              AUTH=$(printf '%s:%s' x-access-token "$GITHUB_TOKEN" | base64 | tr -d '\n')
+              printf '{"auths":{"ghcr.io":{"auth":"%s"}}}' "$AUTH" > /docker-config/config.json
           volumeMounts:
             - name: docker-config
               mountPath: /docker-config
@@ -311,7 +316,12 @@ spec:
           args:
             - |
               GITHUB_TOKEN=$(cat /github-token/token)
-              printf '{"auths":{"ghcr.io":{"auth":"%s"}}}' "$(printf '%s:%s' x-access-token "$GITHUB_TOKEN" | base64)" > /docker-config/config.json
+              # base64 は 76 文字ごとに改行を入れる。"x-access-token:" + GitHub App トークンは
+              # ちょうどその境界付近の長さで、トークンが数文字長いと config.json の文字列リテラルに
+              # 改行が混入して imager が "invalid character '\n' in string literal" で落ちる。
+              # BusyBox の base64 に -w オプションは無いので tr で除去する。
+              AUTH=$(printf '%s:%s' x-access-token "$GITHUB_TOKEN" | base64 | tr -d '\n')
+              printf '{"auths":{"ghcr.io":{"auth":"%s"}}}' "$AUTH" > /docker-config/config.json
           volumeMounts:
             - name: docker-config
               mountPath: /docker-config

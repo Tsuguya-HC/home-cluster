@@ -4,7 +4,8 @@
     "config:recommended",
     "helpers:pinGitHubActionDigests"
   ],
-  "platformAutomerge": false,
+  "platformAutomerge": true,
+  "automergeStrategy": "squash",
   "minimumReleaseAge": "3 days",
   "argocd": {
     "managerFilePatterns": ["/apps/.+\\.yaml$/"]

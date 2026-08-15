@@ -17,10 +17,17 @@ resources:
   limits:
     memory: 128Mi
 
+# Prometheus の serviceMonitorSelector / ruleSelector は release ラベルで絞っているため、
+# extraLabels で付けないと作成されても一切拾われない。
 serviceMonitor:
   enabled: true
+  extraLabels:
+    release: kube-prometheus-stack
 
-# chart 同梱のアラート。SMART status / media error / 温度など。
-# 寿命 (percentage_used, Wear_Leveling_Count) は含まれないので別途 PrometheusRule で追加する。
-prometheusRule:
+# chart 同梱のアラート (キーは複数形の prometheusRules)。
+# ただし media_errors / available_spare は NVMe 用メトリクスで SATA では発火しない。
+# SATA 向けの寿命・故障予兆は manifests/monitoring/prometheusrule-ssd-health.yaml で補う。
+prometheusRules:
   enabled: true
+  extraLabels:
+    release: kube-prometheus-stack

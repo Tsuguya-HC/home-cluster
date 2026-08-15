@@ -291,12 +291,18 @@ spec:
               fi
 
               echo "Upgrading kubelet on ${SHORT_NAME} (${IP})"
-              kubectl drain "$SHORT_NAME" --ignore-daemonsets --delete-emptydir-data --timeout=300s
+              # No drain: patching the kubelet image restarts kubelet in place
+              # and the containers on the node keep running, so a patch bump
+              # needs no eviction. Draining also could not succeed here —
+              # single-replica workloads (tempo, rss-pg) carry minAvailable=1
+              # PDBs, so their eviction is unsatisfiable by construction and the
+              # drain timed out, leaving the node cordoned. If a drain is ever
+              # reintroduced, uncordon from a trap so a failure cannot strand a
+              # node in SchedulingDisabled.
               talosctl -n "$IP" --talosconfig /etc/talos/config \
                 patch machineconfig \
                 -p "{\"machine\":{\"kubelet\":{\"image\":\"ghcr.io/siderolabs/kubelet:v${NEW_VER}\"}}}"
               kubectl wait --for=condition=Ready "node/${SHORT_NAME}" --timeout=300s
-              kubectl uncordon "$SHORT_NAME"
               echo "Node ${SHORT_NAME} upgraded to v${NEW_VER}"
             done
 
@@ -368,12 +374,11 @@ spec:
             fi
 
             echo "Upgrading kubelet on ${SELF_NODE} (${IP})"
-            kubectl drain "$SELF_NODE" --ignore-daemonsets --delete-emptydir-data --timeout=300s
+            # No drain — see the note in the previous step.
             talosctl -n "$IP" --talosconfig /etc/talos/config \
               patch machineconfig \
               -p "{\"machine\":{\"kubelet\":{\"image\":\"ghcr.io/siderolabs/kubelet:v${NEW_VER}\"}}}"
             kubectl wait --for=condition=Ready "node/${SELF_NODE}" --timeout=300s
-            kubectl uncordon "$SELF_NODE"
             echo "Node ${SELF_NODE} upgraded to v${NEW_VER}"
 
             echo "=== All nodes upgraded ==="

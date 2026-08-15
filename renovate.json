@@ -9,8 +9,8 @@
   "minimumReleaseAge": "3 days",
   "osvVulnerabilityAlerts": true,
   "vulnerabilityAlerts": {
-    "description": "A published CVE is a present risk; the cooldown exists to catch a hypothetical compromised release. Security updates therefore skip the age gate and the schedule. The merge policy is deliberately left to the update-type rules below, so a major security bump still gets read by a human.",
-    "minimumReleaseAge": null,
+    "description": "Security updates get a shorter soak, not none. Waiting the full 3 days on a known CVE is its own risk, but merging a release published minutes ago — unattended, straight into the cluster — is exactly the case the age gate exists for: a poisoned release is least likely to have been noticed while it is brand new. Most advisory fix versions are already older than this by the time the advisory lands, so in practice this delays almost nothing.",
+    "minimumReleaseAge": "1 day",
     "schedule": ["at any time"],
     "labels": ["security"]
   },
@@ -18,7 +18,7 @@
     "description": "Almost every open alert here is a transitive dependency in .github/mcp/pr-review/package-lock.json, which no direct-dependency bump will ever fix. Automerged because the mcp CI job installs from the refreshed lock file and type-checks against it.",
     "enabled": true,
     "schedule": ["before 6am on monday"],
-    "automerge": true
+    "automerge": false
   },
   "argocd": {
     "managerFilePatterns": ["/apps/.+\\.yaml$/"]

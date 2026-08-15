@@ -210,7 +210,7 @@ make genconfig
 再起動するまで反映されない `--mode=staged` で適用。
 
 ```bash
-for entry in cp-01:<旧IP> cp-02:<旧IP> cp-03:<旧IP> wn-01:<旧IP> wn-02:<旧IP> wn-03:<旧IP>; do
+for entry in cp-11:<旧IP> cp-12:<旧IP> cp-13:<旧IP> wn-01:<旧IP> wn-02:<旧IP> wn-03:<旧IP>; do
   name="${entry%%:*}"; ip="${entry##*:}"
   talosctl apply-config --mode=staged \
     -f clusterconfig/home-cluster-${name}.cluster.internal.yaml \
@@ -227,37 +227,37 @@ done
 
 ノードが新 IP で起動するが、etcd のピア URL に旧 IP が残っているためクォーラムが取れない。
 
-**cp-01 を単独 etcd クラスタとして起動（データ保持）:**
+**cp-13 を単独 etcd クラスタとして起動（データ保持）:**
 
 ```bash
-talosctl -n <cp-01新IP> -e <cp-01新IP> patch machineconfig --patch 'cluster:
+talosctl -n <cp-13新IP> -e <cp-13新IP> patch machineconfig --patch 'cluster:
   etcd:
     extraArgs:
       force-new-cluster: "true"'
 
-talosctl -n <cp-01新IP> -e <cp-01新IP> reboot
+talosctl -n <cp-13新IP> -e <cp-13新IP> reboot
 # etcd Health OK を確認
-talosctl -n <cp-01新IP> -e <cp-01新IP> service etcd
+talosctl -n <cp-13新IP> -e <cp-13新IP> service etcd
 ```
 
-**cp-01 から force-new-cluster フラグを除去:**
+**cp-13 から force-new-cluster フラグを除去:**
 
 ```bash
 talosctl apply-config \
-  -f clusterconfig/home-cluster-cp-01.cluster.internal.yaml \
-  -n <cp-01新IP> -e <cp-01新IP>
+  -f clusterconfig/home-cluster-cp-13.cluster.internal.yaml \
+  -n <cp-13新IP> -e <cp-13新IP>
 ```
 
-**cp-02, cp-03 を 1 台ずつ再参加させる（重要: 必ず 1 台ずつ）:**
+**cp-11, cp-12 を 1 台ずつ再参加させる（重要: 必ず 1 台ずつ）:**
 
 ```bash
-# cp-02
-talosctl -n <cp-02新IP> -e <cp-02新IP> reset \
+# cp-11
+talosctl -n <cp-11新IP> -e <cp-11新IP> reset \
   --graceful=false --reboot --system-labels-to-wipe=EPHEMERAL
 # etcd 3/3 Health OK を確認してから次へ
 
-# cp-03
-talosctl -n <cp-03新IP> -e <cp-03新IP> reset \
+# cp-12
+talosctl -n <cp-12新IP> -e <cp-12新IP> reset \
   --graceful=false --reboot --system-labels-to-wipe=EPHEMERAL
 ```
 

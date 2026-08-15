@@ -12,9 +12,9 @@ spec:
       - name: nodes
         description: "Shutdown target"
         enum:
-          - cp-01
-          - cp-02
-          - cp-03
+          - cp-11
+          - cp-12
+          - cp-13
           - wn-01
           - wn-02
           - wn-03
@@ -59,9 +59,9 @@ spec:
 
           # Resolve target to IPs
           case "$TARGET" in
-            cp-01) IPS="192.168.10.230" ;;
-            cp-02) IPS="192.168.10.231" ;;
-            cp-03) IPS="192.168.10.232" ;;
+            cp-13) IPS="192.168.10.230" ;;
+            cp-11) IPS="192.168.10.231" ;;
+            cp-12) IPS="192.168.10.232" ;;
             wn-01) IPS="192.168.10.200" ;;
             wn-02) IPS="192.168.10.201" ;;
             wn-03) IPS="192.168.10.202" ;;

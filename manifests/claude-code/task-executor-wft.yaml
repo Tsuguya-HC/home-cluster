@@ -70,7 +70,7 @@ spec:
             - CNI: Cilium（全 Pod にデフォルト deny の CiliumNetworkPolicy 適用）
             - GitOps: ArgoCD（home-cluster リポジトリ、selfHeal: true）
             - Observability: Prometheus + Loki + Hubble
-            - ノード: cp-01/02/03 (control plane), wn-01/02/03 (worker)
+            - ノード: cp-11/12/13 (control plane), wn-01/02/03 (worker)
 
             ## 使えるツール
             - kubectl（読み取り専用）

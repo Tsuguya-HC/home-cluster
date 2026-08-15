@@ -26,7 +26,7 @@ ArgoCD GitOps で管理するホーム Kubernetes クラスタの構成リポジ
 
 | Node | Hardware | RAM |
 |------|----------|-----|
-| cp-01〜03 | Minisforum S100 (Intel N100) | - |
+| cp-11〜13 | AOOSTAR N1 Pro (Intel N150) | 12GB |
 | wn-01 | TRIGKEY G4 (Intel N100) | 32GB |
 | wn-02 | NiPoGi AK2Plus (Intel N100) | 32GB |
 | wn-03 | MINISFORUM UM790Pro (AMD 7940HS) | 64GB |

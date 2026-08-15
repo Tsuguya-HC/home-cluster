@@ -154,9 +154,10 @@ spec:
               fi
             }
 
-            map_config "58-47-ca-76-07-c4" "cp-01.cluster.internal"
-            map_config "58-47-ca-76-09-95" "cp-02.cluster.internal"
-            map_config "58-47-ca-76-08-d2" "cp-03.cluster.internal"
+            # CP は Gen2 (AOOSTAR/TianBei N1 Pro)。MAC は enp3s0 側 (I226-V ×2 のうち LAN を挿す方)
+            map_config "c8-ff-bf-05-ec-b7" "cp-11.cluster.internal"
+            map_config "c8-ff-bf-05-ea-9b" "cp-12.cluster.internal"
+            map_config "c8-ff-bf-05-e9-8f" "cp-13.cluster.internal"
             map_config "7c-83-34-be-c0-b4" "wn-01.cluster.internal"
             map_config "68-1d-ef-36-c6-e3" "wn-02.cluster.internal"
             map_config "58-47-ca-73-ce-2a" "wn-03.cluster.internal"

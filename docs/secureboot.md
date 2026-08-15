@@ -27,7 +27,7 @@ GHA (talos-custom-build)              Argo Workflows (talos-build namespace)
 
 | ノード | HW | SecureBoot | 備考 |
 |--------|-----|-----------|------|
-| cp-01/02/03 | Minisforum S100 | **有効** | UEFI Shell + Reset To Setup Mode + auto-enrollment で登録 |
+| cp-11/12/13 | AOOSTAR N1 Pro (DMI 上は TianBei) | **有効** | Key Management なし。**UEFI Shell 不要**。手順は下の「方法 C」を参照 |
 | wn-01 | TRIGKEY G4 | **有効** | UEFI Key Management から USB で .auth 登録 |
 | wn-02 | NiPoGi AK2Plus | **有効** | 同上 |
 | wn-03 | Minisforum UM790Pro | **有効** | UEFI Shell + Reset To Setup Mode + auto-enrollment で登録 |
@@ -154,11 +154,37 @@ UEFI Shell で .auth ファイルを ESP に配置し、systemd-boot の自動�
 - `secureboot-iso` を USB に焼いてブートする方法でも可（ISO には auto-enrollment 用 .auth が含まれている）
 - 失敗しても CMOS クリア（バッテリー外し）で復旧可能
 
+### 方法 C: secureboot-iso を USB に焼いて auto-enrollment（AOOSTAR N1 Pro / Gen2 CP）
+
+**UEFI Shell も Key Management も不要**。`secureboot-iso` には `loader/keys/auto/` に .auth が入っているので、
+Setup Mode でありさえすれば systemd-boot が登録してくれる。2026-08-15 に CP 3台すべてこの手順で登録した。
+
+**順番が肝。Secure Boot を Disabled にしてから Setup Mode にする。**
+逆（Setup Mode だけにして Secure Boot は Enabled のまま）だと、**USB 自体が Secure Boot Violation で弾かれて
+enroll 画面に到達できない**。仕様上 Setup Mode では署名検証しないはずだが、この AMI 実装は弾く。
+
+0. **ISO を焼く前に中身を検証**（[GitHub Release](https://github.com/Tsuguya/talos-custom-build/releases) の `metal-amd64-secureboot.iso`）:
+   ```bash
+   # ESP をマウントして確認（ISO 内のパーティション2）
+   sbverify --list EFI/Linux/Talos-*.efi   # → issuer: /O=Test UKI Signing Key なら署名済み
+   ls loader/keys/auto/                    # → PK.auth KEK.auth db.auth が必要
+   cat loader/loader.conf                  # → secure-boot-enroll が off でないこと
+   ```
+   `No signature table present` や鍵が無い場合は**通常 ISO**なので使えない。
+
+1. UEFI: `Secure Boot Mode` → **Custom**、`Secure Boot` → **Disabled** → 保存して再起動
+2. 再起動後にもう一度 UEFI へ入り、`Reset to Setup Mode` を実行（保存で工場鍵が戻る個体があるので、Setup Mode が維持されているか必ず確認）
+3. Boot Override から USB を選択して起動
+4. systemd-boot メニュー最下部の **`Enroll Secure Boot keys: auto`** を選択
+   - `secure-boot-enroll: if-safe` は**実機では自動登録されない**（自動は VM のみ）。必ず手動選択する
+5. 再起動 → UEFI: `Secure Boot` → **Enabled**
+
 ### 確認
 
 ```bash
 talosctl -n <NODE_IP> get securitystate
 # SecureBoot: true を確認
+# PCRSIGNINGKEYFINGERPRINT が他ノードと一致することも確認する（鍵が二系統に割れていないか）
 ```
 
 ### 注意: 未署名 installer で SecureBoot ON にしない

@@ -83,7 +83,7 @@ spec:
 
     - name: detect-in-cluster
       script:
-        image: us-docker.pkg.dev/fairwinds-ops/oss/pluto:v5.24.0
+        image: us-docker.pkg.dev/fairwinds-ops/oss/pluto:v5.24.3
         resources:
           requests:
             cpu: 10m
@@ -105,7 +105,7 @@ spec:
 
     - name: detect-helm
       script:
-        image: us-docker.pkg.dev/fairwinds-ops/oss/pluto:v5.24.0
+        image: us-docker.pkg.dev/fairwinds-ops/oss/pluto:v5.24.3
         resources:
           requests:
             cpu: 10m

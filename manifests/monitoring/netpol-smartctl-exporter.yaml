@@ -15,16 +15,6 @@ spec:
         - ports:
             - port: "9633"
               protocol: TCP
-  # SMART の読み取りはローカルの /dev に対して行うため、外向き通信は DNS 以外不要
-  egress:
-    - toEndpoints:
-        - matchLabels:
-            io.kubernetes.pod.namespace: kube-system
-            k8s-app: kube-dns
-      toPorts:
-        - ports:
-            - port: "53"
-              protocol: UDP
-          rules:
-            dns:
-              - matchPattern: "*"
+  # SMART の読み取りはローカルの /dev に対して行うため egress は不要。
+  # DNS は CCNP (manifests/infra/ccnp-dns.yaml) で全 Pod に共通適用済み。
+  egress: []

@@ -1,0 +1,42 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: trivy-scanjob-tmpdir
+  annotations:
+    policies.kyverno.io/description: >-
+      trivy names its temp dir after the PID, which is identical in every
+      container of a scan job pod, so parallel scanners collide on the shared
+      /tmp emptyDir and delete each other's files. Give each scan container its
+      own emptyDir and point TMPDIR at it. /tmp/trivy/.cache and /tmp/scan stay
+      shared. See aquasecurity/trivy-operator#2859.
+spec:
+  admission: true
+  background: false
+  rules:
+    - name: per-container-tmpdir
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - trivy-system
+              selector:
+                matchLabels:
+                  app.kubernetes.io/managed-by: trivy-operator
+      mutate:
+        foreach:
+          - list: "request.object.spec.containers"
+            patchStrategicMerge:
+              spec:
+                volumes:
+                  - name: "tmpdir-{{ element.name }}"
+                    emptyDir: {}
+                containers:
+                  - name: "{{ element.name }}"
+                    env:
+                      - name: TMPDIR
+                        value: "/tmp/private-{{ element.name }}"
+                    volumeMounts:
+                      - name: "tmpdir-{{ element.name }}"
+                        mountPath: "/tmp/private-{{ element.name }}"

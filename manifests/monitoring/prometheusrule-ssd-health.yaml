@@ -1,0 +1,89 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: ssd-health
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: ssd-health
+      rules:
+        # --- 寿命 (正規化値。100 = 新品、thresh = 50 で寿命判定) ---
+        # chart 同梱のアラートは NVMe 用メトリクス (media_errors, available_spare) が前提で
+        # SATA SSD では発火しないため、ATA の属性ベースで別途監視する。
+        - alert: SsdWearLevelingDegraded
+          expr: |
+            smartctl_device_attribute{attribute_name="Wear_Leveling_Count",attribute_value_type="value"} < 60
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "SSD の摩耗が進行 ({{ $labels.instance }} {{ $labels.device }})"
+            description: "Wear_Leveling_Count が {{ $value }} (新品=100, 寿命判定=50)。交換用 M.2 の手配を検討する。"
+
+        - alert: SsdReservedBlocksLow
+          expr: |
+            smartctl_device_attribute{attribute_name=~"Used_Rsvd_Blk_Cnt_Chip|Available_Reservd_Space",attribute_value_type="value"} < 60
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "SSD の予備ブロックが減少 ({{ $labels.instance }} {{ $labels.device }})"
+            description: "{{ $labels.attribute_name }} が {{ $value }} (新品=100, 寿命判定=50)。"
+
+        # --- 故障の予兆 (raw が 0 から増えたら異常) ---
+        - alert: SsdReallocatedSectors
+          expr: |
+            smartctl_device_attribute{attribute_name="Reallocated_Sector_Ct",attribute_value_type="raw"} > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "SSD に代替セクタが発生 ({{ $labels.instance }} {{ $labels.device }})"
+            description: "Reallocated_Sector_Ct = {{ $value }}。1 個でも出たら劣化の始まりとして扱う。"
+
+        - alert: SsdPendingSectors
+          expr: |
+            smartctl_device_attribute{attribute_name="Current_Pending_Sector",attribute_value_type="raw"} > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "SSD に保留セクタが発生 ({{ $labels.instance }} {{ $labels.device }})"
+            description: "Current_Pending_Sector = {{ $value }}。読み取り不能ブロックの候補。"
+
+        - alert: SsdUncorrectableErrors
+          expr: |
+            smartctl_device_attribute{attribute_name="Offline_Uncorrectable",attribute_value_type="raw"} > 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "SSD に訂正不能エラー ({{ $labels.instance }} {{ $labels.device }})"
+            description: "Offline_Uncorrectable = {{ $value }}。データ損失のリスク。速やかに交換する。"
+
+        # ケーブル・コネクタ側の問題を切り分けるため、CRC エラーは別建てにする
+        - alert: SsdInterfaceCrcErrors
+          expr: |
+            increase(smartctl_device_attribute{attribute_name="UDMA_CRC_Error_Count",attribute_value_type="raw"}[6h]) > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "SATA インターフェースで CRC エラー ({{ $labels.instance }} {{ $labels.device }})"
+            description: "NAND ではなく接続側の問題の可能性。M.2 の挿し直しを検討する。"
+
+        # --- 書き込み量 ---
+        # 2026-08 に trivy の SBOMReport で etcd が 163MB まで肥大し、CP の書き込み量が
+        # 常時 3 倍になっていた。同種の変化に気づけるよう、書き込みの急増を監視する。
+        - alert: SsdWriteRateSpike
+          expr: |
+            increase(smartctl_device_attribute{attribute_name="Total_LBAs_Written",attribute_value_type="raw"}[24h])
+              > 3 * (increase(smartctl_device_attribute{attribute_name="Total_LBAs_Written",attribute_value_type="raw"}[24h] offset 7d) + 1)
+          for: 2h
+          labels:
+            severity: info
+          annotations:
+            summary: "SSD への書き込み量が急増 ({{ $labels.instance }} {{ $labels.device }})"
+            description: "直近 24h の書き込みが 1 週間前の 3 倍を超えた。新しいワークロードか、意図しない書き込みの発生を疑う。"

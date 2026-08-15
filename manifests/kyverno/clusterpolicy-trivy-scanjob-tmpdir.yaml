@@ -19,6 +19,10 @@ spec:
           - resources:
               kinds:
                 - Pod
+              # Pod spec は作成後 immutable。UPDATE で発火すると job-tracking
+              # finalizer の除去まで API に弾かれるので CREATE 限定にする
+              operations:
+                - CREATE
               namespaces:
                 - trivy-system
               selector:

@@ -88,6 +88,7 @@ spec:
             echo "=== Atomic replace ==="
             mv "${ASSETS_DIR}/vmlinuz.tmp" "${ASSETS_DIR}/vmlinuz"
             mv "${ASSETS_DIR}/initramfs.xz.tmp" "${ASSETS_DIR}/initramfs.xz"
+            chmod 644 "${ASSETS_DIR}/vmlinuz" "${ASSETS_DIR}/initramfs.xz"
 
             echo "=== Done: assets updated to ${TAG} ==="
             ls -lh "${ASSETS_DIR}/"
@@ -158,6 +159,9 @@ spec:
               dst="${CONFIG_DIR}/${mac}.yaml"
               if [ -f "$src" ]; then
                 cp "$src" "$dst"
+                # talhelper は 0600 で書くが PXE の nginx ワーカーが読めず 403 になる。
+                # nginx は group users で動かすので group 読みだけ許可する
+                chmod 640 "$dst"
                 echo "Synced: ${hostname} -> ${mac}.yaml"
               else
                 echo "WARNING: $src not found" >&2

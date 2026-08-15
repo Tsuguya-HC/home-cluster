@@ -50,12 +50,66 @@ spec:
   templates:
     - name: main
       steps:
+        # サーバ設定は mode に関係なく毎回 reconcile する（ドリフト自動修正）
+        - - name: sync-server-files
+            template: sync-server-files
         - - name: update-assets
             template: update-assets
             when: "'{{workflow.parameters.mode}}' == 'update-assets' || '{{workflow.parameters.mode}}' == 'both'"
         - - name: sync-configs
             template: sync-configs
             when: "'{{workflow.parameters.mode}}' == 'sync-configs' || '{{workflow.parameters.mode}}' == 'both'"
+
+    - name: sync-server-files
+      metadata:
+        labels:
+          pxe-sync: "true"
+      volumes:
+        - name: server-files
+          configMap:
+            name: pxe-server-files
+      container:
+        image: alpine:3.24
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            memory: 128Mi
+        command: [sh, -c]
+        args:
+          - |
+            set -euo pipefail
+
+            echo "=== Reconciling PXE server config ==="
+            CHANGED=""
+            for f in boot.ipxe dnsmasq.conf nginx.conf; do
+              if cmp -s "/src/${f}" "/pxe/${f}"; then
+                echo "  unchanged: ${f}"
+              else
+                cp "/src/${f}" "/pxe/${f}"
+                chmod 644 "/pxe/${f}"
+                echo "  UPDATED:   ${f}"
+                CHANGED="${CHANGED} ${f}"
+              fi
+            done
+
+            if [ -n "${CHANGED}" ]; then
+              echo
+              echo "################################################################"
+              echo "# 変更:${CHANGED}"
+              echo "# dnsmasq / nginx は設定を起動時にしか読まないため、NAS 側で"
+              echo "# コンテナを再起動するまで反映されない:"
+              echo "#   ssh tsuguya@192.168.10.2 \\"
+              echo "#     /share/CACHEDEV1_DATA/.qpkg/container-station/bin/docker \\"
+              echo "#     restart pxe-dnsmasq-1 pxe-nginx-1"
+              echo "################################################################"
+            fi
+        volumeMounts:
+          - name: server-files
+            mountPath: /src
+          - name: pxe
+            mountPath: /pxe
 
     - name: update-assets
       metadata:

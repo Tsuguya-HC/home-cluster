@@ -1,0 +1,50 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pxe-server-files
+  namespace: argo
+data:
+  # QNAP の Container Station で動く PXE スタック (dnsmasq + nginx) の設定。
+  # pxe-sync Workflow が NFS 経由で /share/CACHEDEV1_DATA/Container/pxe/ に配置する。
+  # 変更した場合は NAS 側でコンテナ再起動が必要（Workflow が警告を出す）。
+  boot.ipxe: |
+    #!ipxe
+    kernel http://192.168.10.2:8888/assets/vmlinuz talos.platform=metal slab_nomerge pti=on initrd=initramfs.xz talos.config=http://192.168.10.2:8888/config/${mac:hexhyp}.yaml
+    initrd http://192.168.10.2:8888/assets/initramfs.xz
+    boot
+
+  dnsmasq.conf: |
+    port=0
+    interface=eth2
+    bind-dynamic
+
+    # UniFi (UCG Fiber) が本来の DHCP サーバ。ここは PXE 情報だけ返す proxy として動く
+    dhcp-range=192.168.10.0,proxy
+
+    # iPXE は user class に "iPXE" を名乗る。素の UEFI と区別しないと
+    # snponly.efi が自分自身をチェーンロードし続けて無限ループする
+    dhcp-userclass=set:ipxe,iPXE
+
+    # 1段目: 素の UEFI ファームウェア -> TFTP で iPXE (snponly.efi) を渡す
+    pxe-service=tag:!ipxe,x86-64_EFI,"iPXE (UEFI)",snponly.efi,192.168.10.2
+    # 2段目: iPXE -> HTTP でブートスクリプトを渡す
+    pxe-service=tag:ipxe,x86-64_EFI,"Talos PXE boot",http://192.168.10.2:8888/boot.ipxe
+
+    enable-tftp
+    tftp-root=/var/lib/tftpboot
+    log-queries
+    log-dhcp
+
+  nginx.conf: |
+    # machine config は talhelper が 0600 で書き、pxe-sync が 0640 に落とす。
+    # ワーカーを group users で動かすことで、0644 にせず配信できるようにする
+    user nginx users;
+    events {}
+    http {
+        server {
+            listen 80;
+            root /usr/share/nginx/html;
+            autoindex off;
+            access_log /dev/stdout;
+        }
+    }

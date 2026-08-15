@@ -1,0 +1,26 @@
+---
+# SSD の SMART 監視。ASint AS606 (CP 3台の SATA M.2) が無名ブランドで耐久性のデータが無く、
+# 寿命の予兆を見えるようにするために導入した。
+# 背景: S100 の UFS は温度も寿命も一切測れず、壊れて初めて分かる状態だった。
+# image は chart の appVersion に従う (helm-values は digest ピンの対象外。
+# chart の targetRevision を Renovate が更新する運用)
+
+# CP にも配置する (監視対象は CP の SATA SSD が主目的)
+tolerations:
+  - effect: NoSchedule
+    operator: Exists
+
+resources:
+  requests:
+    cpu: 10m
+    memory: 32Mi
+  limits:
+    memory: 128Mi
+
+serviceMonitor:
+  enabled: true
+
+# chart 同梱のアラート。SMART status / media error / 温度など。
+# 寿命 (percentage_used, Wear_Leveling_Count) は含まれないので別途 PrometheusRule で追加する。
+prometheusRule:
+  enabled: true

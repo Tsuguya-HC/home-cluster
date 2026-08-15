@@ -59,6 +59,13 @@ spec:
               protocol: TCP
     - toEndpoints:
         - matchLabels:
+            app.kubernetes.io/name: prometheus-smartctl-exporter
+      toPorts:
+        - ports:
+            - port: "9633"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
             app.kubernetes.io/name: tempo
       toPorts:
         - ports:

@@ -82,7 +82,9 @@ spec:
             set -euo pipefail
 
             echo "=== Reconciling PXE server config ==="
-            CHANGED=""
+            # boot.ipxe は nginx が静的配信するだけなので再起動不要。
+            # dnsmasq.conf / nginx.conf は起動時にしか読まれない
+            NEEDS_RESTART=""
             for f in boot.ipxe dnsmasq.conf nginx.conf; do
               if cmp -s "/src/${f}" "/pxe/${f}"; then
                 echo "  unchanged: ${f}"
@@ -90,19 +92,20 @@ spec:
                 cp "/src/${f}" "/pxe/${f}"
                 chmod 644 "/pxe/${f}"
                 echo "  UPDATED:   ${f}"
-                CHANGED="${CHANGED} ${f}"
+                case "${f}" in
+                  dnsmasq.conf) NEEDS_RESTART="${NEEDS_RESTART} pxe-dnsmasq-1" ;;
+                  nginx.conf)   NEEDS_RESTART="${NEEDS_RESTART} pxe-nginx-1" ;;
+                esac
               fi
             done
 
-            if [ -n "${CHANGED}" ]; then
+            if [ -n "${NEEDS_RESTART}" ]; then
               echo
               echo "################################################################"
-              echo "# 変更:${CHANGED}"
-              echo "# dnsmasq / nginx は設定を起動時にしか読まないため、NAS 側で"
-              echo "# コンテナを再起動するまで反映されない:"
+              echo "# 起動時にしか設定を読まないコンテナが変更された。NAS 側で再起動が必要:"
               echo "#   ssh tsuguya@192.168.10.2 \\"
               echo "#     /share/CACHEDEV1_DATA/.qpkg/container-station/bin/docker \\"
-              echo "#     restart pxe-dnsmasq-1 pxe-nginx-1"
+              echo "#     restart${NEEDS_RESTART}"
               echo "################################################################"
             fi
         volumeMounts:

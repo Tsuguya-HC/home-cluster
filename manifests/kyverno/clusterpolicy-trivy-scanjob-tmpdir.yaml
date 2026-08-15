@@ -10,10 +10,14 @@ metadata:
       own emptyDir and point TMPDIR at it. /tmp/trivy/.cache and /tmp/scan stay
       shared. See aquasecurity/trivy-operator#2859.
 spec:
+  # admission が注入するデフォルトを明示しないと ArgoCD が OutOfSync になる
   admission: true
   background: false
+  emitWarning: false
+  validationFailureAction: Audit
   rules:
     - name: per-container-tmpdir
+      skipBackgroundRequests: true
       match:
         any:
           - resources:

@@ -276,7 +276,8 @@ jobs:
     needs: [kubeconform, helm-template, image-existence]
     if: >-
       github.event_name == 'pull_request' &&
-      github.event.pull_request.user.login == 'renovate[bot]' &&
+      contains(fromJSON('["renovate[bot]", "tsuguya-home-cluster[bot]"]'),
+               github.event.pull_request.user.login) &&
       !contains(github.event.pull_request.body, '**Automerge**: Enabled') &&
       !contains(github.event.pull_request.title, 'gateway-api')
     runs-on: ubuntu-latest
@@ -304,7 +305,7 @@ jobs:
       - uses: anthropics/claude-code-action@c3d45e8e941e1b2ad7b278c57482d9c5bf1f35b3 # v1.0.99
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          allowed_bots: "renovate[bot]"
+          allowed_bots: "renovate[bot],tsuguya-home-cluster[bot]"
           claude_args: "--model claude-sonnet-4-6 --max-turns 30 --disallowedTools Edit,Write,NotebookEdit,WebFetch,WebSearch,Glob,Grep --allowedTools 'Bash(gh:*)' Read 'mcp__pr-review__*' --mcp-config .github/mcp/pr-review/mcp-config.json"
           prompt: |
             You are reviewing a Renovate dependency update PR for a Kubernetes homelab cluster managed by ArgoCD.
@@ -380,7 +381,7 @@ jobs:
       - uses: anthropics/claude-code-action@c3d45e8e941e1b2ad7b278c57482d9c5bf1f35b3 # v1.0.99
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          allowed_bots: "renovate[bot]"
+          allowed_bots: "renovate[bot],tsuguya-home-cluster[bot]"
           direct_prompt: |
             This PR has failing CI checks. Fix them.
 

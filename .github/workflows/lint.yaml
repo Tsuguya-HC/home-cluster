@@ -219,6 +219,36 @@ jobs:
             exit 1
           fi
 
+  # The only required status check. Aggregates every correctness leaf so the
+  # ruleset never names an individual job: adding, renaming or matrix-splitting
+  # a job below can't leave a required context that is never reported (which
+  # blocks the PR forever). ai-review / ai-fix-ci are deliberately excluded —
+  # they are advisory and conditional, and ai-review merges the PR itself.
+  gate:
+    name: CI Gate
+    needs: [kubeconform, helm-template, image-existence]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Aggregate results
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          set -euo pipefail
+          echo "Results: ${RESULTS}"
+          # fail-closed: an empty needs list would make the loop pass vacuously
+          if [ -z "${RESULTS// /}" ]; then
+            echo "::error::No job results to aggregate (empty needs) — failing closed."
+            exit 1
+          fi
+          for r in ${RESULTS}; do
+            case "${r}" in
+              success|skipped) ;;
+              *) echo "::error::A required job concluded with: ${r}"; exit 1 ;;
+            esac
+          done
+
   ai-review:
     needs: [kubeconform, helm-template, image-existence]
     if: >-

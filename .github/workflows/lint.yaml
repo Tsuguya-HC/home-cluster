@@ -306,7 +306,7 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           allowed_bots: "renovate[bot],tsuguya-home-cluster[bot]"
-          claude_args: "--model claude-sonnet-4-6 --max-turns 30 --disallowedTools Edit,Write,NotebookEdit,WebFetch,WebSearch,Glob,Grep --allowedTools 'Bash(gh:*)' Read 'mcp__pr-review__*' --mcp-config .github/mcp/pr-review/mcp-config.json"
+          claude_args: "--model claude-sonnet-5 --max-turns 30 --disallowedTools Edit,Write,NotebookEdit,WebFetch,WebSearch,Glob,Grep --allowedTools 'Bash(gh:*)' Read 'mcp__pr-review__*' --mcp-config .github/mcp/pr-review/mcp-config.json"
           prompt: |
             You are reviewing a Renovate dependency update PR for a Kubernetes homelab cluster managed by ArgoCD.
 

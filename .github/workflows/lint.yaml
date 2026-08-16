@@ -265,17 +265,21 @@ jobs:
               manifests/ kustomize/ | sort -u
           )
           printf 'linting %d files\n' "${#files[@]}"
-          out=$(argo lint --offline --no-color -o simple "${files[@]}" 2>&1)
+          # a finding exits non-zero and the runner's shell is bash -e, so the
+          # findings have to survive the assignment to be classified below
+          out=$(argo lint --offline --no-color -o simple "${files[@]}" 2>&1) || true
           echo "$out"
 
           # discord-notify runs as an exit handler, where {{workflow.failures}}
           # is bound; offline lint has no such binding and can never resolve
           # it. Tolerate that one finding, nothing else.
           known='manifests/argo/cluster-discord-notify-wft.yaml: in "discord-notify" (ClusterWorkflowTemplate): templates.send templates.send: failed to resolve {{workflow.failures}}'
+          # grep exits 1 when it filters everything out, which is the clean
+          # case, so the pipeline must not decide the step's fate either
           unexpected=$(printf '%s\n' "$out" \
             | grep -Fvx "$known" \
             | grep -Fvx 'no linting errors found!' \
-            | sed '/^$/d')
+            | sed '/^$/d') || true
           if [ -n "$unexpected" ]; then
             echo "::error::argo lint reported findings beyond the known exit-handler one"
             exit 1

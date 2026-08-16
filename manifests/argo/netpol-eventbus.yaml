@@ -16,6 +16,8 @@ spec:
         - matchLabels:
             sensor-name: tofu-cloudflare
         - matchLabels:
+            sensor-name: tofu-unifi
+        - matchLabels:
             sensor-name: upgrade-k8s
         - matchLabels:
             sensor-name: pxe-sync

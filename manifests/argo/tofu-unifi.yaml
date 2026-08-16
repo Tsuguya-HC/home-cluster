@@ -1,0 +1,197 @@
+---
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: tofu-unifi-plan
+  namespace: argo
+spec:
+  activeDeadlineSeconds: 600
+  serviceAccountName: tofu-executor
+  entrypoint: main
+  arguments:
+    parameters:
+      - name: pr-number
+      - name: branch
+      - name: sha
+      - name: author
+        default: ""
+  templates:
+    - name: main
+      volumes:
+        - name: workspace
+          emptyDir: {}
+        - name: github-token
+          emptyDir: {}
+        - name: tools
+          emptyDir: {}
+        - name: github-app-secret
+          secret:
+            secretName: github-app-private-key
+      initContainers:
+        - name: github-auth
+          image: registry.infra.tgy.io/tools/argo-tools:latest
+          command: [github-auth.sh]
+          env:
+            - name: GITHUB_APP_ID
+              value: "2998228"
+            - name: GITHUB_APP_INSTALLATION_ID
+              value: "113765957"
+          securityContext:
+            runAsUser: 65532
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: github-app-secret
+              mountPath: /github-app
+              readOnly: true
+            - name: github-token
+              mountPath: /github-token
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+        - name: copy-tools
+          image: registry.infra.tgy.io/tools/argo-tools:latest
+          command: [sh, -c]
+          args:
+            - cp /usr/local/bin/jq /usr/local/bin/gh /tools/
+          securityContext:
+            runAsUser: 65532
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: tools
+              mountPath: /tools
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+        - name: git-clone
+          image: alpine/git:v2.54.0
+          command: [sh, -c]
+          args:
+            - |
+              GITHUB_TOKEN=$(cat /github-token/token)
+              git clone --depth 1 -b "${BRANCH}" "https://x-access-token:${GITHUB_TOKEN}@github.com/Tsuguya/home-unifi.git" /workspace
+          env:
+            - name: BRANCH
+              value: "{{workflow.parameters.branch}}"
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+            - name: github-token
+              mountPath: /github-token
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+      container:
+        image: ghcr.io/opentofu/opentofu:1.12.5
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            memory: 512Mi
+        command: [sh, -c]
+        args:
+          - |
+            set -uo pipefail
+            export GITHUB_TOKEN=$(cat /github-token/token)
+            export PATH="/tools:$PATH"
+
+            REPO="Tsuguya/home-unifi"
+            PR="{{workflow.parameters.pr-number}}"
+            SHA="{{workflow.parameters.sha}}"
+            AUTHOR="{{workflow.parameters.author}}"
+            RUN_URL="https://argo.infra.tgy.io/workflows/argo/{{workflow.name}}"
+
+            # The commit status is the merge gate, so it is posted as pending
+            # before anything else can fail. A workflow that never starts, or
+            # one that dies mid-run, leaves the check unreported and GitHub
+            # blocks the merge — the whole point of using a status here rather
+            # than only a PR comment.
+            post_status() {
+              gh api "repos/$REPO/statuses/$SHA" \
+                -f state="$1" \
+                -f context=tofu-plan \
+                -f description="$2" \
+                -f target_url="$RUN_URL" >/dev/null
+            }
+
+            post_status pending "Running tofu plan"
+
+            cd /workspace
+
+            if ! OUTPUT=$(tofu fmt -check -recursive 2>&1); then
+              STATE=failure
+              DESC="tofu fmt -check: files need formatting"
+            elif ! OUTPUT=$(tofu init -input=false -no-color 2>&1); then
+              STATE=error
+              DESC="tofu init failed"
+            elif ! OUTPUT=$(tofu validate -no-color 2>&1); then
+              STATE=failure
+              DESC="tofu validate failed"
+            else
+              # -lock=false: this only ever reads state, and a PR plan must not
+              # block a concurrent apply run from the workstation.
+              OUTPUT=$(tofu plan -detailed-exitcode -lock=false -no-color 2>&1) && CODE=0 || CODE=$?
+              if [ "$CODE" = "0" ]; then
+                STATE=success
+                DESC="No changes"
+              elif [ "$CODE" = "2" ]; then
+                # A diff is the normal case for a hand-written change, so it
+                # stays green. The gate exists to prove the plan ran, not to
+                # forbid changes; read the comment for what it would do.
+                STATE=success
+                DESC="Changes detected - review the plan before merging"
+              else
+                STATE=error
+                DESC="tofu plan failed (exit $CODE)"
+              fi
+            fi
+
+            jq -n \
+              --arg desc "$DESC" \
+              --arg output "$OUTPUT" \
+              '{body: ("### Tofu Plan: " + $desc + "\n\n<details>\n<summary>Output</summary>\n\n```\n" + $output + "\n```\n\n</details>")}' \
+              | gh api "repos/$REPO/issues/$PR/comments" --input -
+
+            post_status "$STATE" "$DESC"
+
+            # Provider and lockfile bumps are only merged unattended when the
+            # plan is empty; anything with a diff waits for a human.
+            if [ "$DESC" = "No changes" ] && [ "$AUTHOR" = "renovate[bot]" ]; then
+              gh api "repos/$REPO/pulls/$PR/merge" --method PUT -f merge_method=squash
+            fi
+
+            [ "$STATE" = "success" ]
+        env:
+          - name: TF_VAR_api_url
+            valueFrom:
+              secretKeyRef:
+                name: unifi-tofu-credentials
+                key: api_url
+          - name: TF_VAR_api_key
+            valueFrom:
+              secretKeyRef:
+                name: unifi-tofu-credentials
+                key: api_key
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+          - name: github-token
+            mountPath: /github-token
+            readOnly: true
+          - name: tools
+            mountPath: /tools
+            readOnly: true

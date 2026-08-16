@@ -10,6 +10,7 @@ spec:
         operator: In
         values:
           - tofu-cloudflare
+          - tofu-unifi
           - upgrade-k8s
           - pxe-sync
           - talos-build

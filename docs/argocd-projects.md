@@ -33,6 +33,8 @@ ArgoCD AppProject でアプリケーションをドメインごとに分離し�
 |---------|------|-------|------|
 | platform | ValidatingWebhookConfiguration | `*` | Cilium, ArgoCD |
 | platform | MutatingWebhookConfiguration | `*` | Cilium |
+| platform | ValidatingAdmissionPolicy | admissionregistration.k8s.io | Cilium Gateway API (1.20+) |
+| platform | ValidatingAdmissionPolicyBinding | admissionregistration.k8s.io | Cilium Gateway API (1.20+) |
 | platform | APIService | `*` | metrics-server |
 | platform | GatewayClass | `*` | Cilium Gateway API |
 | platform | Namespace | `*` | kube-system config |

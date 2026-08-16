@@ -1,0 +1,29 @@
+{
+  "checksums": [
+    {
+      "id": "github_release/github.com/google/go-containerregistry/v0.21.9/go-containerregistry_Linux_x86_64.tar.gz",
+      "checksum": "5C16D8DDB971CB1D5E6ED8B1E743DA8224414EEBA2C2762D8F1A61B2F095699E",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "github_release/github.com/mikefarah/yq/v4.53.3/yq_linux_amd64",
+      "checksum": "2148F058B3D9BE6348C7F261F504E53C52FFC4ADDCCC9659A82866E73BCA0AC62F9443D146932C547EFE54748700AC5A1633D9AFF01BA5605EEDDBF58FF880B5",
+      "algorithm": "sha512"
+    },
+    {
+      "id": "github_release/github.com/rhysd/actionlint/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz",
+      "checksum": "8ACA8DB96F1B94770F1B0D72B6DDDCB1EBB8123CB3712530B08CC387B349A3D8",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "github_release/github.com/yannh/kubeconform/v0.8.0/kubeconform-linux-amd64.tar.gz",
+      "checksum": "9BC2BFFBF71F261128533EDAF912153948B7FF238F9A531AE6D34466EC287883",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "registries/github_content/github.com/aquaproj/aqua-registry/v4.552.0/registry.yaml",
+      "checksum": "24EE3C66CE9DD9C2A5F790268252399A3614A746F50DB24158096974B98C8618",
+      "algorithm": "sha256"
+    }
+  ]
+}

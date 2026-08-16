@@ -64,6 +64,15 @@
       ]
     },
     {
+      "description": "Tool versions pinned as a workflow env var or action input. actionlint and zizmor install a specific version rather than the release page's `latest`, so the pin has to be something Renovate can see. extractVersionTemplate drops the tag's leading v to match how the version is written in the file.",
+      "customType": "regex",
+      "managerFilePatterns": ["/^\\.github/workflows/.+\\.ya?ml$/"],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s*\\n\\s*[\\w-]+: \"(?<currentValue>[^\"]+)\""
+      ],
+      "extractVersionTemplate": "^v(?<version>.+)$"
+    },
+    {
       "customType": "regex",
       "managerFilePatterns": ["/manifests/talos-build/workflowtemplate\\.yaml$/"],
       "matchStrings": [

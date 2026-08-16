@@ -6,11 +6,18 @@ on:
   pull_request:
     branches: [main]
 
+# Nothing here needs the token by default. The jobs that do (ai-review,
+# ai-fix-ci, zizmor's SARIF upload) name their own scopes, so a new job added
+# below starts with no permissions rather than inheriting write access.
+permissions: {}
+
 jobs:
   kubeconform:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install kubeconform
         run: |
@@ -37,6 +44,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install tools
         run: |
@@ -114,6 +123,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install tools
         run: |
@@ -129,7 +140,6 @@ jobs:
           set -euo pipefail
           declare -A added_repos
           failed_images=()
-          checked_images=()
 
           is_oci() { [[ "$1" != https://* && "$1" != http://* ]]; }
 
@@ -229,6 +239,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
 
@@ -293,6 +305,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -308,6 +322,67 @@ jobs:
         run: npx tsc --noEmit
         working-directory: .github/mcp/pr-review
 
+  # Most of this file is bash inside `run:` blocks, and none of it is exercised
+  # until a push runs it. actionlint checks the expressions and the job graph,
+  # and shells out to shellcheck for every script — which is where the real
+  # findings are. Pinned and checksummed for the same reason the argo CLI is:
+  # an unverified `latest` install has no business in the job that exists to
+  # keep the supply chain honest.
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install actionlint
+        env:
+          # renovate: datasource=github-releases depName=rhysd/actionlint
+          ACTIONLINT_VERSION: "1.7.12"
+        run: |
+          set -euo pipefail
+          base="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}"
+          curl -fsSL "$base/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" -o actionlint.tar.gz
+          curl -fsSL "$base/actionlint_${ACTIONLINT_VERSION}_checksums.txt" -o checksums.txt
+          grep " actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz\$" checksums.txt | sha256sum -c -
+          sudo tar xzf actionlint.tar.gz -C /usr/local/bin actionlint
+          actionlint --version
+
+      - name: Lint workflows
+        run: |
+          set -euo pipefail
+          # actionlint silently skips its shell checks when shellcheck is
+          # absent, which would quietly reduce this job to expression linting
+          # if the runner image ever drops it.
+          command -v shellcheck >/dev/null || {
+            echo "::error::shellcheck is not on the runner; actionlint would skip every run: block"
+            exit 1
+          }
+          actionlint -no-color
+
+  # Static audit of the workflows themselves: template injection, credential
+  # persistence, permission scope, spoofable bot conditions. The action runs a
+  # container it resolves by digest from the exact version below, so no part of
+  # this path floats on a tag.
+  zizmor:
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write # upload SARIF to code scanning (free on public repos)
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: zizmorcore/zizmor-action@3dc1ecc9bcb9e94e9b2c709687979e1298497054 # v0.6.2
+        with:
+          # renovate: datasource=github-releases depName=zizmorcore/zizmor
+          version: "1.29.0"
+          # Left at the default persona deliberately. `pedantic` adds 13
+          # findings here and all of them are cosmetic — nine are "this job has
+          # no name:" — which would make every new job fail the gate on style.
+          # Run `zizmor --persona=pedantic` by hand when auditing instead.
+          persona: regular
+
   # The only required status check. Aggregates every correctness leaf so the
   # ruleset never names an individual job: adding, renaming or matrix-splitting
   # a job below can't leave a required context that is never reported (which
@@ -315,7 +390,7 @@ jobs:
   # they are advisory and conditional, and ai-review merges the PR itself.
   gate:
     name: CI Gate
-    needs: [kubeconform, helm-template, image-existence, mcp, argo-lint]
+    needs: [kubeconform, helm-template, image-existence, mcp, argo-lint, actionlint, zizmor]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     permissions: {}
@@ -353,7 +428,11 @@ jobs:
       issues: write
       id-token: write
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Claude drives `gh pr review` / `gh pr merge` from this checkout and the
+      # job uploads no artifacts, so the persisted credential never leaves the
+      # runner. Dropping it is probably still correct — it needs one live run to
+      # confirm `gh` keeps authenticating — so it stays for now.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 # zizmor: ignore[artipacked]
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -419,7 +498,9 @@ jobs:
       issues: write
       id-token: write
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # This job's whole purpose is to commit and push the fix, so the
+      # credential has to persist. No artifacts are uploaded from it.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 # zizmor: ignore[artipacked]
         with:
           ref: ${{ github.head_ref }}
           token: ${{ secrets.GITHUB_TOKEN }}

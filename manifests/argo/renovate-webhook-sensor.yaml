@@ -35,13 +35,37 @@ spec:
           if event.body.ref ~= nil then
             return event.body.ref == "refs/heads/main"
           end
-          if event.body.action ~= nil and event.body.issue ~= nil then
-            -- only the Dependency Dashboard, and ignore renovate's own edits
-            -- (bot unchecking the box) to avoid a self-trigger loop
-            return event.body.action == "edited"
-              and event.body.issue.title == "Dependency Dashboard"
-              and event.body.sender ~= nil
-              and event.body.sender.type == "User"
+          -- checkbox clicks arrive as a body edit; ignore renovate's own edits
+          -- (bot unchecking the box) to avoid a self-trigger loop
+          if event.body.action ~= "edited" then return false end
+          -- public repos: anyone can open an issue/PR and edit its own body,
+          -- so the edit must come from the repo owner and the issue/PR itself
+          -- must have been authored by the renovate app
+          local sender = event.body.sender
+          local repo = event.body.repository
+          if sender == nil or sender.type ~= "User" then return false end
+          if repo == nil or repo.owner == nil or repo.owner.login ~= sender.login then
+            return false
+          end
+          local function checked(body)
+            return body ~= nil and string.find(body, "%[[xX]%]") ~= nil
+          end
+          local function byRenovate(u)
+            return u ~= nil and u.type == "Bot"
+              and u.login == "tsuguya-home-cluster[bot]"
+          end
+          if event.body.issue ~= nil then
+            local issue = event.body.issue
+            return issue.title == "Dependency Dashboard"
+              and byRenovate(issue.user)
+              and checked(issue.body)
+          end
+          if event.body.pull_request ~= nil then
+            local pr = event.body.pull_request
+            return pr.head ~= nil
+              and string.sub(pr.head.ref, 1, 9) == "renovate/"
+              and byRenovate(pr.user)
+              and checked(pr.body)
           end
           return false
     - name: home-infra

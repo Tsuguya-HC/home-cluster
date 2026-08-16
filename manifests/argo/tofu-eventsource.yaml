@@ -124,6 +124,7 @@ spec:
       events:
         - push
         - issues
+        - pull_request
       webhookSecret:
         name: renovate-home-cluster-webhook
         key: credential
@@ -139,6 +140,7 @@ spec:
       events:
         - push
         - issues
+        - pull_request
       webhookSecret:
         name: renovate-home-infra-webhook
         key: credential
@@ -154,6 +156,7 @@ spec:
       events:
         - push
         - issues
+        - pull_request
       webhookSecret:
         name: renovate-home-cloudflare-webhook
         key: credential

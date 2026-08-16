@@ -219,6 +219,68 @@ jobs:
             exit 1
           fi
 
+  # Argo Workflows drops deprecated spec fields at majors, and its CRDs set
+  # x-kubernetes-preserve-unknown-fields: a removed field keeps applying
+  # cleanly while the controller ignores it. That is how every mutex in this
+  # repo silently stopped serialising at the v4 bump. The CLI version is taken
+  # from the chart's appVersion, so the chart bump PR is what lints against
+  # the version it is about to install.
+  argo-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+
+      - name: Install yq
+        run: |
+          wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          chmod +x /usr/local/bin/yq
+
+      - name: Install argo CLI matching the deployed controller
+        run: |
+          set -euo pipefail
+          repo=$(yq '.spec.sources[0].repoURL' apps/argo-workflows.yaml)
+          chart=$(yq '.spec.sources[0].chart' apps/argo-workflows.yaml)
+          chart_version=$(yq '.spec.sources[0].targetRevision' apps/argo-workflows.yaml)
+          helm repo add argo "$repo" >/dev/null
+          app_version=$(helm show chart "argo/$chart" --version "$chart_version" | yq '.appVersion')
+          echo "$chart@$chart_version -> argo-workflows $app_version"
+
+          base="https://github.com/argoproj/argo-workflows/releases/download/${app_version}"
+          curl -fsSL "$base/argo-linux-amd64.gz" -o argo-linux-amd64.gz
+          curl -fsSL "$base/argo-workflows-cli-checksums.txt" -o checksums.txt
+          grep ' argo-linux-amd64.gz$' checksums.txt | sha256sum -c -
+          gunzip -c argo-linux-amd64.gz > /usr/local/bin/argo
+          chmod +x /usr/local/bin/argo
+          argo version --short
+
+      - name: Lint workflow manifests
+        run: |
+          set -uo pipefail
+          # every file goes in one invocation: --offline resolves templateRef
+          # against the args, so dropping one breaks the templates using it
+          mapfile -t files < <(
+            grep -rlE '^kind: (Workflow|WorkflowTemplate|ClusterWorkflowTemplate|CronWorkflow)$' \
+              manifests/ kustomize/ | sort -u
+          )
+          printf 'linting %d files\n' "${#files[@]}"
+          out=$(argo lint --offline --no-color -o simple "${files[@]}" 2>&1)
+          echo "$out"
+
+          # discord-notify runs as an exit handler, where {{workflow.failures}}
+          # is bound; offline lint has no such binding and can never resolve
+          # it. Tolerate that one finding, nothing else.
+          known='manifests/argo/cluster-discord-notify-wft.yaml: in "discord-notify" (ClusterWorkflowTemplate): templates.send templates.send: failed to resolve {{workflow.failures}}'
+          unexpected=$(printf '%s\n' "$out" \
+            | grep -Fvx "$known" \
+            | grep -Fvx 'no linting errors found!' \
+            | sed '/^$/d')
+          if [ -n "$unexpected" ]; then
+            echo "::error::argo lint reported findings beyond the known exit-handler one"
+            exit 1
+          fi
+
   # The MCP server the ai-review job runs. Type-checking it against the
   # installed tree is what makes a lock-file refresh or a transitive security
   # bump safe to automerge: nothing else in this repo exercises that package,
@@ -249,7 +311,7 @@ jobs:
   # they are advisory and conditional, and ai-review merges the PR itself.
   gate:
     name: CI Gate
-    needs: [kubeconform, helm-template, image-existence, mcp]
+    needs: [kubeconform, helm-template, image-existence, mcp, argo-lint]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     permissions: {}

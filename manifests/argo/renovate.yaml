@@ -29,8 +29,8 @@ spec:
       - name: repositories
         value: '["Tsuguya/home-cluster","Tsuguya/home-infra","Tsuguya/home-cloudflare"]'
   synchronization:
-    mutex:
-      name: renovate
+    mutexes:
+      - name: renovate
   activeDeadlineSeconds: 3600
   serviceAccountName: renovate-executor
   entrypoint: main

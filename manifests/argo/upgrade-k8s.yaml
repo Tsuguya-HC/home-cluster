@@ -57,8 +57,8 @@ metadata:
 spec:
   activeDeadlineSeconds: 3600
   synchronization:
-    mutex:
-      name: upgrade-k8s
+    mutexes:
+      - name: upgrade-k8s
   serviceAccountName: upgrade-k8s-executor
   entrypoint: main
   arguments:

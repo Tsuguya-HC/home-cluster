@@ -42,6 +42,8 @@ ArgoCD AppProject でアプリケーションをドメインごとに分離し�
 | platform | TracingPolicy | cilium.io | Tetragon セキュリティポリシー |
 | networking | ValidatingWebhookConfiguration | `*` | cert-manager |
 | networking | MutatingWebhookConfiguration | `*` | cert-manager |
+| networking | ValidatingAdmissionPolicy | admissionregistration.k8s.io | Gateway API safe-upgrades (v1.5+) |
+| networking | ValidatingAdmissionPolicyBinding | admissionregistration.k8s.io | Gateway API safe-upgrades (v1.5+) |
 | networking | Namespace | `*` | cert-manager, external-dns |
 | networking | ClusterIssuer | `*` | cert-manager |
 | networking | CiliumClusterwideNetworkPolicy | `*` | DNS 共通ポリシー等 |

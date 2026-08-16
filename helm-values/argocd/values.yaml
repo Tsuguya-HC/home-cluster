@@ -5,6 +5,11 @@ global:
     runAsNonRoot: true
     seccompProfile:
       type: RuntimeDefault
+  # chart 10.0.0 flips this to true. This namespace is governed by the
+  # CiliumNetworkPolicies in manifests/argocd/, and the chart's own policies
+  # would layer a second, coarser deny on top of them.
+  networkPolicy:
+    create: false
 
 controller:
   resources:

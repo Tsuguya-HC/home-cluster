@@ -162,6 +162,20 @@ spec:
         key: credential
       active: false
       contentType: json
+    unifi:
+      owner: Tsuguya
+      repository: home-unifi
+      webhook:
+        endpoint: /unifi
+        port: "12000"
+        method: POST
+      events:
+        - pull_request
+      webhookSecret:
+        name: home-unifi-github-webhook
+        key: credential
+      active: false
+      contentType: json
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Sensor
@@ -275,3 +289,88 @@ spec:
                 dependencyName: pull-request
                 dataKey: body.pull_request.user.login
               dest: spec.arguments.parameters.2.value
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Sensor
+metadata:
+  name: tofu-unifi
+  namespace: argo
+spec:
+  template:
+    serviceAccountName: workflow-executor
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000
+      seccompProfile:
+        type: RuntimeDefault
+    container:
+      resources:
+        requests:
+          cpu: 10m
+          memory: 32Mi
+        limits:
+          memory: 64Mi
+      securityContext:
+        readOnlyRootFilesystem: true
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: [ALL]
+  dependencies:
+    # No push trigger: home-unifi is applied by hand from the workstation
+    # (`make apply`), because a bad apply takes the whole house off the
+    # network. This sensor only ever plans.
+    - name: pull-request
+      eventSourceName: github-webhook
+      eventName: unifi
+      filters:
+        script: |-
+          if event.body == nil or event.body.pull_request == nil or event.body.action == nil then
+            return false
+          end
+          local action = event.body.action
+          return action == "opened" or action == "synchronize" or action == "reopened"
+  triggers:
+    - template:
+        name: tofu-plan
+        conditions: "pull-request"
+        argoWorkflow:
+          operation: submit
+          source:
+            resource:
+              apiVersion: argoproj.io/v1alpha1
+              kind: Workflow
+              metadata:
+                generateName: tofu-unifi-plan-
+                namespace: argo
+              spec:
+                workflowTemplateRef:
+                  name: tofu-unifi-plan
+                arguments:
+                  parameters:
+                    - name: pr-number
+                      value: ""
+                    - name: branch
+                      value: ""
+                    - name: sha
+                      value: ""
+                    - name: author
+                      value: ""
+          parameters:
+            - src:
+                dependencyName: pull-request
+                dataKey: body.number
+              dest: spec.arguments.parameters.0.value
+            - src:
+                dependencyName: pull-request
+                dataKey: body.pull_request.head.ref
+              dest: spec.arguments.parameters.1.value
+            - src:
+                dependencyName: pull-request
+                dataKey: body.pull_request.head.sha
+              dest: spec.arguments.parameters.2.value
+            - src:
+                dependencyName: pull-request
+                dataKey: body.pull_request.user.login
+              dest: spec.arguments.parameters.3.value

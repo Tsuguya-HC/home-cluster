@@ -32,6 +32,20 @@ spec:
     mutexes:
       - name: renovate
   activeDeadlineSeconds: 3600
+  # The renovate image installs node/npm on demand through containerbase, whose
+  # tool tree under /opt/containerbase is root-group-writable and owned by the
+  # image's own user (uid 12021, gid 0). argo's workflowDefaults run every pod
+  # as 65532:65532, which loses that group write, so every tool install died in
+  # ~12ms and with it every npm lock-file update — silently, as an artifactError
+  # with an empty stderr. Overriding the default here restores the image's own
+  # ids; the uid is still non-root, so restricted PSA is satisfied.
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 12021
+    runAsGroup: 0
+    fsGroup: 0
+    seccompProfile:
+      type: RuntimeDefault
   serviceAccountName: renovate-executor
   entrypoint: main
   podMetadata:
@@ -104,8 +118,8 @@ spec:
             value: "false"
           - name: LOG_LEVEL
             value: info
-          # renovate image runs under the argo restricted-PSA uid (65532);
-          # give it a writable HOME and base dir so git/cache work
+          # keep the clones and the containerbase tool cache on the emptyDir
+          # rather than the container's own layer
           - name: HOME
             value: /tmp
           - name: RENOVATE_BASE_DIR

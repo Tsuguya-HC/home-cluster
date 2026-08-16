@@ -170,8 +170,20 @@ spec:
 
             # Provider and lockfile bumps are only merged unattended when the
             # plan is empty; anything with a diff waits for a human.
+            #
+            # tofu-plan is a required check, and the status posted a moment ago
+            # is not always visible to the merge endpoint yet -- it answers 405
+            # until it settles. Without the retry the PR just sits there green
+            # and unmerged, which reads as "automerge is broken" rather than as
+            # a race.
             if [ "$DESC" = "No changes" ] && [ "$AUTHOR" = "renovate[bot]" ]; then
-              gh api "repos/$REPO/pulls/$PR/merge" --method PUT -f merge_method=squash
+              for attempt in 1 2 3 4 5; do
+                if gh api "repos/$REPO/pulls/$PR/merge" --method PUT -f merge_method=squash; then
+                  break
+                fi
+                echo "merge attempt $attempt failed; retrying"
+                sleep 10
+              done
             fi
 
             [ "$STATE" = "success" ]

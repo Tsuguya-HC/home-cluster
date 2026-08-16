@@ -1,0 +1,31 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/aquaproj/aqua/main/json-schema/aqua-yaml.json
+#
+# CLI versions for the lint workflow. These used to be fetched from
+# `releases/latest/download/...` with nothing pinning or verifying them — the
+# one unpinned surface left in a repo that SHA-pins every action and
+# digest-pins every image. aqua records a SHA256 for each binary in
+# aqua-checksums.json and refuses to install anything that does not match.
+#
+# The argo CLI is deliberately not here: its version is resolved at run time
+# from the argo-workflows chart's appVersion so it matches the deployed
+# controller, and it verifies itself against the release's checksums.txt.
+checksum:
+  enabled: true
+  # Fail rather than fall back to "just download it" when a checksum is missing.
+  require_checksum: true
+  # CI and the workstation are both linux/amd64; recording other platforms
+  # would only pad the lock file.
+  supported_envs:
+    - linux/amd64
+
+registries:
+  - type: standard
+    ref: v4.552.0 # renovate: depName=aquaproj/aqua-registry
+
+packages:
+  - name: yannh/kubeconform@v0.8.0
+  - name: mikefarah/yq@v4.53.3
+  # provides `crane`
+  - name: google/go-containerregistry@v0.21.9
+  - name: rhysd/actionlint@v1.7.12

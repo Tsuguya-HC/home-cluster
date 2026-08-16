@@ -35,6 +35,9 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 | Workflow pods (claude-code) | SeaweedFS filer (seaweedfs) | 8333 | Artifact/log storage |
 | Workflow pods (claude-code) | Loki gateway (monitoring) | 8080 | Log query (logcli) |
 | PXE sync pods (argo) | SeaweedFS filer (seaweedfs) | 8333 | Artifact/log storage |
+| Etcd backup (argo) | SeaweedFS filer (seaweedfs) | 8333 | Backup storage |
+| Kanidm backup (argo) | SeaweedFS filer (seaweedfs) | 8333 | Backup storage |
+| Kanidm repl-exchange (argo) | SeaweedFS filer (seaweedfs) | 8333 | Replication data |
 | Argo Workflows server (argo) | SeaweedFS filer (seaweedfs) | 8333 | Archived log retrieval |
 | Prometheus (monitoring) | Trivy Operator (trivy-system) | 8080 | Metrics scrape |
 | Prometheus (monitoring) | Harbor (harbor) | 8001 | Metrics scrape |

@@ -11,7 +11,7 @@ name: Digest cooldown
 # from main, so a PR cannot weaken the gate that is judging it. The action
 # never checks out or runs head-side code — it reads the diff over the API.
 
-on:
+on: # zizmor: ignore[dangerous-triggers]
   pull_request_target:
     types: [opened, synchronize, reopened, labeled, unlabeled, edited]
   schedule:

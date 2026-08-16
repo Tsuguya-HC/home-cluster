@@ -431,11 +431,17 @@ jobs:
       issues: write
       id-token: write
     steps:
-      # Claude drives `gh pr review` / `gh pr merge` from this checkout and the
-      # job uploads no artifacts, so the persisted credential never leaves the
-      # runner. Dropping it is probably still correct — it needs one live run to
-      # confirm `gh` keeps authenticating — so it stays for now.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 # zizmor: ignore[artipacked]
+      # No credential is left behind, and claude-code-action does not want one.
+      # Passing a prompt selects its agent mode, where configureGitAuth() runs
+      # first and explicitly unsets the http.<server>/.extraheader that
+      # actions/checkout installs, then puts its own token in the remote URL.
+      #
+      # Restore this if the job is ever switched to tag mode (the @claude
+      # mention flow): there setupBranch() runs `git fetch` at modes/tag/index.ts
+      # before the auth is configured, so it would fetch with no credential.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -501,12 +507,15 @@ jobs:
       issues: write
       id-token: write
     steps:
-      # This job's whole purpose is to commit and push the fix, so the
-      # credential has to persist. No artifacts are uploaded from it.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 # zizmor: ignore[artipacked]
+      # This job pushes, but not through anything actions/checkout leaves in
+      # .git/config — the push goes through the remote URL claude-code-action
+      # rewrites in agent mode. See the note on ai-review's checkout above.
+      # `token:` is still needed for the clone itself.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.head_ref }}
           token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: false
 
       - name: Add ai-fix label
         run: gh pr edit ${{ github.event.pull_request.number }} --add-label "ai-fix"

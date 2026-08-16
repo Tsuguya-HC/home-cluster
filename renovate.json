@@ -84,6 +84,12 @@
       "automerge": true
     },
     {
+      "description": "Renovate ships several releases a day, and an open PR is re-targeted at each one — 44.30.3 became 44.30.4 within 32 minutes. Every re-target is a new digest, which restarts the digest-cooldown clock, so the gate could never clear and the image sat on 43.251.3 for six weeks. A weekly window keeps one digest on the branch long enough to soak. updateNotScheduled is what actually stops the re-targeting: schedule alone still allows out-of-schedule updates to existing branches. vulnerabilityAlerts overrides this with its own at-any-time schedule, so a CVE still moves immediately.",
+      "matchPackageNames": ["ghcr.io/renovatebot/renovate"],
+      "schedule": ["before 6am on monday"],
+      "updateNotScheduled": false
+    },
+    {
       "description": "Do not automerge critical infrastructure",
       "matchPackageNames": ["cilium", "tetragon", "https://github.com/kubernetes-sigs/gateway-api.git"],
       "automerge": false

@@ -1,0 +1,57 @@
+---
+# 外向き IPv6 疎通の監視。構成と背景は docs/ipv6.md、障害事例は docs/known-issues.md。
+# image は chart の appVersion に従う (helm-values は digest ピンの対象外。
+# chart の targetRevision を Renovate が更新する運用)
+
+fullnameOverride: blackbox-exporter
+
+# Pod ネットワークは IPv4 only なので、hostNetwork でノードの VLAN 10 の GUA
+# (委任プレフィックスの :10::/64 の SLAAC アドレス) を送信元にする。
+# これをやらないと、実際に壊れる経路 (VLAN プレフィックス発の v6) を検査できない。
+# monitoring namespace は PSA privileged で、node-exporter が既に hostNetwork で動いている。
+hostNetwork: true
+dnsPolicy: ClusterFirstWithHostNet
+
+# ICMP prober は raw socket (root + NET_RAW) が要り、ノードの
+# net.ipv4.ping_group_range も "1 0" (非特権 ICMP 無効) のため使えない。
+# HTTPS prober なら特権不要で、かつ「TLS まで含めて実際に使えるか」を見られる。
+securityContext:
+  runAsUser: 1000
+  runAsGroup: 1000
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
+
+config:
+  modules:
+    # ip_protocol_fallback: false が最重要。これが無いと v6 が死んでいても v4 に
+    # フォールバックして成功扱いになり、今回の「壊れているのに気付かない」を
+    # 監視側で再現してしまう。
+    https_v6:
+      prober: http
+      timeout: 5s
+      http:
+        preferred_ip_protocol: ip6
+        ip_protocol_fallback: false
+        follow_redirects: false
+        # ターゲットは IP リテラル (DNS 障害を IPv6 障害と誤検知しないため)。
+        # 証明書名は一致しないので検証しない。ここで見たいのは到達性であって真正性ではない。
+        valid_status_codes: [200, 301, 302]
+        tls_config:
+          insecure_skip_verify: true
+
+resources:
+  requests:
+    cpu: 10m
+    memory: 32Mi
+  limits:
+    memory: 128Mi
+
+# Prometheus の serviceMonitorSelector は release ラベルで絞っているため、
+# extraLabels で付けないと作成されても拾われない。
+serviceMonitor:
+  enabled: true
+  extraLabels:
+    release: kube-prometheus-stack

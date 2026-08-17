@@ -1,0 +1,45 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: ipv6-egress
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: ipv6-egress
+      rules:
+        # 2 事業者とも落ちたときだけ発報する。片方だけなら相手側の問題として扱う。
+        - alert: Ipv6EgressDown
+          expr: |
+            max(probe_success{check="ipv6-egress"}) == 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "VLAN から IPv6 で外部に出られない"
+            description: >-
+              ノードの VLAN 10 GUA を送信元とした IPv6 疎通が全ターゲットで失敗している。
+              v4 は無関係に動き続けるため、放置すると気付かないまま何週間も経過する。
+              HGW の IPv6 静的ルートが「UI には表示されるが適用されていない」状態に
+              なっている可能性が高い (2026-08-17 の障害と同じ)。
+              復旧: 172.16.0.1 → 詳細設定 → IPv6ルーティング設定 でエントリを 1 本だけ
+              編集して保存し直す。1 本の保存でテーブル全体が再適用される。
+              HGW の再起動はこの障害を再発させる操作なので避ける。
+              詳細は docs/known-issues.md を参照。
+
+        # プローブ自体が届かなくなるケース (exporter 停止、CNP で 9115 が塞がる等) を
+        # 「異常なし」と誤読しないための番犬。
+        - alert: Ipv6ProbeMissing
+          expr: |
+            absent(probe_success{check="ipv6-egress"})
+          for: 15m
+          labels:
+            severity: warning
+            namespace: monitoring
+          annotations:
+            summary: "IPv6 疎通プローブのメトリクスが来ていない"
+            description: >-
+              probe_success{check="ipv6-egress"} が存在しない。blackbox-exporter が
+              動いていないか、Prometheus から host:9115 への到達が塞がれている。
+              この状態では IPv6 障害を検知できない。

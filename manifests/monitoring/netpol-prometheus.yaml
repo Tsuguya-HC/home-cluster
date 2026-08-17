@@ -120,6 +120,9 @@ spec:
               protocol: TCP
             - port: "9100"
               protocol: TCP
+            # blackbox-exporter は hostNetwork で動くため host 宛になる
+            - port: "9115"
+              protocol: TCP
             - port: "2379"
               protocol: TCP
             - port: "2381"

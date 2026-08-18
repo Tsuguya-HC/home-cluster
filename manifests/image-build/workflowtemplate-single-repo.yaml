@@ -11,6 +11,10 @@ spec:
     parameters:
       - name: repo-url
       - name: image-name
+      # push 先の Harbor プロジェクト。既定は tools（public）。
+      # 公開したくないイメージは private なプロジェクトを明示する。
+      - name: project
+        value: tools
       - name: commit-sha
         value: main
   podMetadata:
@@ -169,7 +173,7 @@ spec:
               --frontend dockerfile.v0 \
               --local context=/workspace \
               --local dockerfile=/workspace \
-              --output 'type=image,"name=registry.infra.tgy.io/tools/{{workflow.parameters.image-name}}:{{workflow.parameters.commit-sha}},registry.infra.tgy.io/tools/{{workflow.parameters.image-name}}:latest",push=true' \
+              --output 'type=image,"name=registry.infra.tgy.io/{{workflow.parameters.project}}/{{workflow.parameters.image-name}}:{{workflow.parameters.commit-sha}},registry.infra.tgy.io/{{workflow.parameters.project}}/{{workflow.parameters.image-name}}:latest",push=true' \
               --metadata-file /workspace/metadata.json
             jq -r '."containerimage.digest"' /workspace/metadata.json > /workspace/digest
         env:
@@ -263,7 +267,7 @@ spec:
         command: [sh, -c]
         args:
           - |
-            IMAGE="registry.infra.tgy.io/tools/{{workflow.parameters.image-name}}@{{inputs.parameters.digest}}"
+            IMAGE="registry.infra.tgy.io/{{workflow.parameters.project}}/{{workflow.parameters.image-name}}@{{inputs.parameters.digest}}"
             cosign sign --registry-referrers-mode=legacy --new-bundle-format=false --use-signing-config=false --key /cosign/cosign.key --yes "$IMAGE"
         env:
           - name: HOME

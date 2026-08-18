@@ -1,0 +1,19 @@
+# Re-applies weekly so drift introduced through the Harbor UI does not survive,
+# and so a push that failed to apply is retried without anyone noticing it.
+apiVersion: argoproj.io/v1alpha1
+kind: CronWorkflow
+metadata:
+  name: tofu-harbor-periodic
+  namespace: argo
+spec:
+  schedules:
+    - "0 16 * * 0"
+  timezone: Asia/Tokyo
+  concurrencyPolicy: Replace
+  workflowSpec:
+    workflowTemplateRef:
+      name: tofu-harbor
+    arguments:
+      parameters:
+        - name: command
+          value: apply

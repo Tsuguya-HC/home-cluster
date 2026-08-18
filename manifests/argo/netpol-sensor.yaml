@@ -11,6 +11,7 @@ spec:
         values:
           - tofu-cloudflare
           - tofu-unifi
+          - tofu-harbor
           - upgrade-k8s
           - pxe-sync
           - talos-build

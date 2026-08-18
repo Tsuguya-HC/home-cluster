@@ -18,6 +18,8 @@ spec:
         - matchLabels:
             sensor-name: tofu-unifi
         - matchLabels:
+            sensor-name: tofu-harbor
+        - matchLabels:
             sensor-name: upgrade-k8s
         - matchLabels:
             sensor-name: pxe-sync

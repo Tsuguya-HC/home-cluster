@@ -1,0 +1,22 @@
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: tofu-harbor
+  namespace: argo
+spec:
+  endpointSelector:
+    matchLabels:
+      tofu-harbor: "true"
+  egress:
+    # registry.infra.tgy.io resolves to the harbor ClusterIP inside the cluster,
+    # so this is a pod-to-pod path — the world:443 rule in netpol-workflow-pods
+    # never matches it.
+    - toEndpoints:
+        - matchLabels:
+            app: harbor
+            component: nginx
+            io.kubernetes.pod.namespace: harbor
+      toPorts:
+        - ports:
+            - port: "8443"
+              protocol: TCP

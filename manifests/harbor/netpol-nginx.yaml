@@ -44,6 +44,9 @@ spec:
         - matchLabels:
             renovate: "true"
             io.kubernetes.pod.namespace: argo
+        - matchLabels:
+            tofu-harbor: "true"
+            io.kubernetes.pod.namespace: argo
       toPorts:
         - ports:
             - port: "8443"

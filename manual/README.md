@@ -138,6 +138,7 @@ S3 ストレージ（Loki、Tempo、Argo Workflows）は SeaweedFS が提供し�
 | cloudflare-tofu-credentials | argo | CLOUDFLARE_API_TOKEN | OpenTofu Cloudflare provider |
 | github-app-private-key | argo, image-build, talos-build, claude-code | private-key | GitHub App (tgy-cluster-bot) 認証 |
 | home-cloudflare-github-webhook | argo | secret | GitHub webhook 検証 |
+| home-harbor-github-webhook | argo | credential | GitHub webhook 検証 (home-harbor) |
 
 ### 構築後に作成（クラスタ内サービスに依存）
 

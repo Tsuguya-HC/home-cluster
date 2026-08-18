@@ -1,0 +1,277 @@
+# Applies Tsuguya/home-harbor (Harbor projects, robots, retention, GC and scan
+# schedules). The registry is only reachable from inside the cluster on the
+# ClusterIP path, and the state backend is a Secret in this namespace, so both
+# plan and apply have to run here rather than on a GitHub runner.
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: tofu-harbor
+  namespace: argo
+spec:
+  activeDeadlineSeconds: 600
+  serviceAccountName: tofu-executor
+  entrypoint: main
+  podMetadata:
+    labels:
+      tofu-harbor: "true"
+  arguments:
+    parameters:
+      - name: command
+        default: apply
+        enum:
+          - plan
+          - apply
+  templates:
+    - name: main
+      volumes:
+        - name: workspace
+          emptyDir: {}
+        - name: github-token
+          emptyDir: {}
+        - name: github-app-secret
+          secret:
+            secretName: github-app-private-key
+      initContainers:
+        - name: github-auth
+          image: registry.infra.tgy.io/tools/argo-tools:latest
+          command: [github-auth.sh]
+          env:
+            - name: GITHUB_APP_ID
+              value: "2998228"
+            - name: GITHUB_APP_INSTALLATION_ID
+              value: "113765957"
+          securityContext:
+            runAsUser: 65532
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: github-app-secret
+              mountPath: /github-app
+              readOnly: true
+            - name: github-token
+              mountPath: /github-token
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+        - name: git-clone
+          image: alpine/git:v2.54.0
+          command: [sh, -c]
+          args:
+            - |
+              GITHUB_TOKEN=$(cat /github-token/token)
+              git clone --depth 1 "https://x-access-token:${GITHUB_TOKEN}@github.com/Tsuguya/home-harbor.git" /workspace
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+            - name: github-token
+              mountPath: /github-token
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+      container:
+        image: ghcr.io/opentofu/opentofu:1.12.5
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            memory: 512Mi
+        command: [sh, -c]
+        args:
+          - |
+            cd /workspace
+            tofu init
+            if [ "{{workflow.parameters.command}}" = "apply" ]; then
+              tofu apply -auto-approve
+            else
+              tofu plan
+            fi
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+        env:
+          - name: TF_VAR_harbor_password
+            valueFrom:
+              secretKeyRef:
+                name: harbor-tofu-credentials
+                key: admin_password
+          - name: TF_VAR_robot_tools_secret
+            valueFrom:
+              secretKeyRef:
+                name: harbor-tofu-credentials
+                key: robot_tools_secret
+          - name: TF_VAR_robot_renovate_secret
+            valueFrom:
+              secretKeyRef:
+                name: harbor-tofu-credentials
+                key: robot_renovate_secret
+---
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: tofu-harbor-plan
+  namespace: argo
+spec:
+  activeDeadlineSeconds: 600
+  serviceAccountName: tofu-executor
+  entrypoint: main
+  podMetadata:
+    labels:
+      tofu-harbor: "true"
+  arguments:
+    parameters:
+      - name: pr-number
+      - name: branch
+      - name: author
+        default: ""
+  templates:
+    - name: main
+      volumes:
+        - name: workspace
+          emptyDir: {}
+        - name: github-token
+          emptyDir: {}
+        - name: tools
+          emptyDir: {}
+        - name: github-app-secret
+          secret:
+            secretName: github-app-private-key
+      initContainers:
+        - name: github-auth
+          image: registry.infra.tgy.io/tools/argo-tools:latest
+          command: [github-auth.sh]
+          env:
+            - name: GITHUB_APP_ID
+              value: "2998228"
+            - name: GITHUB_APP_INSTALLATION_ID
+              value: "113765957"
+          securityContext:
+            runAsUser: 65532
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: github-app-secret
+              mountPath: /github-app
+              readOnly: true
+            - name: github-token
+              mountPath: /github-token
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+        - name: copy-tools
+          image: registry.infra.tgy.io/tools/argo-tools:latest
+          command: [sh, -c]
+          args:
+            - cp /usr/local/bin/jq /usr/local/bin/gh /tools/
+          securityContext:
+            runAsUser: 65532
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: tools
+              mountPath: /tools
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+        - name: git-clone
+          image: alpine/git:v2.54.0
+          command: [sh, -c]
+          args:
+            - |
+              GITHUB_TOKEN=$(cat /github-token/token)
+              git clone --depth 1 -b "${BRANCH}" "https://x-access-token:${GITHUB_TOKEN}@github.com/Tsuguya/home-harbor.git" /workspace
+          env:
+            - name: BRANCH
+              value: "{{workflow.parameters.branch}}"
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+            - name: github-token
+              mountPath: /github-token
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+      container:
+        image: ghcr.io/opentofu/opentofu:1.12.5
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            memory: 512Mi
+        command: [sh, -c]
+        args:
+          - |
+            set -uo pipefail
+            export GITHUB_TOKEN=$(cat /github-token/token)
+            export PATH="/tools:$PATH"
+
+            cd /workspace
+            tofu init -input=false
+            PLAN_OUTPUT=$(tofu plan -detailed-exitcode -no-color 2>&1) && EXIT_CODE=0 || EXIT_CODE=$?
+            PR="{{workflow.parameters.pr-number}}"
+            REPO="Tsuguya/home-harbor"
+            if [ "$EXIT_CODE" = "0" ]; then
+              TITLE="Tofu Plan: No Changes"
+              MSG="Harbor is up-to-date."
+            elif [ "$EXIT_CODE" = "2" ]; then
+              TITLE="Tofu Plan: Changes Detected"
+              MSG="Review required before merge."
+            else
+              TITLE="Tofu Plan: Error"
+              MSG="Plan failed with exit code $EXIT_CODE."
+            fi
+            BODY=$(jq -n \
+              --arg title "$TITLE" \
+              --arg msg "$MSG" \
+              --arg output "$PLAN_OUTPUT" \
+              '{body: ("### " + $title + "\n" + $msg + "\n\n<details>\n<summary>Plan Output</summary>\n\n```\n" + $output + "\n```\n\n</details>")}')
+            echo "$BODY" | gh api "repos/$REPO/issues/$PR/comments" --input -
+            AUTHOR="{{workflow.parameters.author}}"
+            if [ "$EXIT_CODE" = "0" ] && [ "$AUTHOR" = "renovate[bot]" ]; then
+              gh api "repos/$REPO/pulls/$PR/merge" --method PUT -f merge_method=squash
+            fi
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+          - name: github-token
+            mountPath: /github-token
+            readOnly: true
+          - name: tools
+            mountPath: /tools
+            readOnly: true
+        env:
+          - name: TF_VAR_harbor_password
+            valueFrom:
+              secretKeyRef:
+                name: harbor-tofu-credentials
+                key: admin_password
+          - name: TF_VAR_robot_tools_secret
+            valueFrom:
+              secretKeyRef:
+                name: harbor-tofu-credentials
+                key: robot_tools_secret
+          - name: TF_VAR_robot_renovate_secret
+            valueFrom:
+              secretKeyRef:
+                name: harbor-tofu-credentials
+                key: robot_renovate_secret

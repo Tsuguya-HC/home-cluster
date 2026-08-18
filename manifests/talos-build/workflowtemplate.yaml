@@ -210,9 +210,8 @@ spec:
             # renovate: datasource=docker depName=ghcr.io/siderolabs/iscsi-tools
             - ghcr.io/siderolabs/iscsi-tools:v0.2.0@sha256:44b290660b71cf480ba2ab237e709dd5dee2af3484b368260ee0fc6c435c820d
             - --system-extension-image
-            # self-built mirror until siderolabs publishes spin v0.25.x
-            # (build: talos-custom-build/extensions/spin)
-            - ghcr.io/tsuguya/spin:v0.25.1@sha256:013755d0cfb72578ac199358e1e3bb4e74584c7bcb80dc464cd0c3539496d751
+            # renovate: datasource=docker depName=ghcr.io/siderolabs/spin
+            - ghcr.io/siderolabs/spin:v0.25.1@sha256:cf814e779c47f28d59a3fd4ea1355581506c360c0ac55921b83ef09948107741
             - --system-extension-image
             # renovate: datasource=docker depName=ghcr.io/siderolabs/kata-containers
             - ghcr.io/siderolabs/kata-containers:3.32.0@sha256:dcbcaf42eff4a15260f5a6743c055f7e020c454774db84cadb585680071b130f
@@ -339,9 +338,8 @@ spec:
             # renovate: datasource=docker depName=ghcr.io/siderolabs/iscsi-tools
             - ghcr.io/siderolabs/iscsi-tools:v0.2.0@sha256:44b290660b71cf480ba2ab237e709dd5dee2af3484b368260ee0fc6c435c820d
             - --system-extension-image
-            # self-built mirror until siderolabs publishes spin v0.25.x
-            # (build: talos-custom-build/extensions/spin)
-            - ghcr.io/tsuguya/spin:v0.25.1@sha256:013755d0cfb72578ac199358e1e3bb4e74584c7bcb80dc464cd0c3539496d751
+            # renovate: datasource=docker depName=ghcr.io/siderolabs/spin
+            - ghcr.io/siderolabs/spin:v0.25.1@sha256:cf814e779c47f28d59a3fd4ea1355581506c360c0ac55921b83ef09948107741
             - --system-extension-image
             # renovate: datasource=docker depName=ghcr.io/siderolabs/kata-containers
             - ghcr.io/siderolabs/kata-containers:3.32.0@sha256:dcbcaf42eff4a15260f5a6743c055f7e020c454774db84cadb585680071b130f
@@ -382,9 +380,8 @@ spec:
             # renovate: datasource=docker depName=ghcr.io/siderolabs/iscsi-tools
             - ghcr.io/siderolabs/iscsi-tools:v0.2.0@sha256:44b290660b71cf480ba2ab237e709dd5dee2af3484b368260ee0fc6c435c820d
             - --system-extension-image
-            # self-built mirror until siderolabs publishes spin v0.25.x
-            # (build: talos-custom-build/extensions/spin)
-            - ghcr.io/tsuguya/spin:v0.25.1@sha256:013755d0cfb72578ac199358e1e3bb4e74584c7bcb80dc464cd0c3539496d751
+            # renovate: datasource=docker depName=ghcr.io/siderolabs/spin
+            - ghcr.io/siderolabs/spin:v0.25.1@sha256:cf814e779c47f28d59a3fd4ea1355581506c360c0ac55921b83ef09948107741
             - --system-extension-image
             # renovate: datasource=docker depName=ghcr.io/siderolabs/kata-containers
             - ghcr.io/siderolabs/kata-containers:3.32.0@sha256:dcbcaf42eff4a15260f5a6743c055f7e020c454774db84cadb585680071b130f

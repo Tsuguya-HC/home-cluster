@@ -72,8 +72,11 @@ core:
         secretKeyRef:
           name: harbor-kanidm-oauth
           key: clientSecret
+    # CONFIG_OVERWRITE_JSON が入っている間、Harbor は /configurations への PUT を
+    # admin にも 403 で拒否する（認証キーだけでなくエンドポイント全体）。この
+    # エンドポイントの設定は home-harbor の tofu ではなくここが持ち場になる。
     - name: CONFIG_OVERWRITE_JSON
-      value: '{"auth_mode":"oidc_auth","oidc_name":"Kanidm","oidc_endpoint":"https://idm.tgy.io/oauth2/openid/harbor","oidc_client_id":"harbor","oidc_client_secret":"$(OIDC_CLIENT_SECRET)","oidc_scope":"openid,profile,email","oidc_verify_cert":"true","oidc_auto_onboard":"true","oidc_user_claim":"preferred_username"}'
+      value: '{"auth_mode":"oidc_auth","oidc_name":"Kanidm","oidc_endpoint":"https://idm.tgy.io/oauth2/openid/harbor","oidc_client_id":"harbor","oidc_client_secret":"$(OIDC_CLIENT_SECRET)","oidc_scope":"openid,profile,email","oidc_verify_cert":"true","oidc_auto_onboard":"true","oidc_user_claim":"preferred_username","project_creation_restriction":"adminonly"}'
   resources:
     requests:
       cpu: 50m

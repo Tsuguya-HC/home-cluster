@@ -11,10 +11,9 @@ spec:
     parameters:
       - name: repo-url
       - name: image-name
-      # push 先の Harbor プロジェクト。既定は tools（public）。
-      # 公開したくないイメージは private なプロジェクトを明示する。
+      # push 先の Harbor プロジェクト。既定値を持たせない —— tools は public なので、
+      # 指定漏れが「意図せず公開」になるより、起動時に落ちるほうが安全。
       - name: project
-        value: tools
       - name: commit-sha
         value: main
   podMetadata:

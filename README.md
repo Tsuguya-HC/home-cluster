@@ -53,4 +53,5 @@ manual/        # Manual bootstrap steps
 - [リソース設定](docs/resource-limits.md) — requests/limits 一覧と実測値
 - [SecureBoot](docs/secureboot.md) — Talos SecureBoot + TPM ディスク暗号化
 - [災害復旧](docs/disaster-recovery.md) — PostgreSQL, etcd, Kanidm の復旧手順
+- [IPv6](docs/ipv6.md) — 委任プレフィックス構成・変更時の手順・監視
 - [既知の問題](docs/known-issues.md) — 初回構築時の注意点など

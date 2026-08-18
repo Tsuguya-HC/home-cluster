@@ -1,0 +1,25 @@
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: ipv6-egress
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  interval: 60s
+  scrapeTimeout: 10s
+  module: https_v6
+  prober:
+    url: blackbox-exporter:9115
+    scheme: http
+    path: /probe
+  targets:
+    staticConfig:
+      # IP リテラルで指定する。ホスト名にすると DNS 障害を IPv6 障害と誤検知するうえ、
+      # hostNetwork + ClusterFirstWithHostNet でクラスタ DNS に依存してしまう。
+      # 事業者を 2 つに分けて、片方の障害では発報しないようにする。
+      static:
+        - "https://[2606:4700:4700::1111]/"
+        - "https://[2001:4860:4860::8888]/"
+      labels:
+        check: ipv6-egress

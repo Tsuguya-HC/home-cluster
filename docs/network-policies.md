@@ -77,7 +77,7 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 | Horenso (horenso) | task-dispatch-eventsource (argo) | 12002 | Task dispatch webhook |
 | Workflow pods (claude-code) | task-dispatch-eventsource (argo) | 12002 | Adjudication webhook |
 | Workflow pods (claude-code) | ArgoCD server (argocd) | 8080 | ArgoCD API access |
-| memory (memory) | qdrant (qdrant) | 6333/6334 | Vector database |
+| memory (memory) | qdrant (qdrant) | 6333 | Vector database |
 | memory (memory) | ollama (ollama) | 11434 | LLM inference |
 
 ## Excluded Pods (hostNetwork: true)
@@ -106,7 +106,7 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 | **redis-secret-init** (Job) | (deny world) | kube-apiserver |
 | **cloudflared** | (deny world) | *.v2.argotunnel.com + cftunnel.com + h2.cftunnel.com + quic.cftunnel.com:443/7844 (7844 TCP+UDP), server:8080, eventsource (argo):12000, kanidm (kanidm):8443, nextcloud (nextcloud):80, harbor-nginx (harbor):8443 |
 
-## argo (19 policies)
+## argo (20 policies)
 
 | Component | Ingress | Egress |
 |---|---|---|

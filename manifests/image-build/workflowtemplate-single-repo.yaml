@@ -14,6 +14,11 @@ spec:
       # push 先の Harbor プロジェクト。既定値を持たせない —— tools は public なので、
       # 指定漏れが「意図せず公開」になるより、起動時に落ちるほうが安全。
       - name: project
+      # 署名の保管先。private プロジェクトのイメージは、署名だけ public に置く必要がある——
+      # Kyverno は --imagePullSecrets を署名取得に使わない (kyverno/kyverno#15120)。
+      # 空なら従来どおりイメージと同じリポジトリに署名する。
+      - name: signature-repository
+        value: ""
       - name: commit-sha
         value: main
   podMetadata:
@@ -266,13 +271,18 @@ spec:
         command: [sh, -c]
         args:
           - |
+            set -eu
             IMAGE="registry.infra.tgy.io/{{workflow.parameters.project}}/{{workflow.parameters.image-name}}@{{inputs.parameters.digest}}"
+            # 空のまま渡すと cosign が空リポジトリを参照しようとするので落とす。
+            [ -n "${COSIGN_REPOSITORY:-}" ] || unset COSIGN_REPOSITORY
             cosign sign --registry-referrers-mode=legacy --new-bundle-format=false --use-signing-config=false --key /cosign/cosign.key --yes "$IMAGE"
         env:
           - name: HOME
             value: /tmp
           - name: COSIGN_PASSWORD
             value: ""
+          - name: COSIGN_REPOSITORY
+            value: "{{workflow.parameters.signature-repository}}"
           - name: DOCKER_CONFIG
             value: /docker-config
           - name: HARBOR_USER

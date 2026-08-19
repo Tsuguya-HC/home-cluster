@@ -112,6 +112,11 @@ spec:
               secretKeyRef:
                 name: harbor-tofu-credentials
                 key: robot_renovate_secret
+          - name: TF_VAR_robot_trading_pull_secret
+            valueFrom:
+              secretKeyRef:
+                name: harbor-tofu-credentials
+                key: robot_trading_pull_secret
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
@@ -275,3 +280,8 @@ spec:
               secretKeyRef:
                 name: harbor-tofu-credentials
                 key: robot_renovate_secret
+          - name: TF_VAR_robot_trading_pull_secret
+            valueFrom:
+              secretKeyRef:
+                name: harbor-tofu-credentials
+                key: robot_trading_pull_secret

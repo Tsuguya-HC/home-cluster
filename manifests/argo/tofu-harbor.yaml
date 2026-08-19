@@ -76,7 +76,7 @@ spec:
             capabilities:
               drop: [ALL]
       container:
-        image: ghcr.io/opentofu/opentofu:1.12.5
+        image: ghcr.io/opentofu/opentofu:1.12.6
         resources:
           requests:
             cpu: 50m
@@ -211,7 +211,7 @@ spec:
             capabilities:
               drop: [ALL]
       container:
-        image: ghcr.io/opentofu/opentofu:1.12.5
+        image: ghcr.io/opentofu/opentofu:1.12.6
         resources:
           requests:
             cpu: 50m

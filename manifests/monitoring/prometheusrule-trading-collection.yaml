@@ -1,0 +1,72 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: trading-collection
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: trading-collection
+      rules:
+        # 収集対象は後から取得できない（その時点のアナリスト予想、その日の上場一覧）。
+        # 止まっている間の分は永久に失われるので、静かな失敗が一番痛い。
+        #
+        # 「Job が失敗した」ではなく「成功した実行が無い」で見るのは、
+        # そもそも起動しなかった場合（スケジューラ異常・ノード逼迫・suspend）も拾うため。
+        # 閾値は CronJob ごとに変える —— webull-snapshot は平日のみなので、
+        # 金曜の実行から月曜の実行まで正常に 72 時間空く。
+        - alert: TradingCollectionStale
+          expr: |
+            time() - max by (cronjob) (
+              kube_cronjob_status_last_successful_time{namespace="trading", cronjob="sec-universe"}
+            ) > 30 * 3600
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "収集が 30 時間成功していない ({{ $labels.cronjob }})"
+            description: "trading/{{ $labels.cronjob }} の最後の成功から {{ $value | humanizeDuration }} 経過。日次実行なので 1 回以上落ちている。収集対象は遡れないため、その間のデータは失われる。"
+
+        - alert: TradingCollectionStale
+          expr: |
+            time() - max by (cronjob) (
+              kube_cronjob_status_last_successful_time{namespace="trading", cronjob="webull-snapshot"}
+            ) > 80 * 3600
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "収集が 80 時間成功していない ({{ $labels.cronjob }})"
+            description: "trading/{{ $labels.cronjob }} の最後の成功から {{ $value | humanizeDuration }} 経過。平日のみの実行で週末は 72 時間空くため、これを超えるのは異常。"
+
+        - alert: TradingCollectionNeverSucceeded
+          expr: |
+            max by (cronjob) (kube_cronjob_status_last_successful_time{namespace="trading"}) == 0
+          for: 2h
+          labels:
+            severity: warning
+          annotations:
+            summary: "収集が一度も成功していない ({{ $labels.cronjob }})"
+            description: "trading/{{ $labels.cronjob }} に成功実行の記録が無い。追加直後か、初回から失敗し続けている。"
+
+        - alert: TradingCollectionJobFailing
+          expr: |
+            sum by (namespace) (kube_job_status_failed{namespace="trading"}) > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "収集ジョブが失敗している (trading)"
+            description: "失敗した Job が {{ $value }} 件。失敗の内訳は Loki の構造化ログ（collector フィールド）に出ている。"
+
+        # suspend したまま忘れると、上の 2 つが発火しないまま静かに欠け続ける。
+        - alert: TradingCollectionSuspended
+          expr: |
+            max by (cronjob) (kube_cronjob_spec_suspend{namespace="trading"}) == 1
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "収集が suspend されている ({{ $labels.cronjob }})"
+            description: "trading/{{ $labels.cronjob }} が suspend 状態。意図的でなければ解除する。"

@@ -1,0 +1,23 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: trading
+  namespace: argocd
+spec:
+  project: apps
+  source:
+    # マニフェストは private リポに置く。CNP の egress ルールが取引先と
+    # データソースを列挙するため、ここには出さない。
+    repoURL: https://github.com/Tsuguya/home-trading.git
+    targetRevision: main
+    path: manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: trading
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

@@ -29,12 +29,6 @@ spec:
                       -----END PUBLIC KEY-----
                     signatureAlgorithm: sha256
                   signatureAlgorithm: sha256
-          # trading プロジェクトは private なので、署名 (.sig) を引くのに認証が要る。
-          # 認証情報は kyverno namespace の Secret から取る（pull 専用ロボット）。
-          imageRegistryCredentials:
-            allowInsecureRegistry: false
-            secrets:
-              - harbor-trading-pull
           mutateDigest: true
           required: true
           verifyDigest: true

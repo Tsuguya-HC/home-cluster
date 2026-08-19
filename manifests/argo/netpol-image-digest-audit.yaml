@@ -1,0 +1,21 @@
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: image-digest-audit
+  namespace: argo
+spec:
+  endpointSelector:
+    matchLabels:
+      image-digest-audit: "true"
+  egress:
+    # registry.infra.tgy.io は CoreDNS が harbor の ClusterIP に書き換えるので、
+    # 外向きの 443 ではなく nginx の 8443 に出る。
+    - toEndpoints:
+        - matchLabels:
+            app: harbor
+            component: nginx
+            io.kubernetes.pod.namespace: harbor
+      toPorts:
+        - ports:
+            - port: "8443"
+              protocol: TCP

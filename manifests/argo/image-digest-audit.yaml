@@ -1,0 +1,248 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: image-digest-auditor
+  namespace: argo
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: image-digest-auditor
+  namespace: argo
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: argo-workflows-edit
+subjects:
+  - kind: ServiceAccount
+    name: image-digest-auditor
+    namespace: argo
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: image-digest-auditor
+rules:
+  # 稼働中の Pod が要求しているイメージ参照を読むだけ。
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list]
+  # 検証鍵と署名リポジトリの対応表をポリシーから引くため。鍵をこの監査に
+  # 複製すると、片方だけ回した瞬間に「Kyverno は落とすがここは通す」嘘の
+  # 監査になる。出所はポリシーひとつに保つ。
+  - apiGroups: [kyverno.io]
+    resources: [clusterpolicies]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: image-digest-auditor
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: image-digest-auditor
+subjects:
+  - kind: ServiceAccount
+    name: image-digest-auditor
+    namespace: argo
+---
+# Kyverno の mutateDigest は admission 時に :latest を digest へ解決して Pod spec
+# に焼き込む。その artifact を Harbor の retention が消すと、Pod は既存レイヤの
+# まま動き続けるが、死んだ瞬間に存在しない digest を要求して復帰不能になる
+# (しかも verifyDigest が digest なしの Deployment 更新を拒むので rollout も
+# 効かない)。2026-08-19 の memory がこれで 4 時間停止した。
+#
+# retention を「直近 push 15 件 OR 30 日」に広げ、Renovate に digest をピンさせる
+# ようにしたので通常は起きない。ただしどちらも Renovate が回り続けている前提に
+# 乗っている。Renovate が 30 日止まれば爆弾は再武装するし、それは PR が出ない
+# という「何も起きない」形で進むので気付けない。この監査はその前提が崩れたことを
+# 毎日確かめるためにある。
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: image-digest-audit
+  namespace: argo
+spec:
+  activeDeadlineSeconds: 600
+  serviceAccountName: image-digest-auditor
+  entrypoint: main
+  templates:
+    - name: main
+      metadata:
+        labels:
+          image-digest-audit: "true"
+      container:
+        image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:2b6e5cbfa1a7158a7086f5d7673c33eceb5c9767a4b2968997c35fc78c6c10c5
+        resources:
+          requests:
+            cpu: 10m
+            memory: 64Mi
+          limits:
+            memory: 256Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+        env:
+          - name: HOME
+            value: /tmp
+          - name: DOCKER_CONFIG
+            value: /tmp/docker
+          - name: HARBOR_USER
+            valueFrom:
+              secretKeyRef:
+                name: harbor-pull-robot
+                key: username
+          - name: HARBOR_PASS
+            valueFrom:
+              secretKeyRef:
+                name: harbor-pull-robot
+                key: password
+        command: [sh, -c]
+        args:
+          - |
+            set -eu
+
+            POLICY=$(kubectl get clusterpolicy verify-image-signatures -o json)
+
+            printf '%s' "$POLICY" | jq -r '
+              [.spec.rules[].verifyImages[].attestors[].entries[].keys.publicKeys] | unique
+              | if length == 1 then .[0]
+                else error("policy carries \(length) distinct public keys; this audit assumes one")
+                end
+            ' > /tmp/cosign.pub
+
+            # trading はイメージが private なので署名だけ tools/signatures に出して
+            # いる (Kyverno が imagePullSecrets を署名取得に使わない kyverno#15120 の
+            # 回避)。どのイメージの署名がどこにあるかはルールごとに違うので、対応表も
+            # ポリシーから引く。
+            printf '%s' "$POLICY" | jq -r '
+              .spec.rules[].verifyImages[]
+              | [(.imageReferences | join(" ")),
+                 ((.skipImageReferences // []) | join(" ")),
+                 (.repository // "")] | @tsv
+            ' > /tmp/rules.tsv
+
+            mkdir -p /tmp/docker
+            printf '{"auths":{"registry.infra.tgy.io":{"auth":"%s"}}}' \
+              "$(printf '%s:%s' "$HARBOR_USER" "$HARBOR_PASS" | base64 -w0)" > /tmp/docker/config.json
+
+            # status ではなく spec を見る。Kyverno が焼き込んだ digest — kubelet が
+            # 次に pull しようとする参照 — はそこにあるため。
+            kubectl get pods -A --field-selector=status.phase=Running -o json \
+              | jq -r '.items[].spec | (.containers + (.initContainers // []))[] | .image' \
+              | { grep '^registry\.infra\.tgy\.io/' || true; } | sort -u > /tmp/images.txt
+
+            echo "auditing $(wc -l < /tmp/images.txt) distinct first-party image reference(s)"
+            echo
+
+            FAILED=0
+            while IFS= read -r ref; do
+              [ -n "$ref" ] || continue
+
+              repo=${ref#registry.infra.tgy.io/}
+              repo=${repo%%@*}
+              repo=${repo%%:*}
+              digest=${ref##*@}
+
+              if [ "$digest" = "$ref" ]; then
+                echo "UNPINNED  $ref"
+                echo "          no digest in the manifest — Kyverno resolves the tag at admission and"
+                echo "          the Pod outlives whatever it resolved to. Pin it, or let Renovate."
+                FAILED=1
+                continue
+              fi
+
+              code=$(curl -sS -o /dev/null -w '%{http_code}' -I \
+                -u "$HARBOR_USER:$HARBOR_PASS" \
+                -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
+                "https://registry.infra.tgy.io/v2/${repo}/manifests/${digest}") || code="000"
+
+              if [ "$code" != "200" ]; then
+                echo "MISSING   $ref"
+                echo "          registry answers ${code}. This Pod is running on cached layers and"
+                echo "          cannot restart. Roll it forward before something kills it."
+                FAILED=1
+                continue
+              fi
+
+              # Kyverno と同じ順序で、最初にマッチしたルールが署名の置き場を決める。
+              # 行ごとに cut で切り出す。read の IFS をタブにすると、その IFS が
+              # ループ本体の $refs の単語分割にも効いてしまい、空白区切りの
+              # パターン列が 1 語に潰れる。
+              sigrepo=""
+              matched=0
+              n=1
+              total=$(wc -l < /tmp/rules.tsv)
+              while [ "$n" -le "$total" ]; do
+                line=$(sed -n "${n}p" /tmp/rules.tsv)
+                n=$((n + 1))
+
+                skipped=0
+                for p in $(printf '%s\n' "$line" | cut -f2); do
+                  case "$ref" in $p) skipped=1 ;; esac
+                done
+                [ "$skipped" = 0 ] || continue
+
+                for p in $(printf '%s\n' "$line" | cut -f1); do
+                  case "$ref" in
+                    $p)
+                      sigrepo=$(printf '%s\n' "$line" | cut -f3)
+                      matched=1
+                      break
+                      ;;
+                  esac
+                done
+                [ "$matched" = 0 ] || break
+              done
+
+              if [ "$matched" = 0 ]; then
+                echo "UNCOVERED $ref"
+                echo "          no verifyImages rule matches it — Kyverno is not checking this image"
+                echo "          at all, so nothing would notice if it were replaced."
+                FAILED=1
+                continue
+              fi
+
+              if [ -n "$sigrepo" ]; then
+                export COSIGN_REPOSITORY="$sigrepo"
+              else
+                unset COSIGN_REPOSITORY
+              fi
+
+              if cosign verify --key /tmp/cosign.pub --insecure-ignore-tlog=true "$ref" >/dev/null 2>/tmp/cosign.err; then
+                echo "ok        $ref"
+              else
+                echo "UNSIGNED  $ref"
+                echo "          signature not verifiable${sigrepo:+ in $sigrepo}. The image survives but its"
+                echo "          signature does not, so admission fails the next time a Pod is created:"
+                sed 's/^/            /' /tmp/cosign.err | head -5
+                FAILED=1
+              fi
+            done < /tmp/images.txt
+
+            echo
+            if [ "$FAILED" = 0 ]; then
+              echo "every running Pod can still pull and verify what it references"
+            else
+              echo "findings above — the exit hook posts this workflow to Discord"
+            fi
+            exit "$FAILED"
+---
+apiVersion: argoproj.io/v1alpha1
+kind: CronWorkflow
+metadata:
+  name: image-digest-audit
+  namespace: argo
+spec:
+  # Harbor の retention は Daily (00:00 UTC)。その後に走らせて、消えた直後の
+  # 状態を見る。
+  schedules:
+    - "0 10 * * *"
+  timezone: Asia/Tokyo
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 600
+  workflowSpec:
+    workflowTemplateRef:
+      name: image-digest-audit

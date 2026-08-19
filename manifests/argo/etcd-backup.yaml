@@ -38,7 +38,7 @@ spec:
         labels:
           backup-workflow: "true"
       container:
-        image: registry.infra.tgy.io/tools/talos-tools:latest
+        image: registry.infra.tgy.io/tools/talos-tools:latest@sha256:db5a7dc5af4b49a486c84c1360c9ebb8b54c0cfebd40645957fa0efb81015f45
         resources:
           requests:
             cpu: 10m

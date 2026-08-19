@@ -54,3 +54,10 @@ features:
 
 webhooksCleanup:
   enabled: true
+
+# 署名検証はレジストリから .sig を引くため、private プロジェクトには認証が要る。
+# ポリシー側の imageRegistryCredentials ではレジストリクライアントに届かない
+# （起動ログの `setup registry client... secrets=` が空のまま）。
+# --imagePullSecrets に渡るのはこの値なので、ここで指定する。
+existingImagePullSecrets:
+  - harbor-trading-pull

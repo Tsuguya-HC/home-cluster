@@ -59,6 +59,7 @@ spec:
                       MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEEwj7kCwLmafF4470wPuk97Lhbho0
                       vEW3MUXEhm/9OLNUYmftu7R9VmlcnRl3CufXhVWRqpB/tbJXJWlYO5kV+g==
                       -----END PUBLIC KEY-----
+                    signatureAlgorithm: sha256
                   signatureAlgorithm: sha256
           mutateDigest: true
           required: true

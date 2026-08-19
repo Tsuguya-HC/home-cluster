@@ -83,8 +83,8 @@
   ],
   "packageRules": [
     {
-      "description": "Automerge patch updates",
-      "matchUpdateTypes": ["patch", "digest"],
+      "description": "Automerge patch updates. pinDigest is here because pinning changes nothing that runs — it writes down the digest the registry already resolves the tag to — and leaving those PRs for a human is what leaves a new service unpinned in the meantime. External images still soak: the digest-cooldown status holds their PR for three days regardless of automerge.",
+      "matchUpdateTypes": ["patch", "digest", "pinDigest"],
       "automerge": true
     },
     {
@@ -140,9 +140,9 @@
       "pinDigests": true
     },
     {
-      "description": "Do not pin first-party signed images (own registry)",
+      "description": "Pin first-party digests too. Not for supply chain — these are our own builds, which is why digest-cooldown skips them — but for availability: Harbor retention deletes artifacts, and Kyverno's mutateDigest bakes the resolved digest into every Pod at admission. An unpinned :latest is a Pod that pulls fine today and cannot restart once its artifact ages out, with no way to roll it forward either, since verifyDigest rejects a digest-less Deployment update. memory died exactly that way on 2026-08-19. Pinning also makes it knowable from git which tools image a Workflow actually ran.",
       "matchPackageNames": ["registry.infra.tgy.io/**"],
-      "pinDigests": false
+      "pinDigests": true
     },
     {
       "description": "Digest age gate is unenforceable (renovate#38656 for docker, no commit timestamp for action digests) and leaves renovate/stability-days pending forever; digest-cooldown workflow gates instead",

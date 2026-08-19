@@ -47,6 +47,10 @@ spec:
             app: harbor
             component: registry
             io.kubernetes.pod.namespace: harbor
+        # 収集ジョブが生データを書き込む。namespace 全体ではなく collector だけを許す。
+        - matchLabels:
+            io.kubernetes.pod.namespace: trading
+            trading: collector
       toPorts:
         - ports:
             - port: "8333"

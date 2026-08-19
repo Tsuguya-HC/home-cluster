@@ -23,9 +23,19 @@ kind: ClusterRole
 metadata:
   name: image-digest-auditor
 rules:
-  # 稼働中の Pod が要求しているイメージ参照を読むだけ。
+  # イメージ参照を読むだけ。Pod だけでは足りない — CronJob は普段 Pod を持たず、
+  # 起動が日に一度なら digest が腐っても次の発火まで誰も気付かない。
   - apiGroups: [""]
     resources: [pods]
+    verbs: [get, list]
+  - apiGroups: [apps]
+    resources: [deployments, statefulsets, daemonsets]
+    verbs: [get, list]
+  - apiGroups: [batch]
+    resources: [cronjobs]
+    verbs: [get, list]
+  - apiGroups: [argoproj.io]
+    resources: [workflowtemplates, clusterworkflowtemplates]
     verbs: [get, list]
   # 検証鍵と署名リポジトリの対応表をポリシーから引くため。鍵をこの監査に
   # 複製すると、片方だけ回した瞬間に「Kyverno は落とすがここは通す」嘘の
@@ -128,11 +138,25 @@ spec:
             printf '{"auths":{"registry.infra.tgy.io":{"auth":"%s"}}}' \
               "$(printf '%s:%s' "$HARBOR_USER" "$HARBOR_PASS" | base64 -w0)" > /tmp/docker/config.json
 
-            # status ではなく spec を見る。Kyverno が焼き込んだ digest — kubelet が
-            # 次に pull しようとする参照 — はそこにあるため。
-            kubectl get pods -A --field-selector=status.phase=Running -o json \
-              | jq -r '.items[].spec | (.containers + (.initContainers // []))[] | .image' \
-              | { grep '^registry\.infra\.tgy\.io/' || true; } | sort -u > /tmp/images.txt
+            # Pod は status ではなく spec を見る。Kyverno が焼き込んだ digest —
+            # kubelet が次に pull しようとする参照 — はそこにあるため。
+            #
+            # そして Pod だけでは足りない。CronJob は発火の合間 Pod を持たないし、
+            # WorkflowTemplate はそもそも Pod を「これから」作る側で、どちらも
+            # 参照している digest が消えても、次に動こうとするまで沈黙する。
+            {
+              kubectl get pods -A --field-selector=status.phase=Running -o json \
+                | jq -r '.items[].spec | (.containers + (.initContainers // []))[] | .image'
+
+              kubectl get deployments,statefulsets,daemonsets -A -o json \
+                | jq -r '.items[].spec.template.spec | (.containers + (.initContainers // []))[] | .image'
+
+              kubectl get cronjobs -A -o json \
+                | jq -r '.items[].spec.jobTemplate.spec.template.spec | (.containers + (.initContainers // []))[] | .image'
+
+              kubectl get workflowtemplates,clusterworkflowtemplates -A -o json \
+                | jq -r '.items[].spec.templates[]? | [.container.image?, .script.image?] | .[] | select(. != null)'
+            } | { grep '^registry\.infra\.tgy\.io/' || true; } | sort -u > /tmp/images.txt
 
             echo "auditing $(wc -l < /tmp/images.txt) distinct first-party image reference(s)"
             echo
@@ -224,7 +248,7 @@ spec:
 
             echo
             if [ "$FAILED" = 0 ]; then
-              echo "every running Pod can still pull and verify what it references"
+              echo "everything that could start right now can still pull and verify what it references"
             else
               echo "findings above — the exit hook posts this workflow to Discord"
             fi

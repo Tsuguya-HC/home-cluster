@@ -66,7 +66,7 @@ spec:
         runAsNonRoot: true
       initContainers:
         - name: github-auth
-          image: registry.infra.tgy.io/tools/argo-tools:latest
+          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:2b6e5cbfa1a7158a7086f5d7673c33eceb5c9767a4b2968997c35fc78c6c10c5
           command: [github-auth.sh]
           env:
             - name: GITHUB_APP_ID
@@ -92,7 +92,7 @@ spec:
             limits:
               memory: 64Mi
       script:
-        image: registry.infra.tgy.io/tools/argo-tools:latest
+        image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:2b6e5cbfa1a7158a7086f5d7673c33eceb5c9767a4b2968997c35fc78c6c10c5
         command: [sh]
         source: |
           export GITHUB_TOKEN=$(cat /github-token/token)
@@ -133,7 +133,7 @@ spec:
         fsGroup: 65532
       initContainers:
         - name: github-auth
-          image: registry.infra.tgy.io/tools/argo-tools:latest
+          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:2b6e5cbfa1a7158a7086f5d7673c33eceb5c9767a4b2968997c35fc78c6c10c5
           command: [github-auth.sh]
           env:
             - name: GITHUB_APP_ID
@@ -159,7 +159,7 @@ spec:
             limits:
               memory: 64Mi
         - name: setup
-          image: registry.infra.tgy.io/tools/argo-tools:latest
+          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:2b6e5cbfa1a7158a7086f5d7673c33eceb5c9767a4b2968997c35fc78c6c10c5
           command: [sh, -c]
           args:
             - |
@@ -198,7 +198,7 @@ spec:
             limits:
               memory: 256Mi
       container:
-        image: registry.infra.tgy.io/tools/claude-code:latest
+        image: registry.infra.tgy.io/tools/claude-code:latest@sha256:d18dbca36308e573509c2617ab6c57e050facfb0723ed29386101117408c0b1f
         command: [sh, -c]
         args:
           - |
@@ -247,7 +247,7 @@ spec:
         runAsNonRoot: true
       initContainers:
         - name: github-auth
-          image: registry.infra.tgy.io/tools/argo-tools:latest
+          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:2b6e5cbfa1a7158a7086f5d7673c33eceb5c9767a4b2968997c35fc78c6c10c5
           command: [github-auth.sh]
           env:
             - name: GITHUB_APP_ID
@@ -273,7 +273,7 @@ spec:
             limits:
               memory: 64Mi
       script:
-        image: registry.infra.tgy.io/tools/argo-tools:latest
+        image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:2b6e5cbfa1a7158a7086f5d7673c33eceb5c9767a4b2968997c35fc78c6c10c5
         command: [sh]
         source: |
           set -eu

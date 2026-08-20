@@ -45,6 +45,8 @@ spec:
             sensor-name: talos-extension-bump
         - matchLabels:
             sensor-name: renovate-webhook
+        - matchLabels:
+            sensor-name: aqua-checksum
       toPorts:
         - ports:
             - port: "4222"

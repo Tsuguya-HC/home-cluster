@@ -12,9 +12,7 @@ metadata:
 # trigger could not read the repository and branch out of whichever event
 # actually arrived.
 #
-# Only four of the seven repositories with an aqua.yaml are here. home-rss and
-# home-actions have no webhook at all, and home-trading's sends push only —
-# those are GitHub-side settings, not manifests.
+# All seven repositories that have an aqua.yaml.
 spec:
   template:
     serviceAccountName: workflow-executor
@@ -73,6 +71,21 @@ spec:
     - name: home-harbor
       eventSourceName: github-webhook
       eventName: harbor
+      filters:
+        script: *aquaFilter
+    - name: home-rss
+      eventSourceName: github-webhook
+      eventName: home-rss
+      filters:
+        script: *aquaFilter
+    - name: home-actions
+      eventSourceName: github-webhook
+      eventName: home-actions
+      filters:
+        script: *aquaFilter
+    - name: home-trading
+      eventSourceName: github-webhook
+      eventName: home-trading
       filters:
         script: *aquaFilter
   triggers:
@@ -178,6 +191,96 @@ spec:
               dest: spec.arguments.parameters.0.value
             - src:
                 dependencyName: home-harbor
+                dataKey: body.pull_request.head.ref
+              dest: spec.arguments.parameters.1.value
+          source:
+            resource:
+              apiVersion: argoproj.io/v1alpha1
+              kind: Workflow
+              metadata:
+                generateName: aqua-checksum-
+                namespace: argo
+              spec:
+                workflowTemplateRef:
+                  name: aqua-checksum
+                arguments:
+                  parameters:
+                    - name: repository
+                      value: overwritten-by-parameters
+                    - name: branch
+                      value: overwritten-by-parameters
+    - template:
+        name: aqua-checksum-home-rss
+        conditions: "home-rss"
+        argoWorkflow:
+          operation: submit
+          parameters:
+            - src:
+                dependencyName: home-rss
+                dataKey: body.repository.full_name
+              dest: spec.arguments.parameters.0.value
+            - src:
+                dependencyName: home-rss
+                dataKey: body.pull_request.head.ref
+              dest: spec.arguments.parameters.1.value
+          source:
+            resource:
+              apiVersion: argoproj.io/v1alpha1
+              kind: Workflow
+              metadata:
+                generateName: aqua-checksum-
+                namespace: argo
+              spec:
+                workflowTemplateRef:
+                  name: aqua-checksum
+                arguments:
+                  parameters:
+                    - name: repository
+                      value: overwritten-by-parameters
+                    - name: branch
+                      value: overwritten-by-parameters
+    - template:
+        name: aqua-checksum-home-actions
+        conditions: "home-actions"
+        argoWorkflow:
+          operation: submit
+          parameters:
+            - src:
+                dependencyName: home-actions
+                dataKey: body.repository.full_name
+              dest: spec.arguments.parameters.0.value
+            - src:
+                dependencyName: home-actions
+                dataKey: body.pull_request.head.ref
+              dest: spec.arguments.parameters.1.value
+          source:
+            resource:
+              apiVersion: argoproj.io/v1alpha1
+              kind: Workflow
+              metadata:
+                generateName: aqua-checksum-
+                namespace: argo
+              spec:
+                workflowTemplateRef:
+                  name: aqua-checksum
+                arguments:
+                  parameters:
+                    - name: repository
+                      value: overwritten-by-parameters
+                    - name: branch
+                      value: overwritten-by-parameters
+    - template:
+        name: aqua-checksum-home-trading
+        conditions: "home-trading"
+        argoWorkflow:
+          operation: submit
+          parameters:
+            - src:
+                dependencyName: home-trading
+                dataKey: body.repository.full_name
+              dest: spec.arguments.parameters.0.value
+            - src:
+                dependencyName: home-trading
                 dataKey: body.pull_request.head.ref
               dest: spec.arguments.parameters.1.value
           source:

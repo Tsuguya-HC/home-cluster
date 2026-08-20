@@ -123,8 +123,39 @@ spec:
         method: POST
       events:
         - push
+        # pull_request is here for aqua-checksum, which needs the head branch of
+        # a Renovate PR; the existing push consumer ignores it.
+        - pull_request
       webhookSecret:
         name: home-trading-github-webhook
+        key: credential
+      active: false
+      contentType: json
+    home-rss:
+      owner: Tsuguya
+      repository: home-rss
+      webhook:
+        endpoint: /home-rss
+        port: "12000"
+        method: POST
+      events:
+        - pull_request
+      webhookSecret:
+        name: home-rss-github-webhook
+        key: credential
+      active: false
+      contentType: json
+    home-actions:
+      owner: Tsuguya
+      repository: home-actions
+      webhook:
+        endpoint: /home-actions
+        port: "12000"
+        method: POST
+      events:
+        - pull_request
+      webhookSecret:
+        name: home-actions-github-webhook
         key: credential
       active: false
       contentType: json

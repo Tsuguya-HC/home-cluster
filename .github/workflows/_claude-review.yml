@@ -32,10 +32,10 @@ jobs:
     # from holding a runner for the default six hours on top of that.
     timeout-minutes: 40
     permissions:
-      contents: write
-      pull-requests: write
-      issues: write
-      id-token: write
+      contents: write # gh pr merge --squash でマージするため
+      pull-requests: write # gh pr review --approve で承認するため
+      issues: write # gh pr comment（PR コメントは issues API 経由）
+      id-token: write # claude-code-action の OIDC 認証
     steps:
       # Renovate rebases constantly, so the head SHA is not a stable identity
       # for "this PR was already judged" — PR #487 collected 28 approvals across

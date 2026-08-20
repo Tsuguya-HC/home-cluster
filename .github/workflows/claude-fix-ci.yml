@@ -39,6 +39,7 @@ permissions: {}
 
 jobs:
   fix:
+    name: fix
     # `pull_requests[0]` is populated for same-repo pull requests only, so it
     # doubles as a fork filter; the explicit head_repository comparison is kept
     # because that behaviour is a documented side effect rather than a promise.

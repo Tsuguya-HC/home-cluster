@@ -1,0 +1,16 @@
+# postInitSQL は bootstrap 時にしか走らないので、稼働中のクラスタに
+# データベースを足すには Database CRD を使う。
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: trading
+  namespace: database
+spec:
+  cluster:
+    name: shared-pg
+  name: trading
+  owner: trading
+  ensure: present
+  # 収集した生データを投入する。誤って Database オブジェクトを消したときに
+  # 中身まで落ちないよう retain にする。
+  databaseReclaimPolicy: retain

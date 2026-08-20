@@ -20,6 +20,7 @@ spec:
           - alert-investigate
           - task-dispatch
           - renovate-webhook
+          - aqua-checksum
   ingressDeny:
     - fromEntities:
         - world

@@ -107,7 +107,7 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 | **redis-secret-init** (Job) | (deny world) | kube-apiserver |
 | **cloudflared** | (deny world) | *.v2.argotunnel.com + cftunnel.com + h2.cftunnel.com + quic.cftunnel.com:443/7844 (7844 TCP+UDP), server:8080, eventsource (argo):12000, kanidm (kanidm):8443, nextcloud (nextcloud):80, harbor-nginx (harbor):8443 |
 
-## argo (21 policies)
+## argo (22 policies)
 
 | Component | Ingress | Egress |
 |---|---|---|
@@ -124,12 +124,13 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 | **talos-extension-bump-sensor** | (none) | kube-apiserver, eventbus:4222 |
 | **events-controller** | host → 8081 | kube-apiserver, eventbus:8222 |
 | **eventbus** | eventsource (github-webhook), alertmanager-eventsource (alertmanager-webhook), task-dispatch-eventsource (task-dispatch), task-status-sync-eventsource (task-status-sync), argocd-deployed-eventsource (argocd-deployed), sensors (tofu-cloudflare, tofu-unifi, tofu-harbor, upgrade-k8s, pxe-sync, talos-build, images-build, single-repo-build, alert-investigate, task-dispatch, task-status-sync, talos-extension-bump, renovate-webhook) → 4222; self → 6222/7777; events-controller → 8222 | self:6222/7777 |
-| **workflow-pods** (backup-workflow, pxe-sync, talos-build, kanidm-repl-exchange, kanidm-backup除外) | (deny world) | kube-apiserver, HTTPS 443, kube-apiserver/remote-node/host:50000 (Talos apid — node IP は node identity を持つので toCIDR では一致しない), seaweedfs-filer (seaweedfs):8333 |
+| **workflow-pods** (backup-workflow, pxe-sync, talos-build, kanidm-repl-exchange, kanidm-backup, aqua-checksum除外) | (deny world) | kube-apiserver, HTTPS 443, kube-apiserver/remote-node/host:50000 (Talos apid — node IP は node identity を持つので toCIDR では一致しない), seaweedfs-filer (seaweedfs):8333 |
 | **etcd-backup** (backup-workflow=true) | (deny world) | kube-apiserver:6443/50000 (Talos apid), *.r2.cloudflarestorage.com:443, seaweedfs-filer (seaweedfs):8333 |
 | **pxe-sync** (pxe-sync=true) | (deny world) | kube-apiserver, github.com + api.github.com + *.githubusercontent.com + dl-cdn.alpinelinux.org :443, seaweedfs-filer (seaweedfs):8333, QNAP NAS (192.168.5.240):2049 (NFS) |
 | **kanidm-backup** (kanidm-backup=true) | (deny world) | kube-apiserver, *.r2.cloudflarestorage.com:443, seaweedfs-filer (seaweedfs):8333 |
 | **kanidm-repl-exchange** (kanidm-repl-exchange=true) | (deny world) | kube-apiserver, seaweedfs-filer (seaweedfs):8333 |
 | **image-digest-audit** (image-digest-audit=true) | (none) | harbor-nginx (harbor):8443 |
+| **aqua-checksum** (aqua-checksum=true) | (deny world) | github.com + api.github.com + *.githubusercontent.com :443 |
 | **renovate** (renovate=true) | (none) | harbor-nginx (harbor):8443 |
 | **tofu-harbor** (tofu-harbor=true) | (none) | harbor-nginx (harbor):8443 |
 

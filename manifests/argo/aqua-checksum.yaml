@@ -1,0 +1,156 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: aqua-checksum-executor
+  namespace: argo
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: aqua-checksum-executor
+  namespace: argo
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: argo-workflows-edit
+subjects:
+  - kind: ServiceAccount
+    name: aqua-checksum-executor
+    namespace: argo
+---
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: aqua-checksum
+  namespace: argo
+# Regenerates aqua-checksums.json on a Renovate branch that moved an aqua
+# package, and commits it back.
+#
+# aqua.yaml sets require_checksum: true in every repository that has one, so a
+# version bump without the matching checksum fails at install with
+# `checksum is required` — measured, not theoretical. Renovate cannot produce
+# the checksum itself: containerbase has no aqua tool definition, so the binary
+# does not exist in the image Renovate runs in.
+#
+# The alternative was a GitHub App private key in each repository's Actions
+# secrets. Doing it here instead keeps the key in one place, and makes adding a
+# repository a manifest change rather than something only a human can do.
+#
+# The commit is made through the Git Data API by github-signed-commit.sh, which
+# has two consequences that matter: it is signed by GitHub (Verified), and it
+# comes from the App — so unlike a GITHUB_TOKEN push it re-triggers the failed
+# workflow instead of leaving a stale red check.
+#
+# Renovate drops this commit whenever it rebases the branch, and this workflow
+# then re-adds it on the resulting synchronize. That is the intended behaviour:
+# the alternative is Renovate treating the branch as modified and refusing to
+# update it at all, which strands the PR. See ignoredAuthors in renovate.json.
+spec:
+  serviceAccountName: aqua-checksum-executor
+  entrypoint: main
+  activeDeadlineSeconds: 900
+  podMetadata:
+    labels:
+      aqua-checksum: "true"
+  arguments:
+    parameters:
+      - name: repository # Tsuguya/<name>
+      - name: branch # the pull request's head branch
+  templates:
+    - name: main
+      volumes:
+        - name: workspace
+          emptyDir: {}
+        - name: github-token
+          emptyDir: {}
+        - name: github-app-secret
+          secret:
+            secretName: github-app-private-key
+      initContainers:
+        - name: github-auth
+          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:2b553887ff8c4ecfae6af8c0b37ac29c5d2c0bf49e26f6536ef0c56d7238bc3b
+          command: [github-auth.sh]
+          env:
+            - name: GITHUB_APP_ID
+              value: "2998228"
+            - name: GITHUB_APP_INSTALLATION_ID
+              value: "113765957"
+          securityContext:
+            runAsUser: 65532
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: github-app-secret
+              mountPath: /github-app
+              readOnly: true
+            - name: github-token
+              mountPath: /github-token
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+      container:
+        image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:2b553887ff8c4ecfae6af8c0b37ac29c5d2c0bf49e26f6536ef0c56d7238bc3b
+        command: [sh, -c]
+        args:
+          - |
+            set -euo pipefail
+            GH_TOKEN=$(cat /github-token/token)
+            export GH_TOKEN
+            # aqua reads GITHUB_TOKEN for the release downloads below; without
+            # it the anonymous rate limit applies and update-checksum -a is
+            # exactly the operation that hits it.
+            GITHUB_TOKEN="$GH_TOKEN"
+            export GITHUB_TOKEN
+
+            git clone --depth 1 --branch "{{workflow.parameters.branch}}" \
+              "https://x-access-token:${GH_TOKEN}@github.com/{{workflow.parameters.repository}}.git" /workspace
+            cd /workspace
+
+            if [ ! -f aqua.yaml ]; then
+              echo "no aqua.yaml in {{workflow.parameters.repository}} — nothing to do"
+              exit 0
+            fi
+
+            # aqua downloads every package to hash it, so this needs the same
+            # network reach as the CI it is fixing. AQUA_GLOBAL_CONFIG is
+            # cleared so only the repository's own aqua.yaml is considered.
+            AQUA_GLOBAL_CONFIG="" aqua update-checksum -a
+
+            git add aqua-checksums.json
+            if git diff --cached --quiet; then
+              echo "aqua-checksums.json already matches aqua.yaml — nothing to commit"
+              exit 0
+            fi
+
+            # Signed via the Git Data API, and authored by the App — which is
+            # what makes the failed check run again.
+            github-signed-commit.sh \
+              -r "{{workflow.parameters.repository}}" \
+              -b "{{workflow.parameters.branch}}" \
+              -m "ci: update aqua-checksums.json"
+        env:
+          # aqua writes its package tree under HOME; the image's user cannot
+          # write to the default one.
+          - name: HOME
+            value: /workspace
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+          - name: github-token
+            mountPath: /github-token
+            readOnly: true
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: [ALL]
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            memory: 512Mi

@@ -1,0 +1,198 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Sensor
+metadata:
+  name: aqua-checksum
+  namespace: argo
+# Fires the aqua-checksum workflow on Renovate pull requests, so a bump that
+# moves an aqua package does not sit red waiting for someone to run
+# `aqua update-checksum -a` by hand.
+#
+# One trigger per repository rather than one trigger with four conditions:
+# a trigger's parameters are resolved against a named dependency, so a shared
+# trigger could not read the repository and branch out of whichever event
+# actually arrived.
+#
+# Only four of the seven repositories with an aqua.yaml are here. home-rss and
+# home-actions have no webhook at all, and home-trading's sends push only —
+# those are GitHub-side settings, not manifests.
+spec:
+  template:
+    serviceAccountName: workflow-executor
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000
+      seccompProfile:
+        type: RuntimeDefault
+    container:
+      resources:
+        requests:
+          cpu: 10m
+          memory: 32Mi
+        limits:
+          memory: 64Mi
+      securityContext:
+        readOnlyRootFilesystem: true
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: [ALL]
+  dependencies:
+    - name: home-cluster
+      eventSourceName: github-webhook
+      eventName: renovate-home-cluster
+      filters:
+        script: &aquaFilter |-
+          if event.body == nil then return false end
+          local pr = event.body.pull_request
+          if pr == nil then return false end
+          local action = event.body.action
+          if action ~= "opened" and action ~= "synchronize" and action ~= "reopened" then
+            return false
+          end
+          if pr.state ~= "open" or pr.draft == true then return false end
+          if pr.head == nil or pr.head.ref == nil then return false end
+          -- Renovate's branches only. Nothing else should have a file rewritten
+          -- under it by a workflow holding an App token.
+          if string.sub(pr.head.ref, 1, 9) ~= "renovate/" then return false end
+          -- and never a fork: the workflow clones the head branch, so a fork
+          -- would put someone else's aqua.yaml in front of the App key.
+          if pr.head.repo == nil or event.body.repository == nil then return false end
+          if pr.head.repo.full_name ~= event.body.repository.full_name then return false end
+          return true
+    - name: home-infra
+      eventSourceName: github-webhook
+      eventName: renovate-home-infra
+      filters:
+        script: *aquaFilter
+    - name: home-cloudflare
+      eventSourceName: github-webhook
+      eventName: renovate-home-cloudflare
+      filters:
+        script: *aquaFilter
+    - name: home-harbor
+      eventSourceName: github-webhook
+      eventName: harbor
+      filters:
+        script: *aquaFilter
+  triggers:
+    - template:
+        name: aqua-checksum-home-cluster
+        conditions: "home-cluster"
+        argoWorkflow:
+          operation: submit
+          parameters:
+            - src:
+                dependencyName: home-cluster
+                dataKey: body.repository.full_name
+              dest: spec.arguments.parameters.0.value
+            - src:
+                dependencyName: home-cluster
+                dataKey: body.pull_request.head.ref
+              dest: spec.arguments.parameters.1.value
+          source:
+            resource:
+              apiVersion: argoproj.io/v1alpha1
+              kind: Workflow
+              metadata:
+                generateName: aqua-checksum-
+                namespace: argo
+              spec:
+                workflowTemplateRef:
+                  name: aqua-checksum
+                arguments:
+                  parameters:
+                    - name: repository
+                      value: overwritten-by-parameters
+                    - name: branch
+                      value: overwritten-by-parameters
+    - template:
+        name: aqua-checksum-home-infra
+        conditions: "home-infra"
+        argoWorkflow:
+          operation: submit
+          parameters:
+            - src:
+                dependencyName: home-infra
+                dataKey: body.repository.full_name
+              dest: spec.arguments.parameters.0.value
+            - src:
+                dependencyName: home-infra
+                dataKey: body.pull_request.head.ref
+              dest: spec.arguments.parameters.1.value
+          source:
+            resource:
+              apiVersion: argoproj.io/v1alpha1
+              kind: Workflow
+              metadata:
+                generateName: aqua-checksum-
+                namespace: argo
+              spec:
+                workflowTemplateRef:
+                  name: aqua-checksum
+                arguments:
+                  parameters:
+                    - name: repository
+                      value: overwritten-by-parameters
+                    - name: branch
+                      value: overwritten-by-parameters
+    - template:
+        name: aqua-checksum-home-cloudflare
+        conditions: "home-cloudflare"
+        argoWorkflow:
+          operation: submit
+          parameters:
+            - src:
+                dependencyName: home-cloudflare
+                dataKey: body.repository.full_name
+              dest: spec.arguments.parameters.0.value
+            - src:
+                dependencyName: home-cloudflare
+                dataKey: body.pull_request.head.ref
+              dest: spec.arguments.parameters.1.value
+          source:
+            resource:
+              apiVersion: argoproj.io/v1alpha1
+              kind: Workflow
+              metadata:
+                generateName: aqua-checksum-
+                namespace: argo
+              spec:
+                workflowTemplateRef:
+                  name: aqua-checksum
+                arguments:
+                  parameters:
+                    - name: repository
+                      value: overwritten-by-parameters
+                    - name: branch
+                      value: overwritten-by-parameters
+    - template:
+        name: aqua-checksum-home-harbor
+        conditions: "home-harbor"
+        argoWorkflow:
+          operation: submit
+          parameters:
+            - src:
+                dependencyName: home-harbor
+                dataKey: body.repository.full_name
+              dest: spec.arguments.parameters.0.value
+            - src:
+                dependencyName: home-harbor
+                dataKey: body.pull_request.head.ref
+              dest: spec.arguments.parameters.1.value
+          source:
+            resource:
+              apiVersion: argoproj.io/v1alpha1
+              kind: Workflow
+              metadata:
+                generateName: aqua-checksum-
+                namespace: argo
+              spec:
+                workflowTemplateRef:
+                  name: aqua-checksum
+                arguments:
+                  parameters:
+                    - name: repository
+                      value: overwritten-by-parameters
+                    - name: branch
+                      value: overwritten-by-parameters

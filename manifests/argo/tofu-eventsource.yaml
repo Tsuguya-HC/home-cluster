@@ -114,6 +114,20 @@ spec:
         key: credential
       active: false
       contentType: json
+    home-trading:
+      owner: Tsuguya
+      repository: home-trading
+      webhook:
+        endpoint: /home-trading
+        port: "12000"
+        method: POST
+      events:
+        - push
+      webhookSecret:
+        name: home-trading-github-webhook
+        key: credential
+      active: false
+      contentType: json
     renovate-home-cluster:
       owner: Tsuguya
       repository: home-cluster

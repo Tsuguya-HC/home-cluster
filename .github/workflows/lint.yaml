@@ -99,7 +99,16 @@ jobs:
               while IFS= read -r vf; do
                 [[ -z "$vf" || "$vf" == "null" ]] && continue
                 actual="${vf/\$values\//}"
-                [[ -f "$actual" ]] && values_args+=("-f" "$actual")
+                # Fail rather than drop. Skipping a missing values file renders
+                # the chart with its own defaults, which passes kubeconform and
+                # reports green — while ArgoCD, which cannot resolve the same
+                # path, fails to sync. A rename under helm-values/ or a dropped
+                # $values/ prefix would otherwise reach main unnoticed.
+                if [[ ! -f "$actual" ]]; then
+                  echo "::error file=$app_file::valueFiles entry '$vf' resolves to '$actual', which does not exist"
+                  exit 1
+                fi
+                values_args+=("-f" "$actual")
               done < <(yq ".spec.sources[$i].helm.valueFiles[]" "$app_file" 2>/dev/null || true)
               echo ">>> $app_name: $chart@$revision"
               if is_oci "$repo_url"; then
@@ -179,7 +188,16 @@ jobs:
               while IFS= read -r vf; do
                 [[ -z "$vf" || "$vf" == "null" ]] && continue
                 actual="${vf/\$values\//}"
-                [[ -f "$actual" ]] && values_args+=("-f" "$actual")
+                # Fail rather than drop. Skipping a missing values file renders
+                # the chart with its own defaults, which passes kubeconform and
+                # reports green — while ArgoCD, which cannot resolve the same
+                # path, fails to sync. A rename under helm-values/ or a dropped
+                # $values/ prefix would otherwise reach main unnoticed.
+                if [[ ! -f "$actual" ]]; then
+                  echo "::error file=$app_file::valueFiles entry '$vf' resolves to '$actual', which does not exist"
+                  exit 1
+                fi
+                values_args+=("-f" "$actual")
               done < <(yq ".spec.sources[$i].helm.valueFiles[]" "$app_file" 2>/dev/null || true)
               if is_oci "$repo_url"; then
                 chart_ref="oci://${repo_url}/${chart}"

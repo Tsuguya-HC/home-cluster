@@ -99,10 +99,19 @@ spec:
             cd /tmp
             git clone "https://x-access-token:${GITHUB_TOKEN}@github.com/Tsuguya/images.git" repo
             cd repo
+            # Every directory that holds a Dockerfile is an image.
+            find . -name Dockerfile -not -path './.git/*' \
+              | sed 's|^./||;s|/Dockerfile$||' | sort -u > /tmp/image-dirs
             if [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
-              find . -name Dockerfile -not -path './.git/*' | sed 's|^./||;s|/Dockerfile$||' | sort -u
+              cat /tmp/image-dirs
             else
-              git diff --name-only "$BEFORE".."$AFTER" -- '*/Dockerfile' | sed 's|/Dockerfile$||' | sort -u
+              # Any file in one of those directories, not just its Dockerfile.
+              # github-auth.sh and github-signed-commit.sh are COPYed into
+              # argo-tools, so matching only */Dockerfile left the published
+              # image stale against its own sources with nothing to show for it.
+              git diff --name-only "$BEFORE".."$AFTER" \
+                | awk -F/ 'NF > 1 { print $1 }' | sort -u \
+                | while read -r d; do grep -qxF "$d" /tmp/image-dirs && echo "$d"; done
             fi | awk 'BEGIN{printf "["} NR>1{printf ","} {printf "\"%s\"",$0} END{print "]"}' > /tmp/changed-dirs
         env:
           - name: BEFORE

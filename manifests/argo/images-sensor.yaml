@@ -37,7 +37,11 @@ spec:
           for _, c in ipairs(event.body.commits) do
             for _, list in ipairs({c.added or {}, c.modified or {}, c.removed or {}}) do
               for _, f in ipairs(list) do
-                if string.find(f, "Dockerfile", 1, true) then
+                -- any file inside a subdirectory, not just a Dockerfile: the
+                -- scripts COPYed into an image live beside it, and matching
+                -- only Dockerfile meant changing one never rebuilt anything.
+                -- detect-changes decides which of those are image directories.
+                if string.find(f, "/", 1, true) then
                   return true
                 end
               end

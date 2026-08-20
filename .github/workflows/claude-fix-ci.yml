@@ -112,7 +112,25 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           allowed_bots: "renovate[bot],tsuguya-home-cluster[bot]"
-          direct_prompt: |
+          # The `actions: read` in this job's `permissions:` does NOT reach the
+          # agent. src/entrypoints/run.ts overwrites GITHUB_TOKEN/GH_TOKEN with
+          # the App installation token it gets from the OIDC exchange, and that
+          # token's scopes come from DEFAULT_PERMISSIONS (contents/pull_requests/
+          # issues: write) merged with this input — nothing else. Without the
+          # line below, the `gh run view --log-failed` in the prompt is a 403.
+          additional_permissions: |
+            actions: read
+          # Match the reviewer's posture: no web access, and a turn budget so a
+          # confused run ends before the job timeout does.
+          claude_args: "--model claude-sonnet-5 --max-turns 40 --disallowedTools WebFetch,WebSearch,NotebookEdit"
+          # `prompt`, NOT `direct_prompt`. v1 removed the latter, and an unknown
+          # `with:` key only produces a warning annotation — the action then
+          # starts with an empty prompt and src/modes/detector.ts falls through
+          # to "agent mode (which won't trigger without a prompt)", so the job
+          # goes green having done nothing. Measured in run 32040557264:
+          # "Context prompt: NO PROMPT" / "No trigger found, skipping remaining
+          # steps". This job had never once run since it was written.
+          prompt: |
             This PR has failing CI checks. Fix them.
 
             PR: #${{ github.event.workflow_run.pull_requests[0].number }}

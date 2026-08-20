@@ -58,6 +58,7 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 | Workflow pods (image-build) | Harbor nginx (harbor) | 8443 | Internal image push |
 | Kyverno (kyverno) | Harbor nginx (harbor) | 8443 | Image signature verification |
 | scan-jobs (trivy-system) | Harbor nginx (harbor) | 8443 | Image scan from Harbor registry |
+| image-digest-audit pods (argo) | Harbor nginx (harbor) | 8443 | Image digest audit |
 | Renovate (argo) | Harbor nginx (harbor) | 8443 | Self-hosted Renovate digest lookup (tools/*) |
 | SeaweedFS filer (seaweedfs) | shared-pg (database) | 5432 | Filer metadata (postgres2) |
 | Harbor core (harbor) | shared-pg (database) | 5432 | Harbor database |
@@ -106,7 +107,7 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 | **redis-secret-init** (Job) | (deny world) | kube-apiserver |
 | **cloudflared** | (deny world) | *.v2.argotunnel.com + cftunnel.com + h2.cftunnel.com + quic.cftunnel.com:443/7844 (7844 TCP+UDP), server:8080, eventsource (argo):12000, kanidm (kanidm):8443, nextcloud (nextcloud):80, harbor-nginx (harbor):8443 |
 
-## argo (20 policies)
+## argo (21 policies)
 
 | Component | Ingress | Egress |
 |---|---|---|
@@ -128,6 +129,7 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 | **pxe-sync** (pxe-sync=true) | (deny world) | kube-apiserver, github.com + api.github.com + *.githubusercontent.com + dl-cdn.alpinelinux.org :443, seaweedfs-filer (seaweedfs):8333, QNAP NAS (192.168.5.240):2049 (NFS) |
 | **kanidm-backup** (kanidm-backup=true) | (deny world) | kube-apiserver, *.r2.cloudflarestorage.com:443, seaweedfs-filer (seaweedfs):8333 |
 | **kanidm-repl-exchange** (kanidm-repl-exchange=true) | (deny world) | kube-apiserver, seaweedfs-filer (seaweedfs):8333 |
+| **image-digest-audit** (image-digest-audit=true) | (none) | harbor-nginx (harbor):8443 |
 | **renovate** (renovate=true) | (none) | harbor-nginx (harbor):8443 |
 | **tofu-harbor** (tofu-harbor=true) | (none) | harbor-nginx (harbor):8443 |
 
@@ -262,7 +264,7 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 
 | Component | Ingress | Egress |
 |---|---|---|
-| **nginx** | ingress, cloudflared (argocd), image-build (image-build), host/remote-node, kyverno (admission/background/reports-controller), scan-jobs (trivy-system), renovate (argo), tofu-harbor (argo) → 8443; prometheus (monitoring) → 8001 | core:8080, portal:8080 |
+| **nginx** | ingress, cloudflared (argocd), image-build (image-build), host/remote-node, kyverno (admission/background/reports-controller), scan-jobs (trivy-system), image-digest-audit (argo), renovate (argo), tofu-harbor (argo) → 8443; prometheus (monitoring) → 8001 | core:8080, portal:8080 |
 | **core** | nginx, jobservice, exporter, trivy → 8080; prometheus (monitoring) → 8001 | shared-pg (database):5432, redis:6379, registry:5000/8080, portal:8080, jobservice:8080, trivy:8080, kanidm (kanidm):8443, kube-apiserver |
 | **portal** | nginx, core → 8080 | (none) |
 | **registry** | core, jobservice → 5000/8080; prometheus (monitoring) → 8001 | seaweedfs-filer (seaweedfs):8333, redis:6379 |

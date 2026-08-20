@@ -247,7 +247,9 @@ spec:
         - name: docker-config
           emptyDir: {}
         - name: work
-          emptyDir: {}
+          # tarball とその展開先を両方置く。イメージ 1 個ぶん。
+          emptyDir:
+            sizeLimit: 8Gi
       initContainers:
         - name: setup-registry-auth
           image: alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
@@ -298,7 +300,11 @@ spec:
             container-structure-test test --driver tar --image /work/image.tar               --config /work/structure-test.yaml
         env:
           - name: HOME
-            value: /tmp
+            value: /work
+          # tar ドライバは tarball を一時ディレクトリに展開する。既定の /tmp は
+          # readOnlyRootFilesystem で書けないので、書ける方に向ける。
+          - name: TMPDIR
+            value: /work
           - name: DOCKER_CONFIG
             value: /docker-config
         securityContext:

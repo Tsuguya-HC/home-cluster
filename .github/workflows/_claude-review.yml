@@ -43,6 +43,9 @@ jobs:
       pull-requests: write # approve and comment; and the gh pr checks call below
       issues: write # PR conversation comments go through the issues API
       id-token: write # mints the App token via OIDC; without it nothing runs at all
+      checks: read # gh pr checks below reads the rollup through GraphQL, which
+      # returns "Resource not accessible by integration" for a check the token
+      # cannot see — and one unreadable check fails the whole query
     steps:
       # Renovate rebases constantly, so the head SHA is not a stable identity
       # for "this PR was already judged" — PR #487 collected 28 approvals across

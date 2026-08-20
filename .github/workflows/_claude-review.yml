@@ -37,6 +37,46 @@ jobs:
       issues: write
       id-token: write
     steps:
+      # Renovate rebases constantly, so the head SHA is not a stable identity
+      # for "this PR was already judged" — PR #487 collected 28 approvals across
+      # only 5 distinct SHAs before this guard existed. Auto-merge is the record
+      # that survives a rebase: the first review enables it, and GitHub then
+      # merges the PR by itself once the required checks are green. A second
+      # review cannot make that happen sooner, and re-reviewing a PR that is
+      # merely waiting out the 3-day digest cooldown burns a Claude session per
+      # rebase for three days.
+      #
+      # This is deliberately not a correctness risk: auto-merge does not bypass
+      # anything. CI Gate and digest-cooldown are re-evaluated against whatever
+      # the branch looks like after each rebase, and GitHub refuses the merge
+      # until both are green on the current head.
+      - name: Skip if this PR has already been judged
+        id: dedupe
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          enabled=$(gh pr view "$PR" --repo "$REPO" --json autoMergeRequest \
+                      --jq '.autoMergeRequest.enabledAt // ""')
+          if [ -n "${enabled}" ]; then
+            echo "::notice::auto-merge was enabled at ${enabled} — the decision is already made."
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Second gate, for the repeats that happen before any decision is
+          # reached: 23 of those 28 runs fired against a head that had not moved.
+          approved=$(gh api "repos/${REPO}/pulls/${PR}/reviews" --paginate \
+                       --jq "[.[] | select(.user.login == \"claude[bot]\" and .state == \"APPROVED\" and .commit_id == \"${SHA}\")] | length")
+          if [ "${approved}" -gt 0 ]; then
+            echo "::notice::already approved at ${SHA} — not reviewing again."
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "proceed=true" >> "$GITHUB_OUTPUT"
+
       # Stands in for the `needs: [kubeconform, helm-template, image-existence]`
       # this job had while it lived in lint.yaml. A separate workflow cannot
       # depend on another one's jobs, and this reviewer approves and merges on
@@ -45,6 +85,7 @@ jobs:
       # ruleset requires.
       - name: Wait for CI Gate
         id: ci
+        if: steps.dedupe.outputs.proceed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}

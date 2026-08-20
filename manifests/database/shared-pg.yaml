@@ -86,3 +86,10 @@ spec:
         login: true
         passwordSecret:
           name: horenso-pg-credentials
+      - name: trading
+        ensure: present
+        connectionLimit: -1
+        inherit: true
+        login: true
+        passwordSecret:
+          name: trading-pg-credentials

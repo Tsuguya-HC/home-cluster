@@ -9,6 +9,10 @@ spec:
       cnpg.io/cluster: shared-pg
   ingress:
     - fromEndpoints:
+        # 収集ジョブが Sharadar の価格データ等を投入する。
+        - matchLabels:
+            io.kubernetes.pod.namespace: trading
+            trading: collector
         - matchLabels:
             app.kubernetes.io/name: grafana
             io.kubernetes.pod.namespace: monitoring

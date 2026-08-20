@@ -31,11 +31,18 @@ jobs:
     # The wait below can idle for up to 20 minutes; this stops a hung review
     # from holding a runner for the default six hours on top of that.
     timeout-minutes: 40
+    # These bound `${{ github.token }}` — the steps below that call gh with it,
+    # and whatever claude-code-action itself does with it. They do NOT bound
+    # the agent: src/entrypoints/run.ts overwrites GITHUB_TOKEN and GH_TOKEN
+    # with the App installation token from the OIDC exchange, whose scopes come
+    # from that action's DEFAULT_PERMISSIONS merged with `additional_permissions`
+    # and nothing here. Narrowing this block does not narrow what Claude can do;
+    # `additional_permissions` on the action step is the knob for that.
     permissions:
-      contents: write # gh pr merge --squash でマージするため
-      pull-requests: write # gh pr review --approve で承認するため
-      issues: write # gh pr comment（PR コメントは issues API 経由）
-      id-token: write # claude-code-action の OIDC 認証
+      contents: write # the reviewer merges the PR it approves
+      pull-requests: write # approve and comment; and the gh pr checks call below
+      issues: write # PR conversation comments go through the issues API
+      id-token: write # mints the App token via OIDC; without it nothing runs at all
     steps:
       # Renovate rebases constantly, so the head SHA is not a stable identity
       # for "this PR was already judged" — PR #487 collected 28 approvals across
@@ -152,6 +159,11 @@ jobs:
         if: steps.ci.outputs.proceed == 'true'
         with:
           node-version: "24"
+          # lint.yaml's `mcp` job installs the same lock file with this cache
+          # on every push to main, and setup-node's key does not include the
+          # job, so the entry is already there to be restored.
+          cache: npm
+          cache-dependency-path: .github/mcp/pr-review/package-lock.json
 
       - name: Install MCP server dependencies
         if: steps.ci.outputs.proceed == 'true'
@@ -177,6 +189,11 @@ jobs:
 
             Step 1: Get PR summary
             Use `get_pr_summary` with pr_number=${{ github.event.pull_request.number }} to get structured PR info including update type, package versions, release notes, and affected files.
+
+            Step 1.5: Read the change itself
+            Run `gh pr diff ${{ github.event.pull_request.number }}` and say, in your review body, which files changed and what each hunk does.
+            Steps 2 through 4 below only produce anything when update_type is "helm" — `app_version_change`, `removed_keys` and `impact_on_user_values` come from `helm_values_diff` and do not exist otherwise, and `release_notes_summary` is often "No release notes found" for a digest bump.
+            So for anything that is not a helm update, this diff is the only evidence you have. Do not answer SAFE without quoting from it.
 
             Step 2: If update_type is "helm", run helm values diff
             Use `helm_values_diff` with the chart's repo_url, chart name, old/new versions (from step 1), and user_values_path (from affected_helm_values in step 1).

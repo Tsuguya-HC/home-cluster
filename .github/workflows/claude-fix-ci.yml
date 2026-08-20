@@ -28,10 +28,15 @@ on: # zizmor: ignore[dangerous-triggers]
     types: [completed]
 
 concurrency:
-  # Not cancel-in-progress: the fixer pushes to the PR branch at the end of its
-  # run, and that push is made with claude-code-action's own token, so Lint runs
-  # again and this workflow fires again. Cancelling would kill the run that just
-  # did the work; queueing lets it finish and the follow-up see the result.
+  # Not cancel-in-progress: the fixer commits and pushes at the end of its run,
+  # with claude-code-action's own token, so Lint runs again and this workflow
+  # fires again — cancelling would throw away a whole agent session that had
+  # just done the work.
+  #
+  # Note this is not a queue. GitHub keeps at most one pending run per group and
+  # drops it when a newer one arrives; there is no `queue:` here and adding one
+  # would be wrong. The dropped run would have judged a branch state the running
+  # fixer is about to replace, so losing it is the behaviour we want.
   group: ai-fix-ci-${{ github.event.workflow_run.head_branch }}
   cancel-in-progress: false
 

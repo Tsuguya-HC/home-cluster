@@ -83,7 +83,7 @@ spec:
         labels:
           image-digest-audit: "true"
       container:
-        image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:2b6e5cbfa1a7158a7086f5d7673c33eceb5c9767a4b2968997c35fc78c6c10c5
+        image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:a9a441abf2e582a3a909204a5547c96dc199a420f27240091ba1ae29a18a9a21
         resources:
           requests:
             cpu: 10m

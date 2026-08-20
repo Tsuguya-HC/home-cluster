@@ -37,7 +37,7 @@ spec:
         # structure-test.yaml を置いていないリポジトリでは丸ごとスキップされる。
         - - name: structure-test
             template: structure-test
-            when: "{{steps.build.outputs.parameters.has-structure-test}} == yes"
+            when: "'{{steps.build.outputs.parameters.has-structure-test}}' == 'present'"
             arguments:
               parameters:
                 - name: digest
@@ -194,8 +194,9 @@ spec:
             jq -r '."containerimage.digest"' /workspace/metadata.json > /workspace/digest
             # 中身は when に入れられない（複数行が式に展開されて壊れる）。
             # 判定は有無だけの 1 語で行う。
-            test -f /workspace/structure-test.yaml && echo yes > /workspace/has-structure-test \
-              || echo no > /workspace/has-structure-test
+            # yes/no は式パーサにブールと解釈される余地があるので使わない。
+            test -f /workspace/structure-test.yaml && echo present > /workspace/has-structure-test \
+              || echo absent > /workspace/has-structure-test
         env:
           - name: DOCKER_CONFIG
             value: /docker-config

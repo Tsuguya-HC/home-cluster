@@ -1,0 +1,145 @@
+name: AI review (reusable)
+
+# The reviewer itself. Called only from claude-review.yml, which pins this file
+# to @main — so everything below is read from the default branch regardless of
+# what the PR under review contains. That is the point: the reviewer's model,
+# tool allow-list, prompt and action version cannot be rewritten by the change
+# it is reviewing, and bumping any of them does not make the caller (the file
+# claude-code-action validates) differ from main.
+#
+# Renovate's action bumps land here. The caller stays frozen.
+on:
+  workflow_call:
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN:
+        description: "Claude Code OAuth token used by claude-code-action"
+        required: true
+
+permissions: {}
+
+jobs:
+  review:
+    # The caller job is already named "AI review"; a reusable check renders as
+    # "<caller job> / <callee job>", so keep this one short.
+    name: review
+    if: >-
+      contains(fromJSON('["renovate[bot]", "tsuguya-home-cluster[bot]"]'),
+               github.event.pull_request.user.login) &&
+      !contains(github.event.pull_request.body, '**Automerge**: Enabled') &&
+      !contains(github.event.pull_request.title, 'gateway-api')
+    runs-on: ubuntu-latest
+    # The wait below can idle for up to 20 minutes; this stops a hung review
+    # from holding a runner for the default six hours on top of that.
+    timeout-minutes: 40
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+    steps:
+      # Stands in for the `needs: [kubeconform, helm-template, image-existence]`
+      # this job had while it lived in lint.yaml. A separate workflow cannot
+      # depend on another one's jobs, and this reviewer approves and merges on
+      # its own, so it waits for the aggregate gate instead — which is stricter
+      # than the old three-job dependency, and is also the check the branch
+      # ruleset requires.
+      - name: Wait for CI Gate
+        id: ci
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # `gh pr checks` exits non-zero whenever anything is pending or red,
+          # which is most of the loop — hence the `|| true` on the substitution.
+          for _ in $(seq 1 40); do
+            bucket=$(gh pr checks "$PR" --repo "$REPO" --json name,bucket \
+                       --jq '[.[] | select(.name == "CI Gate") | .bucket] | first // ""' \
+                     2>/dev/null || true)
+            case "${bucket}" in
+              pass)
+                echo "proceed=true" >> "$GITHUB_OUTPUT"
+                exit 0
+                ;;
+              ""|pending)
+                # "" also covers the window before the gate check exists at all
+                sleep 30
+                ;;
+              *)
+                echo "::notice::CI Gate concluded '${bucket}' — nothing to review."
+                echo "proceed=false" >> "$GITHUB_OUTPUT"
+                exit 0
+                ;;
+            esac
+          done
+          echo "::error::Timed out after 20 minutes waiting for CI Gate."
+          exit 1
+
+      # No credential is left behind, and claude-code-action does not want one.
+      # Passing a prompt selects its agent mode, where configureGitAuth() runs
+      # first and explicitly unsets the http.<server>/.extraheader that
+      # actions/checkout installs, then puts its own token in the remote URL.
+      #
+      # Restore this if the job is ever switched to tag mode (the @claude
+      # mention flow): there setupBranch() runs `git fetch` at modes/tag/index.ts
+      # before the auth is configured, so it would fetch with no credential.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.ci.outputs.proceed == 'true'
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: steps.ci.outputs.proceed == 'true'
+        with:
+          node-version: "24"
+
+      - name: Install MCP server dependencies
+        if: steps.ci.outputs.proceed == 'true'
+        run: npm ci
+        working-directory: .github/mcp/pr-review
+
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        if: steps.ci.outputs.proceed == 'true'
+
+      # Pinned to v1.0.99 — v1.0.100+ has a regression where install.sh
+      # silently fails and the SDK can't fall back to its bundled binary.
+      # Unpin once anthropics/claude-code-action#1260 lands.
+      - uses: anthropics/claude-code-action@c3d45e8e941e1b2ad7b278c57482d9c5bf1f35b3 # v1.0.99
+        if: steps.ci.outputs.proceed == 'true'
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          allowed_bots: "renovate[bot],tsuguya-home-cluster[bot]"
+          claude_args: "--model claude-sonnet-5 --max-turns 30 --disallowedTools Edit,Write,NotebookEdit,WebFetch,WebSearch,Glob,Grep --allowedTools 'Bash(gh:*)' Read 'mcp__pr-review__*' --mcp-config .github/mcp/pr-review/mcp-config.json"
+          prompt: |
+            You are reviewing a Renovate dependency update PR for a Kubernetes homelab cluster managed by ArgoCD.
+
+            You have MCP tools for efficient review. Follow this workflow:
+
+            Step 1: Get PR summary
+            Use `get_pr_summary` with pr_number=${{ github.event.pull_request.number }} to get structured PR info including update type, package versions, release notes, and affected files.
+
+            Step 2: If update_type is "helm", run helm values diff
+            Use `helm_values_diff` with the chart's repo_url, chart name, old/new versions (from step 1), and user_values_path (from affected_helm_values in step 1).
+            This writes detailed diffs to /tmp/pr-review/diff/ — check the summary first.
+
+            Step 3: Check app version change
+            If `app_version_change` is present, the underlying application version also changed (e.g., ArgoCD chart bump includes ArgoCD server version bump).
+            - Check `app_version_change.level` — major/minor upgrades need careful review
+            - If `app_version_change.release_notes_file` exists, use `Read` on `/tmp/pr-review/app-release-notes.md` for upstream release notes
+            - This is often where breaking changes actually live (chart changes are usually just values, app changes affect behavior)
+
+            Step 4: Deep dive if needed
+            - If removed_keys or impact_on_user_values has entries, use `Read` on the relevant section diff files in /tmp/pr-review/diff/sections/
+            - If release_notes_summary mentions breaking/deprecated keywords, use `Read` on /tmp/pr-review/release-notes.md
+            - Read the relevant helm-values/ files to verify your understanding
+
+            Step 5: Evaluate
+            - No breaking changes affecting our values configuration
+            - No deprecated options we currently use
+            - No removed keys that we depend on
+            - No known critical bugs in the new version
+
+            Decision:
+            - SAFE: Run `gh pr review ${{ github.event.pull_request.number }} --approve -b "AI Review: <brief summary of what was checked>"` then `gh pr merge ${{ github.event.pull_request.number }} --squash`
+            - CONCERNS: Run `gh pr comment ${{ github.event.pull_request.number }} -b "<your detailed concerns>"` — do NOT approve or merge

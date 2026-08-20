@@ -6,9 +6,14 @@ on:
   pull_request:
     branches: [main]
 
-# Nothing here needs the token by default. The jobs that do (ai-review,
-# ai-fix-ci, zizmor's SARIF upload) name their own scopes, so a new job added
-# below starts with no permissions rather than inheriting write access.
+# Nothing here needs the token by default. The one job that does (zizmor's
+# SARIF upload) names its own scope, so a new job added below starts with no
+# permissions rather than inheriting write access.
+#
+# The Claude reviewer and CI fixer used to live in this file. They now sit in
+# claude-review.yml / claude-fix-ci.yml, because claude-code-action validates
+# its entry-point workflow against main and a PR that edits this file would
+# otherwise be unreviewable.
 permissions: {}
 
 jobs:
@@ -367,8 +372,9 @@ jobs:
   # The only required status check. Aggregates every correctness leaf so the
   # ruleset never names an individual job: adding, renaming or matrix-splitting
   # a job below can't leave a required context that is never reported (which
-  # blocks the PR forever). ai-review / ai-fix-ci are deliberately excluded —
-  # they are advisory and conditional, and ai-review merges the PR itself.
+  # blocks the PR forever). The Claude jobs are deliberately not part of it —
+  # they are advisory and conditional, and the reviewer waits on this gate
+  # rather than being gated by it.
   gate:
     name: CI Gate
     needs: [kubeconform, helm-template, image-existence, mcp, argo-lint, actionlint, zizmor]
@@ -393,143 +399,3 @@ jobs:
               *) echo "::error::A required job concluded with: ${r}"; exit 1 ;;
             esac
           done
-
-  ai-review:
-    needs: [kubeconform, helm-template, image-existence]
-    if: >-
-      github.event_name == 'pull_request' &&
-      contains(fromJSON('["renovate[bot]", "tsuguya-home-cluster[bot]"]'),
-               github.event.pull_request.user.login) &&
-      !contains(github.event.pull_request.body, '**Automerge**: Enabled') &&
-      !contains(github.event.pull_request.title, 'gateway-api')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
-      issues: write
-      id-token: write
-    steps:
-      # No credential is left behind, and claude-code-action does not want one.
-      # Passing a prompt selects its agent mode, where configureGitAuth() runs
-      # first and explicitly unsets the http.<server>/.extraheader that
-      # actions/checkout installs, then puts its own token in the remote URL.
-      #
-      # Restore this if the job is ever switched to tag mode (the @claude
-      # mention flow): there setupBranch() runs `git fetch` at modes/tag/index.ts
-      # before the auth is configured, so it would fetch with no credential.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: "24"
-
-      - name: Install MCP server dependencies
-        run: npm ci
-        working-directory: .github/mcp/pr-review
-
-      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
-
-      # Pinned to v1.0.99 — v1.0.100+ has a regression where install.sh
-      # silently fails and the SDK can't fall back to its bundled binary.
-      # Unpin once anthropics/claude-code-action#1260 lands.
-      - uses: anthropics/claude-code-action@c3d45e8e941e1b2ad7b278c57482d9c5bf1f35b3 # v1.0.99
-        with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          allowed_bots: "renovate[bot],tsuguya-home-cluster[bot]"
-          claude_args: "--model claude-sonnet-5 --max-turns 30 --disallowedTools Edit,Write,NotebookEdit,WebFetch,WebSearch,Glob,Grep --allowedTools 'Bash(gh:*)' Read 'mcp__pr-review__*' --mcp-config .github/mcp/pr-review/mcp-config.json"
-          prompt: |
-            You are reviewing a Renovate dependency update PR for a Kubernetes homelab cluster managed by ArgoCD.
-
-            You have MCP tools for efficient review. Follow this workflow:
-
-            Step 1: Get PR summary
-            Use `get_pr_summary` with pr_number=${{ github.event.pull_request.number }} to get structured PR info including update type, package versions, release notes, and affected files.
-
-            Step 2: If update_type is "helm", run helm values diff
-            Use `helm_values_diff` with the chart's repo_url, chart name, old/new versions (from step 1), and user_values_path (from affected_helm_values in step 1).
-            This writes detailed diffs to /tmp/pr-review/diff/ — check the summary first.
-
-            Step 3: Check app version change
-            If `app_version_change` is present, the underlying application version also changed (e.g., ArgoCD chart bump includes ArgoCD server version bump).
-            - Check `app_version_change.level` — major/minor upgrades need careful review
-            - If `app_version_change.release_notes_file` exists, use `Read` on `/tmp/pr-review/app-release-notes.md` for upstream release notes
-            - This is often where breaking changes actually live (chart changes are usually just values, app changes affect behavior)
-
-            Step 4: Deep dive if needed
-            - If removed_keys or impact_on_user_values has entries, use `Read` on the relevant section diff files in /tmp/pr-review/diff/sections/
-            - If release_notes_summary mentions breaking/deprecated keywords, use `Read` on /tmp/pr-review/release-notes.md
-            - Read the relevant helm-values/ files to verify your understanding
-
-            Step 5: Evaluate
-            - No breaking changes affecting our values configuration
-            - No deprecated options we currently use
-            - No removed keys that we depend on
-            - No known critical bugs in the new version
-
-            Decision:
-            - SAFE: Run `gh pr review ${{ github.event.pull_request.number }} --approve -b "AI Review: <brief summary of what was checked>"` then `gh pr merge ${{ github.event.pull_request.number }} --squash`
-            - CONCERNS: Run `gh pr comment ${{ github.event.pull_request.number }} -b "<your detailed concerns>"` — do NOT approve or merge
-
-  ai-fix-ci:
-    needs: [kubeconform, helm-template]
-    if: >-
-      github.event_name == 'pull_request' &&
-      always() &&
-      (needs.kubeconform.result == 'failure' || needs.helm-template.result == 'failure')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
-      issues: write
-      id-token: write
-    steps:
-      # This job pushes, but not through anything actions/checkout leaves in
-      # .git/config — the push goes through the remote URL claude-code-action
-      # rewrites in agent mode. See the note on ai-review's checkout above.
-      # `token:` is still needed for the clone itself.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.head_ref }}
-          token: ${{ secrets.GITHUB_TOKEN }}
-          persist-credentials: false
-
-      - name: Add ai-fix label
-        run: gh pr edit ${{ github.event.pull_request.number }} --add-label "ai-fix"
-        env:
-          GH_TOKEN: ${{ github.token }}
-
-      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
-
-      - uses: aquaproj/aqua-installer@96a9bc20066c5bf5e275b41019cfc165b25f4e2e # v4.0.5
-        with:
-          aqua_version: v2.62.3
-
-      # Pinned to v1.0.99 — v1.0.100+ has a regression where install.sh
-      # silently fails and the SDK can't fall back to its bundled binary.
-      # Unpin once anthropics/claude-code-action#1260 lands.
-      - uses: anthropics/claude-code-action@c3d45e8e941e1b2ad7b278c57482d9c5bf1f35b3 # v1.0.99
-        with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          allowed_bots: "renovate[bot],tsuguya-home-cluster[bot]"
-          direct_prompt: |
-            This PR has failing CI checks. Fix them.
-
-            PR: #${{ github.event.pull_request.number }}
-            Branch: ${{ github.head_ref }}
-
-            ## Instructions
-
-            1. Run `gh run list --branch ${{ github.head_ref }} --limit 1 --json databaseId --jq '.[0].databaseId'` to get the latest run ID
-            2. Run `gh run view <run-id> --log-failed` to see the failure logs
-            3. Analyze the error and fix the source files
-            4. Run the same validation locally to verify:
-               - For kubeconform: `kubeconform -strict -ignore-missing-schemas -schema-location default -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' -summary manifests/`
-               - For helm-template: reproduce the failing helm template command from the logs
-            5. Commit and push the fix
-
-            ## Rules
-            - Only fix CI failures, don't make unrelated changes
-            - Commit message should describe what was fixed and why
-            - If the fix requires a schema override or skip, that's acceptable as a last resort

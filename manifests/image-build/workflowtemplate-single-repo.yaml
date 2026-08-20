@@ -37,7 +37,7 @@ spec:
         # structure-test.yaml を置いていないリポジトリでは丸ごとスキップされる。
         - - name: structure-test
             template: structure-test
-            when: "{{steps.build.outputs.parameters.structure-test}} != ''"
+            when: "{{steps.build.outputs.parameters.has-structure-test}} == yes"
             arguments:
               parameters:
                 - name: digest
@@ -192,6 +192,10 @@ spec:
               --output 'type=image,"name=registry.infra.tgy.io/{{workflow.parameters.project}}/{{workflow.parameters.image-name}}:{{workflow.parameters.commit-sha}},registry.infra.tgy.io/{{workflow.parameters.project}}/{{workflow.parameters.image-name}}:latest",push=true' \
               --metadata-file /workspace/metadata.json
             jq -r '."containerimage.digest"' /workspace/metadata.json > /workspace/digest
+            # 中身は when に入れられない（複数行が式に展開されて壊れる）。
+            # 判定は有無だけの 1 語で行う。
+            test -f /workspace/structure-test.yaml && echo yes > /workspace/has-structure-test \
+              || echo no > /workspace/has-structure-test
         env:
           - name: DOCKER_CONFIG
             value: /docker-config
@@ -224,6 +228,9 @@ spec:
             valueFrom:
               path: /workspace/structure-test.yaml
               default: ""
+          - name: has-structure-test
+            valueFrom:
+              path: /workspace/has-structure-test
 
     - name: structure-test
       inputs:

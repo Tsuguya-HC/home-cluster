@@ -8,6 +8,10 @@
   "platformAutomerge": true,
   "automergeStrategy": "squash",
   "rebaseWhen": "behind-base-branch",
+  "ignoredAuthors": [
+    "265309552+tsuguya-home-cluster[bot]@users.noreply.github.com",
+    "noreply@github.com"
+  ],
   "minimumReleaseAge": "3 days",
   "constraints": {
     "npm": ">=11.10.0"

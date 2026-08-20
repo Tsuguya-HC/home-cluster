@@ -18,6 +18,8 @@ spec:
         operator: DoesNotExist
       - key: kanidm-backup
         operator: DoesNotExist
+      - key: aqua-checksum
+        operator: DoesNotExist
   ingressDeny:
     - fromEntities:
         - world

@@ -46,13 +46,7 @@ jobs:
           # The self-hosted Renovate runs as our own GitHub App, so its PRs are
           # NOT authored by renovate[bot]; the action's default would silently
           # degrade every PR to the pure-digest-bump baseline.
-          # Both, to match the reviewer's author gate in _claude-review.yml. The
-          # self-hosted Renovate runs as the App, so renovate[bot] should not
-          # appear — but if it ever did, the reviewer would still approve and
-          # merge it while the cooldown silently degraded to the pure-digest
-          # baseline. The two lists disagreeing in the direction of the weaker
-          # gate is the part worth fixing.
-          gate-authors: tsuguya-home-cluster[bot],renovate[bot]
+          gate-authors: tsuguya-home-cluster[bot]
           # Report success on PRs with nothing to gate so this status can be a
           # required check without deadlocking unrelated PRs.
           always-report: true

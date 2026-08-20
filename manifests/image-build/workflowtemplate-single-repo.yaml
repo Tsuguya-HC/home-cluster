@@ -32,6 +32,18 @@ spec:
       steps:
         - - name: build
             template: buildkit-build
+        # 署名の前に置く。イメージは既に push 済みなので「push を止める」ことはできないが、
+        # Kyverno が署名を要求しているので、ここで落とせば署名されず＝クラスタで起動できない。
+        # structure-test.yaml を置いていないリポジトリでは丸ごとスキップされる。
+        - - name: structure-test
+            template: structure-test
+            when: "{{steps.build.outputs.parameters.structure-test}} != ''"
+            arguments:
+              parameters:
+                - name: digest
+                  value: "{{steps.build.outputs.parameters.digest}}"
+                - name: config
+                  value: "{{steps.build.outputs.parameters.structure-test}}"
         - - name: sign
             template: cosign-sign
             arguments:
@@ -60,7 +72,7 @@ spec:
             secretName: github-app-private-key
       initContainers:
         - name: github-auth
-          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:2b6e5cbfa1a7158a7086f5d7673c33eceb5c9767a4b2968997c35fc78c6c10c5
+          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:a9a441abf2e582a3a909204a5547c96dc199a420f27240091ba1ae29a18a9a21
           command: [github-auth.sh]
           env:
             - name: GITHUB_APP_ID
@@ -205,6 +217,99 @@ spec:
           - name: digest
             valueFrom:
               path: /workspace/digest
+          # リポジトリに structure-test.yaml があればその中身、無ければ空。
+          # ここで拾うのは clone 済みのワークスペースが手元にあるからで、
+          # 後段でもう一度 clone して認証を用意する必要をなくすため。
+          - name: structure-test
+            valueFrom:
+              path: /workspace/structure-test.yaml
+              default: ""
+
+    - name: structure-test
+      inputs:
+        parameters:
+          - name: digest
+          - name: config
+      securityContext:
+        runAsUser: 65532
+        runAsNonRoot: true
+        runAsGroup: 65532
+        fsGroup: 65532
+      volumes:
+        - name: docker-config
+          emptyDir: {}
+        - name: work
+          emptyDir: {}
+      initContainers:
+        - name: setup-registry-auth
+          image: alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
+          command: [sh, -c]
+          args:
+            - |
+              HARBOR_AUTH=$(printf '%s:%s' "$HARBOR_USER" "$HARBOR_PASS" | base64 -w0)
+              printf '{"auths":{"registry.infra.tgy.io":{"auth":"%s"}}}' "$HARBOR_AUTH" > /docker-config/config.json
+          env:
+            - name: HARBOR_USER
+              valueFrom:
+                secretKeyRef:
+                  name: harbor-robot-images
+                  key: username
+            - name: HARBOR_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: harbor-robot-images
+                  key: credential
+          securityContext:
+            runAsUser: 65532
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: docker-config
+              mountPath: /docker-config
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+      container:
+        image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:a9a441abf2e582a3a909204a5547c96dc199a420f27240091ba1ae29a18a9a21
+        command: [sh, -c]
+        args:
+          - |
+            set -eu
+            IMAGE="registry.infra.tgy.io/{{workflow.parameters.project}}/{{workflow.parameters.image-name}}@{{inputs.parameters.digest}}"
+            cat > /work/structure-test.yaml <<'STRUCTURE_TEST_EOF'
+            {{inputs.parameters.config}}
+            STRUCTURE_TEST_EOF
+            # tar ドライバを使う。Kata の中に docker デーモンは無いし、
+            # 起動せずに中身を検査できればそれで足りる。
+            crane pull "$IMAGE" /work/image.tar
+            container-structure-test test --driver tar --image /work/image.tar               --config /work/structure-test.yaml
+        env:
+          - name: HOME
+            value: /tmp
+          - name: DOCKER_CONFIG
+            value: /docker-config
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: [ALL]
+        volumeMounts:
+          - name: docker-config
+            mountPath: /docker-config
+            readOnly: true
+          - name: work
+            mountPath: /work
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            memory: 2Gi
 
     - name: cosign-sign
       inputs:
@@ -267,7 +372,7 @@ spec:
             limits:
               memory: 64Mi
       container:
-        image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:2b6e5cbfa1a7158a7086f5d7673c33eceb5c9767a4b2968997c35fc78c6c10c5
+        image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:a9a441abf2e582a3a909204a5547c96dc199a420f27240091ba1ae29a18a9a21
         command: [sh, -c]
         args:
           - |

@@ -53,6 +53,31 @@ spec:
       eventName: horenso
       filters:
         script: *buildFilter
+    - name: home-trading-push
+      eventSourceName: github-webhook
+      eventName: home-trading
+      filters:
+        # Python なので共通フィルタ（src/ や package.json）は当たらない。
+        # schemas/ を含めるのは、ベンダー DDL がイメージに焼かれているため。
+        script: |-
+          if event.body == nil or event.body.ref ~= "refs/heads/main" or event.body.commits == nil then
+            return false
+          end
+          for _, c in ipairs(event.body.commits) do
+            for _, list in ipairs({c.added or {}, c.modified or {}, c.removed or {}}) do
+              for _, f in ipairs(list) do
+                if string.find(f, "Dockerfile", 1, true)
+                  or string.find(f, "collectors/", 1, true)
+                  or string.find(f, "execution/", 1, true)
+                  or string.find(f, "strategies/", 1, true)
+                  or string.find(f, "schemas/", 1, true)
+                  or string.find(f, "requirements", 1, true) then
+                  return true
+                end
+              end
+            end
+          end
+          return false
   triggers:
     - template:
         name: memory-build
@@ -114,5 +139,40 @@ spec:
           parameters:
             - src:
                 dependencyName: horenso-push
+                dataKey: body.after
+              dest: spec.arguments.parameters.2.value
+    - template:
+        name: home-trading-build
+        conditions: "home-trading-push"
+        argoWorkflow:
+          operation: submit
+          source:
+            resource:
+              apiVersion: argoproj.io/v1alpha1
+              kind: Workflow
+              metadata:
+                generateName: home-trading-build-
+                namespace: image-build
+              spec:
+                workflowTemplateRef:
+                  name: single-repo-image-build
+                arguments:
+                  parameters:
+                    - name: repo-url
+                      value: github.com/Tsuguya/home-trading
+                    - name: image-name
+                      value: home-trading
+                    - name: commit-sha
+                      value: ""
+                    # commit-sha は位置参照 (parameters.2.value) されているので末尾に足す
+                    - name: project
+                      value: trading
+                    # trading は private プロジェクト。Kyverno が署名を読めるよう
+                    # 署名だけ public な tools/signatures に置く（kyverno#15120）。
+                    - name: signature-repository
+                      value: registry.infra.tgy.io/tools/signatures
+          parameters:
+            - src:
+                dependencyName: home-trading-push
                 dataKey: body.after
               dest: spec.arguments.parameters.2.value

@@ -16,6 +16,10 @@ spec:
         - matchName: "github.com"
         - matchName: "api.github.com"
         - matchPattern: "*.githubusercontent.com"
+        # podMetadata.labels lands on the onExit pod too, so the Discord notify
+        # that every workflow runs is selected by this policy rather than by
+        # netpol-workflow-pods' blanket 443 — and without this it times out.
+        - matchName: "discord.com"
       toPorts:
         - ports:
             - port: "443"

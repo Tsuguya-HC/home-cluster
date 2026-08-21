@@ -78,6 +78,14 @@ spec:
       eventName: renovate-home-cloudflare
       filters:
         script: *renovateFilter
+    # Reuses the endpoint the build and aqua-checksum sensors already consume,
+    # rather than a renovate-* one of its own: the webhook and its secret exist,
+    # and one more consumer of the same event costs nothing.
+    - name: home-trading
+      eventSourceName: github-webhook
+      eventName: home-trading
+      filters:
+        script: *renovateFilter
   triggers:
     - template:
         name: renovate-home-cluster
@@ -136,3 +144,22 @@ spec:
                   parameters:
                     - name: repositories
                       value: '["Tsuguya/home-cloudflare"]'
+    - template:
+        name: renovate-home-trading
+        conditions: "home-trading"
+        argoWorkflow:
+          operation: submit
+          source:
+            resource:
+              apiVersion: argoproj.io/v1alpha1
+              kind: Workflow
+              metadata:
+                generateName: renovate-home-trading-
+                namespace: argo
+              spec:
+                workflowTemplateRef:
+                  name: renovate
+                arguments:
+                  parameters:
+                    - name: repositories
+                      value: '["Tsuguya/home-trading"]'

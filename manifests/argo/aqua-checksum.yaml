@@ -68,7 +68,7 @@ spec:
             secretName: github-app-private-key
       initContainers:
         - name: github-auth
-          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:2b553887ff8c4ecfae6af8c0b37ac29c5d2c0bf49e26f6536ef0c56d7238bc3b
+          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:b7d1229a8b93c40b7cf10e760b0b113d826febdea2004e59911224262954c719
           command: [github-auth.sh]
           env:
             - name: GITHUB_APP_ID
@@ -94,7 +94,7 @@ spec:
             limits:
               memory: 64Mi
       container:
-        image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:2b553887ff8c4ecfae6af8c0b37ac29c5d2c0bf49e26f6536ef0c56d7238bc3b
+        image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:b7d1229a8b93c40b7cf10e760b0b113d826febdea2004e59911224262954c719
         command: [sh, -c]
         args:
           - |
@@ -137,6 +137,17 @@ spec:
           # aqua writes its package tree under HOME; the image's user cannot
           # write to the default one.
           - name: HOME
+            value: /workspace
+          # The clone is owned by a different uid than the one git runs as, so
+          # every git call in this step and inside github-signed-commit.sh dies
+          # with "detected dubious ownership". Passed as environment rather than
+          # `git config --global`, which would land a .gitconfig inside the
+          # clone because HOME points at it.
+          - name: GIT_CONFIG_COUNT
+            value: "1"
+          - name: GIT_CONFIG_KEY_0
+            value: safe.directory
+          - name: GIT_CONFIG_VALUE_0
             value: /workspace
         volumeMounts:
           - name: workspace

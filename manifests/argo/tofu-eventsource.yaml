@@ -126,6 +126,10 @@ spec:
         # pull_request is here for aqua-checksum, which needs the head branch of
         # a Renovate PR; the existing push consumer ignores it.
         - pull_request
+        # issues is here for renovate-webhook: ticking a box on the Dependency
+        # Dashboard arrives as an issue body edit, and without it the only way
+        # to start a run is to wait out the four-hour cron.
+        - issues
       webhookSecret:
         name: home-trading-github-webhook
         key: credential

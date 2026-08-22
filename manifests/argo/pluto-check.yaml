@@ -83,7 +83,7 @@ spec:
 
     - name: detect-in-cluster
       script:
-        image: us-docker.pkg.dev/fairwinds-ops/oss/pluto:v5.24.3
+        image: us-docker.pkg.dev/fairwinds-ops/oss/pluto:v5.24.3@sha256:08554ef0f998d52366fcdca82ad4cd48e4e36747b89c4738f66abf0740dc38b6
         resources:
           requests:
             cpu: 10m
@@ -105,7 +105,7 @@ spec:
 
     - name: detect-helm
       script:
-        image: us-docker.pkg.dev/fairwinds-ops/oss/pluto:v5.24.3
+        image: us-docker.pkg.dev/fairwinds-ops/oss/pluto:v5.24.3@sha256:08554ef0f998d52366fcdca82ad4cd48e4e36747b89c4738f66abf0740dc38b6
         resources:
           requests:
             cpu: 10m
@@ -280,7 +280,7 @@ spec:
 
     - name: fail-if-deprecated
       container:
-        image: alpine:3.24
+        image: alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
         resources:
           requests:
             cpu: 10m

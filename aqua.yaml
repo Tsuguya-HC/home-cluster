@@ -28,4 +28,3 @@ packages:
   - name: mikefarah/yq@v4.53.3
   # provides `crane`
   - name: google/go-containerregistry@v0.21.9
-  - name: rhysd/actionlint@v1.7.12

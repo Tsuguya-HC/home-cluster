@@ -133,6 +133,10 @@ user_invocable: true
 
 ## Tier 3 — Info（Chart 固有の落とし穴）
 
+**この Tier の限界**: ここは「values を読んで」チャート固有の罠を当てにいくルールで、既知のものしか当たらない。書いてあるキーが実際にチャートに届いているかは、読んでも分からない（Helm は階層を間違えたキーを黙って無視する）。実際 Rule 11 は nextcloud の securityContext を見ているが、`podSecurityContext` がトップレベルにあって丸ごと無視されていた件は捕まえられなかった。
+
+helm-values を触ったら **`/values` を併せて実行する**。あちらはレンダリング結果で判定するので、未知の罠にも当たる。
+
 ### Rule 10: SeaweedFS quirks
 
 **対象**: `helm-values/seaweedfs/`

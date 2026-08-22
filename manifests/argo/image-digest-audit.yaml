@@ -236,6 +236,39 @@ spec:
                 continue
               fi
 
+              # digest が在ることと、消されずに在り続けることは別の話。タグを
+              # 失った artifact は retention の件数ルールの保護外で、週次 GC が
+              # 消す。参照している側から見れば「今日は引けるが来週引けない」で、
+              # MISSING と同じ故障を、起きる前の姿で見ていることになる。
+              #
+              # 2026-08-19 の memory も 2026-08-22 の trading も、気付いたのは
+              # 消えた後だった。ここで見えていれば GC までの最大 7 日が猶予になる。
+              proj=${repo%%/*}
+              name=$(printf '%s' "${repo#*/}" | sed 's#/#%2F#g')
+              meta=$(curl -sS --connect-timeout 10 --max-time 30 \
+                --retry 3 --retry-delay 5 --retry-connrefused \
+                -u "$HARBOR_USER:$HARBOR_PASS" \
+                "https://registry.infra.tgy.io/api/v2.0/projects/${proj}/repositories/${name}/artifacts/${digest}?with_tag=true") || meta=""
+
+              # 読めなかったときは黙る。タグが無いことと、権限が無くて分からない
+              # ことを混同すると、この監査が二度目に信用されなくなる。
+              #
+              # 既定を unknown 側に置いているのは、空の応答に jq をかけると何も
+              # 出力されず、それは「タグが空」と見分けが付かないため。curl が
+              # 落ちた回を孤児として報告するのは、直したばかりの誤報と同じ形。
+              tags="unknown"
+              if [ -n "$meta" ]; then
+                tags=$(printf '%s' "$meta" | jq -r 'if type=="object" and has("digest") then ([.tags[]?.name] | join(",")) else "unknown" end' 2>/dev/null) || tags="unknown"
+              fi
+
+              if [ -z "$tags" ]; then
+                echo "ORPHANED  $ref"
+                echo "          the artifact is still here, but nothing tags it any more. The count"
+                echo "          rule cannot retain an untagged artifact and the weekly GC deletes it."
+                echo "          Roll this reference forward before Sunday."
+                FAILED=1
+              fi
+
               # Kyverno と同じ順序で、最初にマッチしたルールが署名の置き場を決める。
               # 行ごとに cut で切り出す。read の IFS をタブにすると、その IFS が
               # ループ本体の $refs の単語分割にも効いてしまい、空白区切りの

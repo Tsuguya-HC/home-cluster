@@ -50,3 +50,22 @@ jobs:
           # Report success on PRs with nothing to gate so this status can be a
           # required check without deadlocking unrelated PRs.
           always-report: true
+          # Escape hatch. Not a security boundary — anyone who can label a PR
+          # can use it — but an auditable one: exactly one label designates a
+          # bypass, so a label search finds every PR that took it, and each use
+          # is logged as a notice in the run.
+          #
+          # The case it exists for is a pin whose digest is already what the
+          # tag resolves to. Pinning it records what every new pull would fetch
+          # anyway, so waiting out the cooldown buys nothing: the exposure is
+          # identical pinned or not. A digest *bump* is the opposite and should
+          # keep soaking.
+          #
+          # First-seen instants are never reset, so removing the label resumes
+          # the original cooldown rather than restarting it. The triggers above
+          # already include labeled/unlabeled, which is what makes the status
+          # re-evaluate when the label goes on or off.
+          #
+          # bypass-requires-status is deliberately left unset: it gates the
+          # bypass on a provenance-verify status, and nothing here posts one.
+          bypass-label: digest-cooldown-bypass

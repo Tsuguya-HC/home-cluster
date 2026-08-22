@@ -28,3 +28,6 @@ packages:
   - name: mikefarah/yq@v4.53.4
   # provides `crane`
   - name: google/go-containerregistry@v0.21.9
+  # The registry entry verifies the tarball against get.helm.sh's published
+  # .sha256sum, which azure/setup-helm did not do at all.
+  - name: helm/helm@v4.2.4

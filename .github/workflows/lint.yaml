@@ -129,13 +129,24 @@ jobs:
               done < <(yq ".spec.sources[$i].helm.valueFiles[]" "$app_file" 2>/dev/null || true)
               echo ">>> $app_name: $chart@$revision"
               if is_oci "$repo_url"; then
-                chart_ref="oci://${repo_url}/${chart}"
+                # helm 4 prints the OCI pull result ("Pulled:" / "Digest:") on
+                # stdout, so rendering straight from an oci:// ref puts two
+                # non-manifest lines at the head of the stream and kubeconform
+                # reads them as a document with no kind. helm 3 did not do this,
+                # which is why it only surfaced once the version was pinned.
+                # Pull first with that output discarded, then render the copy.
+                oci_dir=$(mktemp -d)
+                helm pull "oci://${repo_url}/${chart}" \
+                  --version "$revision" --untar --untardir "$oci_dir" >/dev/null
+                chart_ref="$oci_dir/$chart"
+                version_args=()
               else
                 alias="r$(echo "$repo_url" | sha256sum | cut -c1-8)"
                 chart_ref="$alias/$chart"
+                version_args=(--version "$revision")
               fi
               helm template "$release_name" "$chart_ref" \
-                --version "$revision" \
+                "${version_args[@]}" \
                 --namespace "$namespace" \
                 "${values_args[@]}" \
                 | kubeconform -strict -ignore-missing-schemas \
@@ -171,7 +182,15 @@ jobs:
           # the run below diffs against the PR's base commit
           fetch-depth: 0
 
-      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+      - uses: aquaproj/aqua-installer@96a9bc20066c5bf5e275b41019cfc165b25f4e2e # v4.0.5
+        with:
+          aqua_version: v2.62.3
+
+      # This job's verdict is "render, change one leaf, render again, compare",
+      # so the renderer is the measuring instrument. Record which one produced
+      # the result.
+      - name: helm version
+        run: helm version --short
 
       - name: Install PyYAML
         run: pip install --quiet pyyaml
@@ -201,8 +220,6 @@ jobs:
       - uses: aquaproj/aqua-installer@96a9bc20066c5bf5e275b41019cfc165b25f4e2e # v4.0.5
         with:
           aqua_version: v2.62.3
-
-      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
 
       - name: Check image existence
         run: |
@@ -341,8 +358,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-
-      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
 
       - uses: aquaproj/aqua-installer@96a9bc20066c5bf5e275b41019cfc165b25f4e2e # v4.0.5
         with:

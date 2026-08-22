@@ -63,6 +63,13 @@ CACHE = os.path.join(tempfile.gettempdir(), "unread-values-charts")
 
 SELF = {"scripts/unread-values.py", "scripts/unread-values-allow.txt"}
 
+# A full run examines every values file reachable from apps/. If that number
+# collapses, the discovery above broke — a schema change in the Application
+# manifests, a rename under helm-values/, a parse that silently yields nothing —
+# and the check reports "no unread keys" while looking at almost nothing. 31 as
+# of 2026-08-22. Re-baseline deliberately when the real number moves.
+MIN_VALUES_FILES = 25
+
 PROBE = "zzprobe"
 WORKERS = min(8, (os.cpu_count() or 2) * 2)
 MISSING = object()
@@ -351,6 +358,15 @@ def main():
         print("\nAllowlist entries that no longer reproduce — delete them:")
         for rel, key in stale:
             print(f"::error file={os.path.relpath(ALLOWLIST, ROOT)}::{rel}::{key}")
+    # Only meaningful for a full run: when scoped to a pull request, examining
+    # nothing is the ordinary result of a pull request that touches no values.
+    if touched is None and len(unread) < MIN_VALUES_FILES:
+        print(
+            f"::error::only {len(unread)} values file(s) examined, expected at least "
+            f"{MIN_VALUES_FILES} — the discovery in sources() is broken, not the charts"
+        )
+        return 1
+
     if not new and not stale:
         print(f"checked {len(unread)} values file(s), no unread keys")
     return 1 if new or stale else 0

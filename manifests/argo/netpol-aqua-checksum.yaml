@@ -19,7 +19,18 @@ metadata:
 #   argo/aqua-checksum-… <> 192.168.10.231:6443 (kube-apiserver)
 #     Policy denied DROPPED (TCP Flags: SYN)
 #
-# netpol-workflow-pods excludes these pods by label, so nothing else grants it.
+# The artifact repository is the other one. Argo's `wait` uploads each step's
+# log to SeaweedFS, so a workflow pod needs the filer on 8333 regardless of what
+# the workflow itself talks to. Adding only the API left these pods dropping on
+# seaweedfs instead:
+#
+#   argo/aqua-checksum-6mwhw <> seaweedfs/seaweedfs-filer-…:8333
+#     Policy denied DROPPED (TCP Flags: SYN)
+#
+# netpol-workflow-pods excludes these pods by label, so nothing else grants
+# either of them. What is deliberately *not* copied from that policy: its
+# blanket toCIDR 0.0.0.0/0 on 443, which the FQDN list below replaces on
+# purpose, and Talos apid on 50000, which this workflow has no talosctl to use.
 spec:
   endpointSelector:
     matchLabels:
@@ -30,6 +41,15 @@ spec:
       toPorts:
         - ports:
             - port: "6443"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: seaweedfs
+            app.kubernetes.io/component: filer
+            io.kubernetes.pod.namespace: seaweedfs
+      toPorts:
+        - ports:
+            - port: "8333"
               protocol: TCP
     - toFQDNs:
         - matchName: "github.com"

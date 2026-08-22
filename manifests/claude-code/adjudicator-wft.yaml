@@ -41,6 +41,10 @@ spec:
             template: adjudicate
         - - name: act-on-decision
             template: act-on-decision
+            arguments:
+              parameters:
+                - name: decision
+                  value: "{{steps.adjudicate.outputs.parameters.decision}}"
 
     - name: adjudicate
       securityContext:
@@ -108,6 +112,19 @@ spec:
             RISK_LEVEL: HIGH
             FALLBACK
             fi
+
+            # Distil the verdict here, in the pod that actually holds result.txt.
+            # Leading whitespace is tolerated; the value itself must match exactly.
+            DECISION_LINES=$(grep -cE '^[[:space:]]*DECISION:' /report/result.txt || true)
+            DECISION=$(grep -E '^[[:space:]]*DECISION:' /report/result.txt | head -1 \
+              | sed 's/^[[:space:]]*DECISION:[[:space:]]*//' | tr -d '\r' | sed 's/[[:space:]]*$//')
+
+            if [ "$DECISION_LINES" != "1" ] || { [ "$DECISION" != "APPROVE" ] && [ "$DECISION" != "REJECT" ]; }; then
+              echo "Unusable verdict (DECISION lines=$DECISION_LINES value='$DECISION'), recording REJECT"
+              DECISION=REJECT
+            fi
+            printf '%s' "$DECISION" > /report/decision.txt
+            echo "verdict: $DECISION"
         env:
           - name: HOME
             value: /tmp
@@ -129,8 +146,25 @@ spec:
             memory: 512Mi
           limits:
             memory: 4Gi
+      # An emptyDir is per-pod, so later steps cannot read /report. Hand the
+      # verdict and the report on as parameters instead.
+      outputs:
+        parameters:
+          - name: decision
+            valueFrom:
+              path: /report/decision.txt
+              default: REJECT
+            globalName: adjudication-decision
+          - name: report
+            valueFrom:
+              path: /report/result.txt
+              default: "裁定結果を取得できませんでした。Argo UI でログを確認してください。"
+            globalName: adjudication-report
 
     - name: act-on-decision
+      inputs:
+        parameters:
+          - name: decision
       securityContext:
         runAsUser: 65532
         runAsNonRoot: true
@@ -143,29 +177,13 @@ spec:
           - |
             SOURCE_WF='{{workflow.parameters.source-workflow}}'
             SOURCE_NS='{{workflow.parameters.source-namespace}}'
+            DECISION='{{inputs.parameters.decision}}'
+
+            echo "verdict: $DECISION"
 
             if [ -z "$SOURCE_WF" ]; then
               echo "No source workflow specified, skipping resume/stop"
               exit 0
-            fi
-
-            # Leading whitespace is tolerated, but the value itself must match
-            # exactly. Anything else is an unusable verdict, not an approval.
-            DECISION_LINES=$(grep -cE '^[[:space:]]*DECISION:' /report/result.txt || true)
-            DECISION=$(grep -E '^[[:space:]]*DECISION:' /report/result.txt | head -1 \
-              | sed 's/^[[:space:]]*DECISION:[[:space:]]*//' | tr -d '\r' | sed 's/[[:space:]]*$//')
-
-            VALID=0
-            if [ "$DECISION_LINES" = "1" ]; then
-              if [ "$DECISION" = "APPROVE" ] || [ "$DECISION" = "REJECT" ]; then
-                VALID=1
-              fi
-            fi
-
-            if [ "$VALID" != "1" ]; then
-              echo "Unusable verdict (DECISION lines=$DECISION_LINES value='$DECISION')"
-              echo "Falling back to REJECT so $SOURCE_WF does not stay suspended forever"
-              DECISION=REJECT
             fi
 
             if [ "$DECISION" = "APPROVE" ]; then
@@ -191,6 +209,8 @@ spec:
               fi
               echo "Workflow $SOURCE_WF resumed"
             else
+              # Anything that is not a clean APPROVE stops the source workflow.
+              # adjudicate already collapsed unreadable verdicts to REJECT.
               echo "REJECT: stopping workflow $SOURCE_WF in $SOURCE_NS"
               if ! kubectl -n "$SOURCE_NS" patch wf "$SOURCE_WF" \
                 --type=merge -p '{"spec":{"shutdown":"Stop"}}' 2>&1; then
@@ -199,18 +219,10 @@ spec:
               fi
               echo "Workflow $SOURCE_WF stopped"
             fi
-
-            # A verdict we could not read is a failure worth surfacing, even
-            # though the source workflow was stopped safely above.
-            [ "$VALID" = "1" ] || exit 1
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:
             drop: [ALL]
-        volumeMounts:
-          - name: report
-            mountPath: /report
-            readOnly: true
         resources:
           requests:
             cpu: 10m
@@ -240,10 +252,7 @@ spec:
               COLOR=16711680
             fi
 
-            REPORT=""
-            if [ -f /report/result.txt ]; then
-              REPORT=$(head -c 3800 /report/result.txt)
-            fi
+            REPORT=$(printf '%s' '{{workflow.outputs.parameters.adjudication-report}}' | head -c 3800)
             if [ -z "$REPORT" ]; then
               REPORT="裁定結果を取得できませんでした。Argo UI でログを確認してください。"
             fi
@@ -273,10 +282,6 @@ spec:
           allowPrivilegeEscalation: false
           capabilities:
             drop: [ALL]
-        volumeMounts:
-          - name: report
-            mountPath: /report
-            readOnly: true
         resources:
           requests:
             cpu: 10m

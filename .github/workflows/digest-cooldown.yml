@@ -4,7 +4,7 @@ name: Digest cooldown
 # expose no releaseTimestamp at all (renovatebot/renovate#38656), and a tag
 # bump's timestamp comes from org.opencontainers.image.created, which whoever
 # pushed the image controls and can back-date. Both are delegated to this
-# action's own clock instead (gate-version-bumps), so renovate.json nulls
+# action's own clock instead (gate-version-bumps), so renovate.jsonc nulls
 # minimumReleaseAge for the docker datasource.
 #
 # pull_request_target, not pull_request: the workflow definition then comes

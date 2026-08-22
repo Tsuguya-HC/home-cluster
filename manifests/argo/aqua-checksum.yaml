@@ -44,7 +44,7 @@ metadata:
 # Renovate drops this commit whenever it rebases the branch, and this workflow
 # then re-adds it on the resulting synchronize. That is the intended behaviour:
 # the alternative is Renovate treating the branch as modified and refusing to
-# update it at all, which strands the PR. See ignoredAuthors in renovate.json.
+# update it at all, which strands the PR. See gitIgnoredAuthors in renovate.jsonc.
 spec:
   serviceAccountName: aqua-checksum-executor
   entrypoint: main

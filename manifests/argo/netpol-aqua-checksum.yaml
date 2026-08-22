@@ -59,6 +59,18 @@ spec:
         # that every workflow runs is selected by this policy rather than by
         # netpol-workflow-pods' blanket 443 — and without this it times out.
         - matchName: "discord.com"
+        # aqua は checksum を記録する前に、上流の署名を cosign で検証する。
+        # bundle 検証自体はオフラインで完結するが、信頼のルートだけは Sigstore
+        # の TUF から取りに行くので、ここが塞がると全パッケージが落ちる:
+        #
+        #   Get "https://tuf-repo-cdn.sigstore.dev/15.root.json": i/o timeout
+        #   → Verification by Cosign failed temporarily, retrying (×5)
+        #   → aqua failed: it failed to update some packages' checksums
+        #
+        # 接続先は strace で実測した。外部に出るのは github.com /
+        # *.githubusercontent.com / このホストの 3 つだけで、rekor と fulcio
+        # には接続しない（bundle に必要な材料が入っているため）。
+        - matchName: "tuf-repo-cdn.sigstore.dev"
       toPorts:
         - ports:
             - port: "443"

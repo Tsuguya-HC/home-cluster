@@ -4,6 +4,15 @@ operator:
   # ClusterVulnerabilityReport も併せて無効になるが、workload 単位の
   # VulnerabilityReport は影響なし。SBOM が必要なら Harbor 側で保管する
   sbomGenerationEnabled: false
+  # チャートが読むのはここ。以前はトップレベルに書かれていて黙って無視され、
+  # 既定の 10 で動いていた（2026-08-22 に wn-03 の NVMe が飽和して発覚。
+  # Renovate の Argo Workflow Pod が大量に立ち、その 1.96GB のイメージを
+  # 同時 7 本がスキャンのために引いていた）。
+  #
+  #   $ helm template ... -f helm-values/trivy-operator/values.yaml \
+  #       | grep OPERATOR_CONCURRENT_SCAN_JOBS_LIMIT
+  #   OPERATOR_CONCURRENT_SCAN_JOBS_LIMIT: "10"   ← 3 が届いていなかった
+  scanJobsConcurrentLimit: 3
 
 resources:
   requests:
@@ -12,7 +21,6 @@ resources:
   limits:
     memory: 768Mi
 
-scanJobsConcurrentLimit: 3
 
 trivy:
   ignoreUnfixed: true

@@ -1,11 +1,10 @@
 admissionController:
   replicas: 1
-  resources:
-    limits:
-      memory: 384Mi
-    requests:
-      cpu: 50m
-      memory: 128Mi
+  # このコンポーネントだけ resources をコンテナ単位で受ける
+  # (backgroundController などは直下の resources が正しい)。直下にも同じ
+  # ブロックが書かれていたがチャートは読んでおらず、container 側だけが
+  # 効いていた。残しておくと container 側を消したときに気付かず
+  # チャート既定の 256Mi に戻るので、読まれない方を削除する。
   container:
     resources:
       limits:

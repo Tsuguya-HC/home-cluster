@@ -50,8 +50,17 @@ resources:
     memory: 128Mi
 
 # Prometheus の serviceMonitorSelector は release ラベルで絞っているため、
-# extraLabels で付けないと作成されても拾われない。
+# labels で付けないと作成されても拾われない。
+#
+# `serviceMonitor.enabled` + `extraLabels` はこのチャートには無い。前者は
+# `serviceMonitor.targets` に列挙したプローブ対象ごとに ServiceMonitor を
+# 作る側のスイッチで、targets が空なら何も生成しない。exporter 自身の
+# /metrics を拾うのは selfMonitor の方で、そちらが未設定だったため
+# ServiceMonitor は1つも作られていなかった（プローブ結果自体は
+# manifests/monitoring/probe-ipv6.yaml の Probe CRD 経由なので生きている。
+# 見えていなかったのは blackbox-exporter 自身の死活とスクレイプ失敗）。
 serviceMonitor:
-  enabled: true
-  extraLabels:
-    release: kube-prometheus-stack
+  selfMonitor:
+    enabled: true
+    labels:
+      release: kube-prometheus-stack

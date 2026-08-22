@@ -58,9 +58,19 @@ extraConfig:
 encryption:
   enabled: true
   type: wireguard
+  # 1.20 で strictMode の下が egress:/ingress: に分割された。旧構造
+  # (strictMode.enabled / .cidr を直下) のままだったため、chart bump 以降
+  # strict mode が黙って無効になっていた — WireGuard 自体は張れているので
+  # `cilium-dbg status` は正常に見えるが、cilium-config に
+  # enable-encryption-strict-mode が無く、未暗号化の pod-to-pod egress が
+  # そのまま通っていた。
   strictMode:
-    enabled: true
-    cidr: "10.244.0.0/16"
+    egress:
+      enabled: true
+      cidr: "10.244.0.0/16"
+      # routing-mode=tunnel では必須（chart の values.yaml が明記）。
+      # 無いと remote node identity を解決できず、正規のトラフィックまで落ちる。
+      allowRemoteNodeIdentities: true
 
 gatewayAPI:
   enabled: true

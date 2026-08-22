@@ -25,9 +25,13 @@ podSecurityContext:
   seccompProfile:
     type: RuntimeDefault
 
-serviceAccount:
-  create: false
+# `serviceAccount.create: false` はここにあったが、このチャートに create の
+# 概念は無く serviceaccount.yaml は無条件で ServiceAccount を作る。書いて
+# あると「作っていない」と読めてしまうので消す（実際は作られている）。
 
+# チャート側の条件は `updateVolumeFsOwnership and (not image.useUnprivilegedImage)`。
+# 上で useUnprivilegedImage: true にしているので、この値に関わらず
+# fsGroup 付け替えの initContainer は出ない。意図の記録として残す。
 updateVolumeFsOwnership: false
 
 persistence:

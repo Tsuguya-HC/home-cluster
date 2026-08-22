@@ -1,5 +1,8 @@
 operator:
-  scanJobNamespace: trivy-system
+  # `scanJobNamespace: trivy-system` がここにあったが、このチャート
+  # (0.35.0) の values にもテンプレートにもそのキーは存在せず、operator の
+  # env にも対応するものが無い。scan job は対象 workload と同じ namespace で
+  # 走る仕様で、集約する設定は用意されていない。
   # SBOMReport が 491件/246MB で etcd の大半を占めていたため無効化 (2026-08-08)
   # ClusterVulnerabilityReport も併せて無効になるが、workload 単位の
   # VulnerabilityReport は影響なし。SBOM が必要なら Harbor 側で保管する

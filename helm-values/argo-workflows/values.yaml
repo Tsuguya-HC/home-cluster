@@ -15,6 +15,20 @@ artifactRepository:
       key: AWS_SECRET_ACCESS_KEY
 
 controller:
+  # Prometheus に取り込まないと、ワークフローの失敗は Argo UI を開いた人しか
+  # 気づけない。9090 は元から開いていて中身も出ているが、scrape 先が無かった。
+  #
+  # secure を明示するのは、この設定を有効にした時点で chart が configmap へ
+  # secure を書き下ろすため。chart のデフォルトは false なので、書かずに
+  # enabled だけ立てると今 TLS で喋っているエンドポイントが平文に落ちる。
+  #
+  # ServiceMonitor は chart 側を使わない（templates に tlsConfig を渡す口が
+  # 無く、自己署名証明書を検証できずに scrape が落ちる）。
+  # manifests/argo/servicemonitor-workflow-controller.yaml が実体。
+  metricsConfig:
+    enabled: true
+    secure: true
+
   links:
     - name: Grafana Logs
       scope: workflow

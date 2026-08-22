@@ -114,7 +114,7 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 | Component | Ingress | Egress |
 |---|---|---|
 | **workflows-server** | ingress → 2746 (L7 HTTP); sensors (tofu-cloudflare, upgrade-k8s, pxe-sync), workflows-controller → 2746 | kube-apiserver, shared-pg (database):5432, kanidm (kanidm):8443, seaweedfs-filer (seaweedfs):8333 |
-| **workflows-controller** | host → 6060 | kube-apiserver, shared-pg (database):5432, workflows-server:2746 |
+| **workflows-controller** | host → 6060; prometheus (monitoring) → 9090 (metrics, TLS) | kube-apiserver, shared-pg (database):5432, workflows-server:2746 |
 | **eventsource** | cloudflared (argocd) → 12000 | kube-apiserver, eventbus:4222 |
 | **alertmanager-eventsource** | alertmanager (monitoring) → 12001 | kube-apiserver, eventbus:4222 |
 | **argocd-deployed-eventsource** | notifications-controller (argocd) → 12003 | kube-apiserver, eventbus:4222 |
@@ -140,7 +140,7 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 
 | Component | Ingress | Egress |
 |---|---|---|
-| **prometheus** | grafana, tempo, claude-code (claude-code) → 9090 | kube-apiserver, alertmanager:9093/8080, kube-state-metrics:8080, operator:10250, grafana:3000, smartctl-exporter:9633, tempo:3200 (scrape), coredns (kube-system):9153, tetragon-operator (kube-system):2113, seaweedfs (seaweedfs):9327, trivy-operator (trivy-system):8080, harbor (harbor):8001, host/remote-node:10250/9100/9115/2379/2381/10257/10259/9965/2112 |
+| **prometheus** | grafana, tempo, claude-code (claude-code) → 9090 | kube-apiserver, alertmanager:9093/8080, kube-state-metrics:8080, operator:10250, grafana:3000, smartctl-exporter:9633, argo-workflows-controller (argo):9090, tempo:3200 (scrape), coredns (kube-system):9153, tetragon-operator (kube-system):2113, seaweedfs (seaweedfs):9327, trivy-operator (trivy-system):8080, harbor (harbor):8001, host/remote-node:10250/9100/9115/2379/2381/10257/10259/9965/2112 |
 | **alertmanager** | prometheus → 9093/8080 | discord.com:443, discordapp.com:443, alertmanager-eventsource (argo):12001 |
 | **grafana** | ingress → 3000 (L7 HTTP); prometheus → 3000 | kube-apiserver, prometheus:9090, loki-gateway:8080, tempo:3200, shared-pg (database):5432, kanidm (kanidm):8443 |
 | **kube-state-metrics** | prometheus → 8080 | kube-apiserver |

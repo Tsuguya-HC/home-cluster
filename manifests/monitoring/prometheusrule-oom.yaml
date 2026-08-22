@@ -1,0 +1,38 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: oom
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: oom
+      rules:
+        # OOMKilled は「落ちて即座に復帰する」ため、既存のルールを全部すり抜ける。
+        # chart 同梱の KubePodCrashLooping は waiting_reason=CrashLoopBackOff が
+        # 条件なので、1 回落ちてすぐ Running に戻る形では発火しない。
+        #
+        # harbor-nginx はこれで 2 週間に 4 回 OOM していたが誰も気づかず、
+        # 2026-08-22 に大きい image の push と重なって初めて表面化した
+        # （buildkit が connection reset を受けてビルドが失敗した）。
+        # tetragon と harbor-trivy の OOM に至っては、その調査の副産物として
+        # 見つかるまで完全に未知だった。
+        #
+        # last_terminated_reason は「最後の終了理由」で 1 のまま張り付くので、
+        # 単独では新規発生を表さない。restarts_total の増加と組み合わせて
+        # 「今 OOM で再起動した」だけを取る。
+        #
+        # retention 全域 (14日) で range 評価して発火は 7 回。2 日に 1 回なので
+        # warning のまま Discord に流す。critical にすると alert-investigate が
+        # horenso タスクを 2 日に 1 件立て続けることになる。
+        - alert: ContainerOOMKilled
+          expr: |
+            increase(kube_pod_container_status_restarts_total[10m]) > 0
+            and on (namespace, pod, container)
+            kube_pod_container_status_last_terminated_reason{reason="OOMKilled"} == 1
+          labels:
+            severity: warning
+          annotations:
+            summary: "OOMKilled で再起動 ({{ $labels.namespace }}/{{ $labels.pod }} {{ $labels.container }})"
+            description: "{{ $labels.namespace }}/{{ $labels.pod }} の {{ $labels.container }} が memory limit に当たって落ちた。即座に復帰するので気づきにくいが、その瞬間の接続は切れている。limit を見直すか、使用量の跳ね方を調べる。"

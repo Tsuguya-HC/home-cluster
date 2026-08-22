@@ -1,0 +1,23 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: argo-workflows-workflow-controller
+  namespace: argo
+  labels:
+    release: kube-prometheus-stack
+spec:
+  endpoints:
+    # controller のメトリクスは自己署名証明書の TLS で出ている。chart 同梱の
+    # ServiceMonitor は scheme しか書けず tlsConfig を渡せないため、
+    # helm-values 側では serviceMonitor を有効にせずここで定義する。
+    - port: metrics
+      path: /metrics
+      scheme: https
+      interval: 30s
+      scrapeTimeout: 10s
+      tlsConfig:
+        insecureSkipVerify: true
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: argo-workflows-workflow-controller
+      app.kubernetes.io/instance: argo-workflows

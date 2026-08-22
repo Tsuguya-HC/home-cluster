@@ -11,11 +11,6 @@
       "algorithm": "sha512"
     },
     {
-      "id": "github_release/github.com/rhysd/actionlint/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz",
-      "checksum": "8ACA8DB96F1B94770F1B0D72B6DDDCB1EBB8123CB3712530B08CC387B349A3D8",
-      "algorithm": "sha256"
-    },
-    {
       "id": "github_release/github.com/yannh/kubeconform/v0.8.0/kubeconform-linux-amd64.tar.gz",
       "checksum": "9BC2BFFBF71F261128533EDAF912153948B7FF238F9A531AE6D34466EC287883",
       "algorithm": "sha256"

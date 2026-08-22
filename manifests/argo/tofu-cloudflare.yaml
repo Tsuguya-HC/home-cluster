@@ -99,7 +99,7 @@ spec:
             limits:
               memory: 64Mi
         - name: git-clone
-          image: alpine/git:v2.54.0
+          image: alpine/git:v2.54.0@sha256:a299a963fbe31628ab481ca42907bcf0691d004f86734c02638abdf513691d42
           command: [sh, -c]
           args:
             - |
@@ -116,7 +116,7 @@ spec:
             capabilities:
               drop: [ALL]
       container:
-        image: ghcr.io/opentofu/opentofu:1.12.6
+        image: ghcr.io/opentofu/opentofu:1.12.6@sha256:22cb52f6c5bf5c72a48a8f56d993d8df3e9462b1cdfb5db7e77143c87e8d159f
         resources:
           requests:
             cpu: 50m
@@ -233,7 +233,7 @@ spec:
             limits:
               memory: 128Mi
         - name: git-clone
-          image: alpine/git:v2.54.0
+          image: alpine/git:v2.54.0@sha256:a299a963fbe31628ab481ca42907bcf0691d004f86734c02638abdf513691d42
           command: [sh, -c]
           args:
             - |
@@ -253,7 +253,7 @@ spec:
             capabilities:
               drop: [ALL]
       container:
-        image: ghcr.io/opentofu/opentofu:1.12.6
+        image: ghcr.io/opentofu/opentofu:1.12.6@sha256:22cb52f6c5bf5c72a48a8f56d993d8df3e9462b1cdfb5db7e77143c87e8d159f
         resources:
           requests:
             cpu: 50m

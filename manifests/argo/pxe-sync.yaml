@@ -69,7 +69,7 @@ spec:
           configMap:
             name: pxe-server-files
       container:
-        image: alpine:3.24
+        image: alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
         resources:
           requests:
             cpu: 10m
@@ -119,7 +119,7 @@ spec:
         labels:
           pxe-sync: "true"
       container:
-        image: alpine:3.24
+        image: alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
         resources:
           requests:
             cpu: 10m
@@ -162,7 +162,7 @@ spec:
           emptyDir: {}
       initContainers:
         - name: git-clone
-          image: alpine/git:v2.54.0
+          image: alpine/git:v2.54.0@sha256:a299a963fbe31628ab481ca42907bcf0691d004f86734c02638abdf513691d42
           command: [git, clone, --depth, "1"]
           args: ["https://github.com/Tsuguya/home-infra.git", /workspace]
           volumeMounts:
@@ -173,7 +173,7 @@ spec:
             capabilities:
               drop: [ALL]
       container:
-        image: alpine:3.24
+        image: alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
         resources:
           requests:
             cpu: 10m

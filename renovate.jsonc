@@ -151,6 +151,27 @@
   "packageRules": [
     {
       "description": [
+        "First-party code does not soak. minimumReleaseAge buys time for someone",
+        "else to notice a poisoned release before we take it; there is no someone",
+        "else here — we wrote it, reviewed it and merged it. Waiting three days on",
+        "our own reusable workflow only delays fixes to the thing that gates every",
+        "other check."
+      ],
+      "matchPackageNames": ["Tsuguya/**"],
+      "minimumReleaseAge": "0"
+    },
+    {
+      "description": [
+        "Lock file maintenance refreshes transitive versions; there is no single",
+        "release to age, so the gate can never be satisfied. horenso#66 was stuck",
+        "pending on it with automerge enabled, which means it would never have",
+        "merged at all. The resolution-time cooldown in .npmrc is what soaks these."
+      ],
+      "matchUpdateTypes": ["lockFileMaintenance"],
+      "minimumReleaseAge": "0"
+    },
+    {
+      "description": [
         "Automerge patch updates. pinDigest is here because pinning changes nothing",
         "that runs — it writes down the digest the registry already resolves the tag",
         "to — and leaving those PRs for a human is what leaves a new service unpinned",

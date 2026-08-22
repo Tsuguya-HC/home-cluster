@@ -178,18 +178,20 @@ spec:
               --model sonnet \
               "$PROMPT" || true
 
-            RESULT=""
-            if [ -f /tmp/result.txt ]; then
-              RESULT=$(head -c 3800 /tmp/result.txt)
-            fi
-            if [ -z "$RESULT" ]; then
-              RESULT="結果ファイルが生成されませんでした。Argo UI でログを確認してください。"
+            # horenso の result は TEXT で上限が無い。ここで切る理由は無いので、
+            # 暴走時の保険としての上限だけ残す。jq の文字列スライスは文字単位なので
+            # UTF-8 のコードポイントを割らない。
+            if [ ! -s /tmp/result.txt ]; then
+              printf '%s' "結果ファイルが生成されませんでした。Argo UI でログを確認してください。" \
+                > /tmp/result.txt
             fi
 
-            PAYLOAD=$(jq -n \
-              --arg status "completed" \
-              --arg result "$RESULT" \
-              '{status:$status,result:$result}')
+            PAYLOAD=$(jq -Rs --arg status "completed" --argjson max 65536 \
+              '{status: $status,
+                result: (if length > $max
+                         then .[0:$max] + "\n\n_(結果が長いため以降を省略。Argo UI のログに全文があります)_"
+                         else . end)}' \
+              < /tmp/result.txt)
             curl -s -X PATCH \
               -H "Content-Type: application/json" \
               -d "$PAYLOAD" \

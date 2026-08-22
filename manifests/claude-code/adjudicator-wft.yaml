@@ -252,7 +252,10 @@ spec:
               COLOR=16711680
             fi
 
-            REPORT=$(printf '%s' '{{workflow.outputs.parameters.adjudication-report}}' | head -c 3800)
+            # Discord の上限は 4096 "文字"。jq の文字列スライスは文字単位。
+            REPORT=$(printf '%s' '{{workflow.outputs.parameters.adjudication-report}}' \
+              | jq -Rsr --argjson max 3900 \
+                  'if length > $max then .[0:$max] + "\n\n_(以降を省略)_" else . end')
             if [ -z "$REPORT" ]; then
               REPORT="裁定結果を取得できませんでした。Argo UI でログを確認してください。"
             fi

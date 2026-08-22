@@ -99,6 +99,28 @@ registry:
       memory: 128Mi
     limits:
       memory: 512Mi
+  # 起動から 0〜24h のジッタ後に走る upload purger が、SeaweedFS の S3 を
+  # walk する途中で必ず panic してプロセスごと落ちる:
+  #
+  #   panic: runtime error: index out of range [0] with length 0
+  #     storage.getOutstandingUploads.func1  purgeuploads.go:73
+  #     ← s3-aws.(*driver).doWalk ← ListObjectsV2Pages
+  #
+  # exit 2 で死んで再起動、またジッタ後に同じ場所で死ぬ、の繰り返しで
+  # 6日半に 339 回再起動していた。落ちるたびに registry.infra.tgy.io が
+  # 5xx を返す窓が開き、Kyverno の verify-image-signatures が digest を
+  # 解決できず Argo の Renovate ワークフローが弾かれていた。
+  #
+  # 上流のバグ（docker/distribution の S3 driver と SeaweedFS の
+  # ListObjectsV2 レスポンスの相性）なので、こちら側では purger を止める
+  # しかない。
+  #
+  # 代償として、中断したアップロードの断片が S3 の _upload/ に残り続ける。
+  # home-harbor の GC は週次で回っている（system.tf, 土 18:00）が、それが
+  # 参照されない blob ではなく _upload/ の一時ファイルまで回収するかは
+  # 未確認。溜まるようなら別途始末する必要がある。
+  upload_purging:
+    enabled: false
 
 jobservice:
   jobLoggers:

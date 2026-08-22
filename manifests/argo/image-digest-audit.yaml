@@ -74,7 +74,9 @@ metadata:
   name: image-digest-audit
   namespace: argo
 spec:
-  activeDeadlineSeconds: 600
+  # 到達性プローブは接続不能を確定させるまでに retry を使い切る (実測 110 秒)。
+  # 監査そのものは 40 秒程度なので、揺れている側に倒れても収まる余裕を持たせる。
+  activeDeadlineSeconds: 900
   serviceAccountName: image-digest-auditor
   entrypoint: main
   templates:
@@ -134,6 +136,31 @@ spec:
                  (.repository // "")] | @tsv
             ' > /tmp/rules.tsv
 
+            # レジストリに届かないことと digest が消えたことは、呼び出し側から
+            # 見ると同じ「200 ではない」でしかない。区別せずに報告すると、
+            # 数十秒の再起動が「稼働中の全イメージが消えた」という一番強い
+            # アラートに化ける。導入時に ingress 許可を入れ忘れていたときが
+            # まさにそれで、実在する 3 件が MISSING として報告された。
+            #
+            # そこで到達性は独立に確かめる。/v2/ はレジストリ API の入口で、
+            # 生きていれば 200 か 401 を返す。接続レベルで落ちるなら、その回の
+            # 監査は「イメージが消えた」ではなく「何も分からなかった」。
+            reachable() {
+              probe=$(curl -sS -o /dev/null -w '%{http_code}' \
+                --connect-timeout 10 --max-time 30 \
+                --retry 5 --retry-delay 10 --retry-connrefused \
+                -u "$HARBOR_USER:$HARBOR_PASS" \
+                "https://registry.infra.tgy.io/v2/") || probe="000"
+              [ "$probe" = "200" ] || [ "$probe" = "401" ]
+            }
+
+            if ! reachable; then
+              echo "UNREACHABLE registry.infra.tgy.io does not answer /v2/ after retries."
+              echo "            This run proves nothing about any digest — it did not get to ask."
+              echo "            Look at harbor before reading anything into it."
+              exit 1
+            fi
+
             mkdir -p /tmp/docker
             printf '{"auths":{"registry.infra.tgy.io":{"auth":"%s"}}}' \
               "$(printf '%s:%s' "$HARBOR_USER" "$HARBOR_PASS" | base64 -w0)" > /tmp/docker/config.json
@@ -178,10 +205,28 @@ spec:
                 continue
               fi
 
+              # 404 は retry されない (curl が再試行するのは接続失敗・タイムアウト・
+              # 5xx だけ)。消えた digest は速く落ち、揺れているレジストリだけが粘る。
               code=$(curl -sS -o /dev/null -w '%{http_code}' -I \
+                --connect-timeout 10 --max-time 30 \
+                --retry 3 --retry-delay 5 --retry-connrefused \
                 -u "$HARBOR_USER:$HARBOR_PASS" \
                 -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
                 "https://registry.infra.tgy.io/v2/${repo}/manifests/${digest}") || code="000"
+
+              if [ "$code" = "000" ]; then
+                # 接続そのものが落ちた。途中でレジストリが落ちた可能性があるので、
+                # 残りを MISSING として並べる前に確かめ直す。
+                if ! reachable; then
+                  echo "UNREACHABLE registry.infra.tgy.io stopped answering partway through."
+                  echo "            Findings above this line stand; everything after is unknown."
+                  exit 1
+                fi
+                echo "MISSING   $ref"
+                echo "          the registry is up but this request failed at the connection level."
+                FAILED=1
+                continue
+              fi
 
               if [ "$code" != "200" ]; then
                 echo "MISSING   $ref"

@@ -58,12 +58,20 @@ persistence:
 
 trivy:
   enabled: true
+  # working_set は平常 5Mi 前後で、OOM 前後を 1 分刻みで見ても跳ねない。
+  # 効いているのは page cache で、数百 MB の脆弱性 DB を読むと
+  # max_usage_bytes が limit ちょうど (1023Mi / 1024Mi) に張り付く。
+  # 2026-08-20 の OOMKilled はこれで、平常時のグラフを見ている限り
+  # 気づけない類の枯渇。
+  #
+  # page cache は回収可能なので limit を上げても同じだけ埋まるが、
+  # 回収が間に合わずに OOM する余地は減る。根治ではなく緩和。
   resources:
     requests:
       cpu: 50m
       memory: 256Mi
     limits:
-      memory: 1Gi
+      memory: 2Gi
 
 core:
   extraEnvVars:

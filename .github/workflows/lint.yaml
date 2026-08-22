@@ -146,6 +146,49 @@ jobs:
             done
           done
 
+  # A key at the wrong nesting level renders exactly like one that was never
+  # written: Helm ignores it, the chart falls back to its default, and nothing
+  # anywhere says so. values.schema.json does not cover this — only 7 of our
+  # charts ship one and only cert-manager sets additionalProperties: false.
+  # That is how `scanJobsConcurrentLimit` sat at the top level of the
+  # trivy-operator values for months while the operator ran on the chart
+  # default of 10 (#547), and how Cilium's WireGuard strict mode switched
+  # itself off when 1.20 split strictMode into egress:/ingress:.
+  #
+  # This renders each chart, changes one leaf of our values at a time, and
+  # renders again: a key no template reads produces byte-identical output.
+  # On a pull request it only examines the values files the PR touches, plus
+  # every values file of a chart whose targetRevision moved — which is exactly
+  # the Renovate bump PR that would otherwise land the rename silently.
+  unread-values:
+    name: unread values
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # the run below diffs against the PR's base commit
+          fetch-depth: 0
+
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
+
+      - name: Check for values keys no chart reads
+        env:
+          # Empty on push, which makes the script check every chart. Kept out
+          # of the script body so the ref cannot be interpolated into it.
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
+        run: |
+          set -euo pipefail
+          if [ -n "${BASE_SHA}" ]; then
+            python3 scripts/unread-values.py --changed "${BASE_SHA}"
+          else
+            python3 scripts/unread-values.py
+          fi
+
   image-existence:
     name: image existence
     runs-on: ubuntu-latest
@@ -429,7 +472,7 @@ jobs:
       contents: read
   gate:
     name: CI Gate
-    needs: [kubeconform, helm-template, image-existence, mcp, argo-lint, lint-workflows, lint-renovate, lint-aqua]
+    needs: [kubeconform, helm-template, unread-values, image-existence, mcp, argo-lint, lint-workflows, lint-renovate, lint-aqua]
     # `!cancelled()` rather than `always()`: under always(), cancelling a run
     # leaves every leaf reporting `cancelled`, which falls through the case
     # below and records the required check as a failure. A cancelled run has no

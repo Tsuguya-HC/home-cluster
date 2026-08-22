@@ -189,6 +189,10 @@ spec:
             echo
 
             FAILED=0
+            # タグ判定が何件成立したか。0 件のまま終わるなら、この監査は
+            # 「孤児はいない」ではなく「孤児を見る目を失っている」。
+            TAGSEEN=0
+            TAGBLIND=0
             while IFS= read -r ref; do
               [ -n "$ref" ] || continue
 
@@ -261,6 +265,12 @@ spec:
                 tags=$(printf '%s' "$meta" | jq -r 'if type=="object" and has("digest") then ([.tags[]?.name] | join(",")) else "unknown" end' 2>/dev/null) || tags="unknown"
               fi
 
+              if [ "$tags" = "unknown" ]; then
+                TAGBLIND=$((TAGBLIND + 1))
+              else
+                TAGSEEN=$((TAGSEEN + 1))
+              fi
+
               if [ -z "$tags" ]; then
                 echo "ORPHANED  $ref"
                 echo "          the artifact is still here, but nothing tags it any more. The count"
@@ -325,6 +335,19 @@ spec:
             done < /tmp/images.txt
 
             echo
+            # 一件も読めなかったなら、ORPHANED は一度も判定されていない。
+            # 権限を失った監査は「孤児 0 件」を静かに報告し続けるので、
+            # 見えていないこと自体を失敗として言う。個別の unknown は
+            # 一過性でありうるので、全滅したときだけ。
+            if [ "$TAGSEEN" = 0 ] && [ "$TAGBLIND" -gt 0 ]; then
+              echo "TAGBLIND  could not read tag state for any of the $TAGBLIND reference(s)."
+              echo "          ORPHANED was never evaluated, so nothing above rules out an orphan."
+              echo "          Check that the robot still has artifact:read on these projects."
+              FAILED=1
+            elif [ "$TAGBLIND" -gt 0 ]; then
+              echo "note: tag state unreadable for $TAGBLIND of $((TAGSEEN + TAGBLIND)) reference(s)."
+            fi
+
             if [ "$FAILED" = 0 ]; then
               echo "everything that could start right now can still pull and verify what it references"
             else

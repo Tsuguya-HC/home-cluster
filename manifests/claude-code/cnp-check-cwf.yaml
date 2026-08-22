@@ -1,0 +1,267 @@
+# CNP カバレッジ点検。判定を散文ではなくディレクトリで受け取る実験を兼ねる。
+#
+# エージェントは out/{pass,attention,escalate} のいずれかにレポートを置く。out/ 自体は
+# 別 uid の所有で 0555 なので、語彙の外にディレクトリを作ることが mkdir の時点でできない。
+# 判定は Argo の output parameter で持ち出す（workflow の emptyDir はステップ間で共有されない）。
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: agent-cnp-reader
+  namespace: claude-code
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: agent-cnp-reader
+rules:
+  # 点検に要るものだけ。claude-code-sre と違い pods/exec は持たない。
+  - apiGroups: [""]
+    resources: [pods, namespaces]
+    verbs: [get, list]
+  - apiGroups: [cilium.io]
+    resources: [ciliumnetworkpolicies, ciliumclusterwidenetworkpolicies]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: agent-cnp-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: agent-cnp-reader
+subjects:
+  - kind: ServiceAccount
+    name: agent-cnp-reader
+    namespace: claude-code
+---
+apiVersion: argoproj.io/v1alpha1
+kind: CronWorkflow
+metadata:
+  name: cnp-check
+  namespace: claude-code
+spec:
+  schedules:
+    - "0 3 * * *"
+  timezone: Asia/Tokyo
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  workflowSpec:
+    entrypoint: main
+    onExit: notify
+    serviceAccountName: agent-cnp-reader
+    activeDeadlineSeconds: 1500
+    podMetadata:
+      labels:
+        claude-code: "true"
+    securityContext:
+      seccompProfile:
+        type: RuntimeDefault
+    volumes:
+      - name: work
+        emptyDir: {}
+    affinity:
+      nodeAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            preference:
+              matchExpressions:
+                - key: kubernetes.io/hostname
+                  operator: In
+                  values: [wn-03]
+    templates:
+      - name: main
+        steps:
+          - - name: analyze
+              template: analyze
+
+      - name: analyze
+        securityContext:
+          # エージェントは 65533。ディレクトリを作る init は 65532。所有者が違うので
+          # エージェントは out/ を chmod し直すことも、新しい分類を生やすこともできない。
+          runAsUser: 65533
+          runAsNonRoot: true
+          runAsGroup: 65532
+          fsGroup: 65532
+        initContainers:
+          - name: prepare
+            image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:d29e837e2601fadc50e346398e86934c9cf49b309448b89b19b867122c9bf74b
+            command: [sh, -c]
+            args:
+              - |
+                set -eu
+                mkdir -p /work/out/pass /work/out/attention /work/out/escalate
+                chmod 0775 /work/out/pass /work/out/attention /work/out/escalate
+                chmod 0555 /work/out
+                ls -la /work/out
+            securityContext:
+              runAsUser: 65532
+              runAsGroup: 65532
+              runAsNonRoot: true
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop: [ALL]
+            volumeMounts:
+              - name: work
+                mountPath: /work
+            resources:
+              requests:
+                cpu: 10m
+                memory: 32Mi
+              limits:
+                memory: 64Mi
+        container:
+          image: registry.infra.tgy.io/tools/claude-code:latest@sha256:d18dbca36308e573509c2617ab6c57e050facfb0723ed29386101117408c0b1f
+          command: [sh, -c]
+          workingDir: /work
+          args:
+            - |
+              PROMPT="あなたは Kubernetes クラスタの CiliumNetworkPolicy カバレッジ点検員です。
+
+              ## タスク
+              全 namespace の Pod が CNP/CCNP に覆われているかを点検し、結果を報告してください。
+
+              ## 手順
+              1. kubectl get ciliumnetworkpolicies -A -o json と kubectl get ciliumclusterwidenetworkpolicies -o json で全ポリシーを取得する
+              2. kubectl get pods -A -o json で全 Pod とそのラベルを取得する
+              3. 各 Pod が、どのポリシーの endpointSelector にも一致しないかを判定する
+              4. 直近 24 時間の POLICY_DENIED を Loki で確認する:
+                 curl -sG 'http://loki-gateway.monitoring.svc.cluster.local:80/loki/api/v1/query_range' \\
+                   --data-urlencode 'query={job=\"hubble\"}' --data-urlencode 'limit=300' \\
+                   --data-urlencode \"start=\$(date -u -d '24 hours ago' +%s)000000000\"
+                 取得できない場合はその旨を書いて次に進む
+
+              ## 除外
+              hostNetwork: true の Pod は CNP の対象外なので未カバー扱いにしない。
+              Completed/Succeeded の Pod も対象外。
+
+              ## 出力（重要）
+              判定に応じて置き場所を変えること。ファイル名は report.md 固定。
+
+              - 未カバー Pod も POLICY_DENIED も無い  -> /work/out/pass/report.md
+              - 対処すべき指摘がある                  -> /work/out/attention/report.md
+              - 情報が足りず判定できない              -> /work/out/escalate/report.md
+
+              **3 つのうち必ず 1 つだけに書くこと。** 複数に書いてはいけない。
+              /work/out/ に新しいディレクトリを作ることはできない（作れなくても正常）。
+
+              report.md の中身は自由。namespace ごとの未カバー Pod、POLICY_DENIED の
+              送信元/宛先と理由、対処案を簡潔に。長くても 3000 字以内。"
+
+              claude -p \
+                --verbose \
+                --output-format stream-json \
+                --dangerously-skip-permissions \
+                --allowedTools "Bash,Read,Write,Grep,Glob" \
+                --model sonnet \
+                --max-turns 40 \
+                "$PROMPT" || true
+
+              # ---- 判定の回収。ここから先はエージェントの発話を一切読まない ----
+              FOUND=""
+              COUNT=0
+              for v in pass attention escalate; do
+                if [ -n "$(ls -A "/work/out/$v" 2>/dev/null)" ]; then
+                  FOUND="$v"
+                  COUNT=$((COUNT + 1))
+                fi
+              done
+
+              if [ "$COUNT" = "1" ]; then
+                VERDICT="$FOUND"
+                head -c 3500 "/work/out/$FOUND/report.md" > /work/report.md 2>/dev/null || true
+              else
+                VERDICT=indeterminate
+                echo "非空のディレクトリが $COUNT 個ありました（ちょうど 1 個であるべき）。" > /work/report.md
+                ls -laR /work/out >> /work/report.md 2>&1 || true
+              fi
+
+              if [ ! -s /work/report.md ]; then
+                echo "レポートが空でした。" > /work/report.md
+              fi
+
+              printf '%s' "$VERDICT" > /work/verdict.txt
+              echo "verdict: $VERDICT"
+          env:
+            - name: HOME
+              value: /tmp
+            - name: CLAUDE_CODE_OAUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: claude-code-token
+                  key: credential
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: work
+              mountPath: /work
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              memory: 4Gi
+        outputs:
+          parameters:
+            - name: verdict
+              valueFrom:
+                path: /work/verdict.txt
+                default: indeterminate
+              globalName: cnp-check-verdict
+            - name: report
+              valueFrom:
+                path: /work/report.md
+                default: "レポートを取得できませんでした。Argo UI でログを確認してください。"
+              globalName: cnp-check-report
+
+      - name: notify
+        securityContext:
+          runAsUser: 65532
+          runAsNonRoot: true
+        container:
+          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:d29e837e2601fadc50e346398e86934c9cf49b309448b89b19b867122c9bf74b
+          command: [sh, -c]
+          args:
+            - |
+              VERDICT='{{workflow.outputs.parameters.cnp-check-verdict}}'
+              REPORT=$(printf '%s' '{{workflow.outputs.parameters.cnp-check-report}}' | head -c 3800)
+              WF_NAME="{{workflow.name}}"
+              NS="{{workflow.namespace}}"
+              URL="https://argo.infra.tgy.io/workflows/${NS}/${WF_NAME}"
+              TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)
+
+              case "$VERDICT" in
+                pass)      COLOR=65280 ;;
+                attention) COLOR=16776960 ;;
+                *)         COLOR=16711680 ;;
+              esac
+
+              PAYLOAD=$(jq -n \
+                --arg title "CNP check: ${VERDICT}" \
+                --arg url "$URL" \
+                --argjson color "$COLOR" \
+                --arg report "$REPORT" \
+                --arg ts "$TIMESTAMP" \
+                '{embeds: [{title: $title, url: $url, color: $color, description: $report, timestamp: $ts}]}')
+
+              wget -qO /dev/null --header="Content-Type: application/json" \
+                --post-data="$PAYLOAD" "$DISCORD_WEBHOOK_URL"
+          env:
+            - name: DISCORD_WEBHOOK_URL
+              valueFrom:
+                secretKeyRef:
+                  name: discord-webhook-argo
+                  key: url
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi

@@ -66,6 +66,14 @@ spec:
               protocol: TCP
     - toEndpoints:
         - matchLabels:
+            app.kubernetes.io/name: argo-workflows-workflow-controller
+            io.kubernetes.pod.namespace: argo
+      toPorts:
+        - ports:
+            - port: "9090"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
             app.kubernetes.io/name: tempo
       toPorts:
         - ports:

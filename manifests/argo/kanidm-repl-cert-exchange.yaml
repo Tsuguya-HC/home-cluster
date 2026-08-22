@@ -73,11 +73,28 @@ spec:
 
             CERT_0=$(cat /tmp/cert-0)
             CERT_1=$(cat /tmp/cert-1)
+            # kanidm-0 が primary、kanidm-1 が secondary。
+            #
+            # automatic_refresh は「分岐したとき自分を相手の内容で作り直す」設定
+            # で、**片側にだけ**付ける。両側に付けると双方が consumer 役を要求し
+            # 合い、どちらも supplier を引き受けないので永久にデッドロックする。
+            # 上流ドキュメントもそう書いている:
+            #
+            #   The secondary can have automatic_refresh = true ... while the
+            #   primary should not have this setting. This means that if
+            #   database issues occur the content of the primary will take
+            #   precedence over the secondary.
+            #
+            # 実際、両側に付けていたせいで RUV 分岐が自動回復せず、2026-07-03 と
+            # 2026-08-22 の 2 回、手動の refresh-replication-consumer が必要に
+            # なった。2 回目は 7 時間以上デッドロックしたままだった。
+            #
+            # primary を ordinal 0 にしているのは、StatefulSet が 0 から順に
+            # 起動するため。分岐時は kanidm-0 の内容が残る。
             cat > /tmp/partner-0.toml << EOF
             [replication."repl://kanidm-1.kanidm-headless.kanidm.svc.cluster.local:8444"]
             type = "mutual-pull"
             partner_cert = "${CERT_1}"
-            automatic_refresh = true
             EOF
 
             cat > /tmp/partner-1.toml << EOF

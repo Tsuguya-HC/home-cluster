@@ -7,3 +7,7 @@
 
 # Node
 node_modules/
+
+# Claude Code worktrees. These live inside the working tree and are their own
+# git repositories, so `git add -A` stages them as gitlinks.
+.claude/worktrees/

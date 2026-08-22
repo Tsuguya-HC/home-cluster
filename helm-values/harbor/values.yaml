@@ -146,12 +146,14 @@ jobservice:
       memory: 256Mi
 
 nginx:
+  # 全 push/pull の経路。大きい blob の並列アップロードでスパイクし、
+  # 128Mi では OOMKilled した (2026-08-22)
   resources:
     requests:
       cpu: 10m
-      memory: 32Mi
+      memory: 64Mi
     limits:
-      memory: 128Mi
+      memory: 512Mi
 
 exporter:
   resources:

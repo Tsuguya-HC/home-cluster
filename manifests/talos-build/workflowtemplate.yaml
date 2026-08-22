@@ -27,7 +27,8 @@ metadata:
   name: talos-secureboot-build
   namespace: talos-build
 spec:
-  activeDeadlineSeconds: 3600
+  # ビルドテンプレートは最大3回まで再試行するので、その最悪ケースを収める
+  activeDeadlineSeconds: 7200
   synchronization:
     mutexes:
       - name: talos-secureboot-build
@@ -97,6 +98,12 @@ spec:
                   value: "{{steps.resolve-version.outputs.parameters.version}}"
 
     - name: resolve-version
+      retryStrategy:
+        limit: 3
+        retryPolicy: Always
+        backoff:
+          duration: 10s
+          factor: 2
       inputs:
         parameters:
           - name: version
@@ -146,6 +153,16 @@ spec:
             memory: 64Mi
 
     - name: build-and-push-installer
+      # ghcr.io からの extension pull が HTTP/2 PROTOCOL_ERROR で落ちることがある。
+      # ハングを 30 分で打ち切って（正常時は約 16 分）作り直す。
+      activeDeadlineSeconds: 1800
+      retryStrategy:
+        limit: 2
+        retryPolicy: Always
+        backoff:
+          duration: 1m
+          factor: 2
+          maxDuration: 5m
       inputs:
         parameters:
           - name: version
@@ -272,6 +289,16 @@ spec:
             readOnly: true
 
     - name: build-and-push-iso
+      # ghcr.io からの extension pull が HTTP/2 PROTOCOL_ERROR で落ちることがある。
+      # ハングを 30 分で打ち切って（正常時は約 16 分）作り直す。
+      activeDeadlineSeconds: 1800
+      retryStrategy:
+        limit: 2
+        retryPolicy: Always
+        backoff:
+          duration: 1m
+          factor: 2
+          maxDuration: 5m
       inputs:
         parameters:
           - name: version
@@ -441,6 +468,12 @@ spec:
             readOnly: true
 
     - name: finalize-release
+      retryStrategy:
+        limit: 3
+        retryPolicy: Always
+        backoff:
+          duration: 10s
+          factor: 2
       inputs:
         parameters:
           - name: version

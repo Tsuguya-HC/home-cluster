@@ -58,14 +58,21 @@ persistence:
 
 trivy:
   enabled: true
-  # working_set は平常 5Mi 前後で、OOM 前後を 1 分刻みで見ても跳ねない。
-  # 効いているのは page cache で、数百 MB の脆弱性 DB を読むと
-  # max_usage_bytes が limit ちょうど (1023Mi / 1024Mi) に張り付く。
-  # 2026-08-20 の OOMKilled はこれで、平常時のグラフを見ている限り
-  # 気づけない類の枯渇。
+  # 平常時は API サーバとして待つだけで rss 5Mi 前後。メモリを食うのは
+  # スキャン実行中だけで、そのスパイクは cAdvisor の 30 秒間隔に写らない
+  # ほど短い。2026-08-20 の OOMKilled はスキャン要求の 10 秒後に起きた:
   #
-  # page cache は回収可能なので limit を上げても同じだけ埋まるが、
-  # 回収が間に合わずに OOM する余地は減る。根治ではなく緩和。
+  #   13:57:22Z jobservice: Job incoming: IMAGE_SCAN
+  #   13:57:32Z jobservice: exit with error: ... connect: connection refused
+  #   13:57:39Z trivy: OOMKilled (exitCode 137)
+  #
+  # コンテナが落ちるのでスキャン自体も失敗するが、Harbor UI 上は該当
+  # イメージの結果が欠けるだけで、それ以外に痕跡が残らない。
+  #
+  # 直近 7 日で incoming 40 件に対し失敗 1 件。常時足りないのではなく、
+  # 大きいイメージを引いたときだけ超える。所要はスキャン対象のサイズに
+  # 依存するので、2Gi で足りるかは次に大きいイメージが来たとき分かる
+  # （ContainerOOMKilled が拾う）。
   resources:
     requests:
       cpu: 50m

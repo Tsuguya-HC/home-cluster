@@ -173,8 +173,10 @@ jobs:
         run: npm ci
         working-directory: .github/mcp/pr-review
 
-      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+      - uses: aquaproj/aqua-installer@96a9bc20066c5bf5e275b41019cfc165b25f4e2e # v4.0.5
         if: steps.ci.outputs.proceed == 'true'
+        with:
+          aqua_version: v2.62.3
 
       # Pinned to v1.0.99 — v1.0.100+ has a regression where install.sh
       # silently fails and the SDK can't fall back to its bundled binary.

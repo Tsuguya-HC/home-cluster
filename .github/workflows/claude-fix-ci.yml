@@ -102,9 +102,6 @@ jobs:
           PR: ${{ github.event.workflow_run.pull_requests[0].number }}
           REPO: ${{ github.repository }}
 
-      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
-        if: steps.failed.outputs.proceed == 'true'
-
       - uses: aquaproj/aqua-installer@96a9bc20066c5bf5e275b41019cfc165b25f4e2e # v4.0.5
         if: steps.failed.outputs.proceed == 'true'
         with:

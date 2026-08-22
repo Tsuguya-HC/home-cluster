@@ -229,7 +229,7 @@ spec:
           - name: cp-ips
           - name: worker-ips
       container:
-        image: registry.infra.tgy.io/tools/talos-tools:latest@sha256:db5a7dc5af4b49a486c84c1360c9ebb8b54c0cfebd40645957fa0efb81015f45
+        image: registry.infra.tgy.io/tools/talos-tools:latest@sha256:68d4bca636e37b5bc1599cab1d57c6840b8075c7ca53cf3cec7b8bd272c2f1ae
         resources:
           requests:
             cpu: 10m
@@ -346,7 +346,7 @@ spec:
       nodeSelector:
         kubernetes.io/hostname: "{{inputs.parameters.safe-node}}"
       container:
-        image: registry.infra.tgy.io/tools/talos-tools:latest@sha256:db5a7dc5af4b49a486c84c1360c9ebb8b54c0cfebd40645957fa0efb81015f45
+        image: registry.infra.tgy.io/tools/talos-tools:latest@sha256:68d4bca636e37b5bc1599cab1d57c6840b8075c7ca53cf3cec7b8bd272c2f1ae
         resources:
           requests:
             cpu: 10m
@@ -399,7 +399,7 @@ spec:
           - name: cp-ips
           - name: worker-ips
       container:
-        image: registry.infra.tgy.io/tools/talos-tools:latest@sha256:db5a7dc5af4b49a486c84c1360c9ebb8b54c0cfebd40645957fa0efb81015f45
+        image: registry.infra.tgy.io/tools/talos-tools:latest@sha256:68d4bca636e37b5bc1599cab1d57c6840b8075c7ca53cf3cec7b8bd272c2f1ae
         resources:
           requests:
             cpu: 10m

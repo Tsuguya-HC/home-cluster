@@ -251,11 +251,30 @@
       ]
     },
     {
-      "description": "Group Talos system extensions",
+      "description": [
+        "Group Talos system extensions. siderolabs rebuilds all three under the",
+        "same version tags at once — the three digests in #487 shared a first-seen",
+        "instant to the millisecond — so they belong in one PR.",
+        "",
+        "The weekly window is what makes that PR reachable. Rebuild intervals",
+        "measured from the signature tags run 1 to 12 days, and three of the last",
+        "seven were under three days: 07-21→07-23, 08-04→08-06, 08-19→08-20. Every",
+        "rebuild re-targets the branch to a new digest, which restarts the",
+        "digest-cooldown clock, so a PR opened during a fast stretch can never",
+        "reach three days. #487 was reset twice that way — opened 08-17, first-seen",
+        "dragged to 08-20.",
+        "",
+        "updateNotScheduled is what actually holds it: schedule alone still permits",
+        "out-of-schedule updates to an existing branch. Same fix as the one on",
+        "ghcr.io/renovatebot/renovate above, for the same reason."
+      ],
       "groupName": "talos-extensions",
       // Extension versions must match the Talos release they are installed into,
-      // so this pair always moves under review, never unattended.
+      // and they are applied with a Talos upgrade rather than continuously, so
+      // there is nothing to gain from tracking them daily.
       "automerge": false,
+      "schedule": ["before 6am on monday"],
+      "updateNotScheduled": false,
       "matchPackageNames": [
         "/^ghcr.io/siderolabs/(iscsi-tools|spin|kata-containers)$/"
       ]

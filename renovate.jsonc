@@ -4,10 +4,24 @@
   // The aqua preset is pinned rather than floating: it owns which files the aqua
   // manager reads, and a preset-side change would silently re-scope this repo.
   "extends": [
-    "config:recommended",
-    "helpers:pinGitHubActionDigests",
+    // config:best-practices = config:recommended + docker:pinDigests
+    // + helpers:pinGitHubActionDigests + :configMigration + :pinDevDependencies
+    // + abandonments:recommended + security:minimumReleaseAgeNpm
+    // + :maintainLockFilesWeekly. The two presets listed separately before are
+    // both inside it now.
+    "config:best-practices",
     "github>aquaproj/aqua-renovate-config#2.13.0"
   ],
+
+  // docker:pinDigests now covers every image, which replaces the two scoped pin
+  // rules this file used to carry. Keeping the reason they existed: pinning our
+  // own registry.infra.tgy.io images is not a supply-chain measure — they are our
+  // builds, which is why digest-cooldown skips them — it is availability. Harbor
+  // retention deletes artifacts and Kyverno's mutateDigest bakes the resolved
+  // digest into every Pod at admission, so an unpinned :latest is a Pod that
+  // pulls fine today and cannot restart once its artifact ages out, with no way
+  // to roll forward either, since verifyDigest rejects a digest-less Deployment
+  // update. memory died exactly that way on 2026-08-19.
 
   // Queue the merge on GitHub's side so branch protection still runs; Renovate
   // never merges locally past a required check.
@@ -151,6 +165,19 @@
   "packageRules": [
     {
       "description": [
+        "docker:pinDigests, which arrives with config:best-practices, reaches ArgoCD",
+        "Applications too. apps/spin-operator.yaml is the one OCI Helm chart here —",
+        "repoURL ghcr.io/spinframework/charts, targetRevision \"0.6.1\" — and Renovate",
+        "sees it on the docker datasource like any image. Pinning would rewrite that",
+        "into 0.6.1@sha256:..., but the field is a chart version, not an image",
+        "reference. Every other Application uses an https:// chart repo, which the",
+        "docker datasource never touches."
+      ],
+      "matchManagers": ["argocd"],
+      "pinDigests": false
+    },
+    {
+      "description": [
         "First-party code does not soak. minimumReleaseAge buys time for someone",
         "else to notice a poisoned release before we take it; there is no someone",
         "else here — we wrote it, reviewed it and merged it. Waiting three days on",
@@ -251,26 +278,6 @@
       "matchManagers": ["github-actions"],
       "matchDepNames": ["Tsuguya/home-cluster"],
       "enabled": false
-    },
-    {
-      "description": "Pin external image digests in build pipelines (gated by digest-cooldown workflow)",
-      "matchFileNames": ["manifests/image-build/**", "manifests/talos-build/**"],
-      "matchDatasources": ["docker"],
-      "pinDigests": true
-    },
-    {
-      "description": [
-        "Pin first-party digests too. Not for supply chain — these are our own builds,",
-        "which is why digest-cooldown skips them — but for availability: Harbor",
-        "retention deletes artifacts, and Kyverno's mutateDigest bakes the resolved",
-        "digest into every Pod at admission. An unpinned :latest is a Pod that pulls",
-        "fine today and cannot restart once its artifact ages out, with no way to roll",
-        "it forward either, since verifyDigest rejects a digest-less Deployment update.",
-        "memory died exactly that way on 2026-08-19. Pinning also makes it knowable",
-        "from git which tools image a Workflow actually ran."
-      ],
-      "matchPackageNames": ["registry.infra.tgy.io/**"],
-      "pinDigests": true
     },
     {
       "description": [

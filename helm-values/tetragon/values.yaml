@@ -3,12 +3,16 @@ extraHostPathMounts:
     mountPath: /sys/kernel/tracing
 
 tetragon:
+  # ノードごとに監視対象の pod 数が違うので、DaemonSet 共通の limit は一番重い
+  # ノードに合わせる。wn-03 (64GB、pod 数最多) のピークが 431Mi で 512Mi の 84%
+  # に達しており、実際に 2 回 OOMKilled されている。落ちている間はそのノードの
+  # 観測に穴が開く。requests も実使用 136〜253Mi を下回っていた。
   resources:
     requests:
       cpu: 50m
-      memory: 128Mi
+      memory: 256Mi
     limits:
-      memory: 512Mi
+      memory: 1Gi
   exportDenyList: |-
     {"health_check":true}
     {"namespace":["","cilium","kube-system"]}

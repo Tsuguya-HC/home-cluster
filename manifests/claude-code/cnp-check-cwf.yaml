@@ -177,6 +177,11 @@ spec:
               if [ "$COUNT" = "1" ]; then
                 VERDICT="$FOUND"
                 head -c 3500 "/work/out/$FOUND/report.md" > /work/report.md 2>/dev/null || true
+                # 切り詰めたことを読み手に伝える。黙って落とすと欠けたことに気づけない
+                if [ "$(wc -c < "/work/out/$FOUND/report.md" 2>/dev/null || echo 0)" -gt 3500 ]; then
+                  echo "" >> /work/report.md
+                  echo "_（レポートが 3500 バイトを超えたため以降を省略。全文は Argo UI のログ参照）_" >> /work/report.md
+                fi
               else
                 VERDICT=indeterminate
                 echo "非空のディレクトリが $COUNT 個ありました（ちょうど 1 個であるべき）。" > /work/report.md

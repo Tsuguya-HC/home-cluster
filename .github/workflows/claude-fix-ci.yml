@@ -123,6 +123,19 @@ jobs:
           # line below, the `gh run view --log-failed` in the prompt is a 403.
           additional_permissions: |
             actions: read
+          # Claude commits with plain `git` unless this is set, and a runner-side
+          # git commit is unsigned. With it, the action registers its
+          # github_file_ops MCP server and the commit goes through the Git Data
+          # API instead, which GitHub signs — the same path the cluster-side
+          # aqua-checksum workflow already uses.
+          #
+          # This is the last unsigned push path in the fleet, and closing it is
+          # what lets required_signatures widen from the default branch to all
+          # branches. Unverified in practice: this job has never once reached
+          # the agent step (every run so far ends at the proceed guard because
+          # CI was green), so the first real fix it attempts is also the first
+          # test of this.
+          use_commit_signing: "true"
           # Match the reviewer's posture: no web access, and a turn budget so a
           # confused run ends before the job timeout does.
           claude_args: "--model claude-sonnet-5 --max-turns 40 --disallowedTools WebFetch,WebSearch,NotebookEdit"

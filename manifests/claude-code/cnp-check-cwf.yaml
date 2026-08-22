@@ -89,6 +89,13 @@ spec:
     volumes:
       - name: work
         emptyDir: {}
+      - name: prompt
+        projected:
+          sources:
+            - configMap:
+                name: agent-verdict-protocol
+            - configMap:
+                name: cnp-check-prompt
     affinity:
       nodeAffinity:
         preferredDuringSchedulingIgnoredDuringExecution:
@@ -145,37 +152,8 @@ spec:
           workingDir: /work
           args:
             - |
-              PROMPT="あなたは Kubernetes クラスタの CiliumNetworkPolicy カバレッジ点検員です。
-
-              ## タスク
-              全 namespace の Pod が CNP/CCNP に覆われているかを点検し、結果を報告してください。
-
-              ## 手順
-              1. kubectl get ciliumnetworkpolicies -A -o json と kubectl get ciliumclusterwidenetworkpolicies -o json で全ポリシーを取得する
-              2. kubectl get pods -A -o json で全 Pod とそのラベルを取得する
-              3. 各 Pod が、どのポリシーの endpointSelector にも一致しないかを判定する
-              4. 直近 24 時間の POLICY_DENIED を Loki で確認する:
-                 curl -sG 'http://loki-gateway.monitoring.svc.cluster.local:80/loki/api/v1/query_range' \\
-                   --data-urlencode 'query={job=\"hubble\"}' --data-urlencode 'limit=300' \\
-                   --data-urlencode \"start=\$(date -u -d '24 hours ago' +%s)000000000\"
-                 取得できない場合はその旨を書いて次に進む
-
-              ## 除外
-              hostNetwork: true の Pod は CNP の対象外なので未カバー扱いにしない。
-              Completed/Succeeded の Pod も対象外。
-
-              ## 出力（重要）
-              判定に応じて置き場所を変えること。ファイル名は report.md 固定。
-
-              - 未カバー Pod も POLICY_DENIED も無い  -> /work/out/pass/report.md
-              - 対処すべき指摘がある                  -> /work/out/attention/report.md
-              - 情報が足りず判定できない              -> /work/out/escalate/report.md
-
-              **3 つのうち必ず 1 つだけに書くこと。** 複数に書いてはいけない。
-              /work/out/ に新しいディレクトリを作ることはできない（作れなくても正常）。
-
-              report.md の中身は自由。namespace ごとの未カバー Pod、POLICY_DENIED の
-              送信元/宛先と理由、対処案を簡潔に。長くても 3000 字以内。"
+              # 指示は ConfigMap から読む。ここでは組み立てない。
+              PROMPT="$(cat /prompt/cnp-check.md; echo; cat /prompt/verdict-protocol.md)"
 
               claude -p \
                 --verbose \
@@ -226,6 +204,9 @@ spec:
           volumeMounts:
             - name: work
               mountPath: /work
+            - name: prompt
+              mountPath: /prompt
+              readOnly: true
           resources:
             requests:
               cpu: 100m

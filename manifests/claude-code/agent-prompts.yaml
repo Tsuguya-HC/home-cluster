@@ -1,0 +1,111 @@
+# エージェントに渡す指示。マニフェストのヒアドキュメントから出して、プロンプトだけを
+# 単独で直せるようにする。verdict-protocol は全タスク共通、タスク固有の手順とは分ける。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-verdict-protocol
+  namespace: claude-code
+data:
+  verdict-protocol.md: |
+    # 判定の出し方（全タスク共通）
+
+    結論は文章ではなく **置き場所** で表す。回収側はディレクトリしか見ず、
+    あなたの発話は一切読まない。
+
+    | 結論 | 置き場所 |
+    |---|---|
+    | 問題なし | `/work/out/pass/report.md` |
+    | 対処すべき指摘がある | `/work/out/attention/report.md` |
+    | 判定できない | `/work/out/escalate/report.md` |
+
+    ## 規則
+
+    - **3 つのうち必ず 1 つだけ**に書く。2 つ以上に置くと判定不能として扱われ、
+      内容に関係なく人間に差し戻される
+    - ファイル名は `report.md` 固定
+    - `/work/out/` に新しいディレクトリは作れない。作れなくても異常ではないので、
+      回避しようとしないこと
+    - 判断に足る材料が無いときは、無理に pass / attention を選ばず **escalate** を選ぶ。
+      判定できないと述べることは失敗ではない
+
+    ## 報告に必ず含めるもの
+
+    - **主張と、それを確かめた手順を対にして書く。** 確かめていないものは
+      「未確認の推測」と明記する。確かめられるのに確かめていない主張は書かない
+    - 対処案は、現状より権限や到達範囲を広げないものに限る
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cnp-check-prompt
+  namespace: claude-code
+data:
+  cnp-check.md: |
+    # CiliumNetworkPolicy カバレッジ点検
+
+    全 namespace の Pod がポリシーに覆われているかを点検し、報告する。
+
+    ## 与えられている権限
+
+    読み取り専用。`pods` / `namespaces` / `ciliumnetworkpolicies` /
+    `ciliumclusterwidenetworkpolicies` の get・list のみ。
+    `kubectl exec` も書き込みもできない。できないことを迂回しようとしないこと。
+
+    ## Cilium の強制セマンティクス（読み違えやすいので必ず踏まえる）
+
+    - エンドポイントは **ingress ルールを持つポリシーに選択されて初めて ingress が強制**される。
+      egress も同様に、egress ルールを持つポリシーに選択されて初めて強制される
+    - したがって **egress ルールしか持たないポリシー（CCNP `allow-dns` など）にのみ
+      選択されているエンドポイントは、egress は絞られるが ingress は無防備**（全許可）になる
+    - これを「ingress が全 DENY」と読むと**危険度の評価が反転する**。
+      遮断されているのではなく、誰からでも到達できる状態である
+    - `ingress: []`（空リスト）は no-op で何も強制しない
+
+    ## 手順
+
+    1. `kubectl get cnp -A -o json` と `kubectl get ccnp -o json` で全ポリシーを取得
+    2. `kubectl get pods -A -o json` で全 Pod とラベルを取得
+    3. 各 Pod について、**どのポリシーの `endpointSelector` に一致するか**を判定する。
+       一致したポリシーが ingress ルールを持つか / egress ルールを持つかを**分けて**記録する
+    4. 直近 24 時間の `POLICY_DENIED` を Loki で確認する
+
+    ## Loki
+
+    ```
+    curl -sG 'http://loki-gateway.monitoring.svc.cluster.local:80/loki/api/v1/query_range' \
+      --data-urlencode 'query={job="hubble"}' \
+      --data-urlencode 'limit=300' \
+      --data-urlencode "start=$(date -u -d '24 hours ago' +%s)000000000"
+    ```
+
+    取得できない場合はその旨を書いて次に進む。
+
+    **Hubble の export は DROPPED しか流していない。** よって「宛先 X のフローが無い」は
+    「誰も X と通信していない」の証拠にならない。許可された通信は記録に残らないので、
+    フローの不在から通信の不在を結論しないこと。
+
+    ## 対象外
+
+    - `hostNetwork: true` の Pod（ポリシーの対象外）
+    - `Completed` / `Succeeded` の Pod
+
+    ## 主張ごとに要求される裏取り
+
+    | 主張 | 併記する根拠 |
+    |---|---|
+    | Pod X は未カバー | X のラベルと、照合したポリシー名（一致が無いなら「一致なし」と明記） |
+    | X は ingress が強制されていない | X を選択しているポリシー名と、それが ingress ルールを持たないこと |
+    | Y が原因で DENIED になっている | Y を実際に確認したコマンドと結果。ラベル不一致を疑うなら**その Pod のラベルを見る** |
+
+    裏が取れなかった主張は、書かないか「未確認の推測」と明記する。
+
+    ## 対処案の制約
+
+    - `toCIDR: 0.0.0.0/0` は使わない。外部 HTTPS は `toFQDNs` でドメイン単位に絞る
+    - 現状より到達範囲を広げる案を出さない
+    - DNS egress は CCNP で全 Pod に共通適用済みなので、個別 CNP には書かない
+
+    ## レポート
+
+    namespace ごとの未カバー Pod、`POLICY_DENIED` の送信元・宛先・理由、対処案を簡潔に。
+    3000 字以内。

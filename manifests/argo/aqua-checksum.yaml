@@ -119,7 +119,13 @@ spec:
             # aqua downloads every package to hash it, so this needs the same
             # network reach as the CI it is fixing. AQUA_GLOBAL_CONFIG is
             # cleared so only the repository's own aqua.yaml is considered.
-            AQUA_GLOBAL_CONFIG="" aqua update-checksum -a
+            #
+            # --prune は aqua.yaml が参照しなくなったエントリを削除する。付けないと
+            # update-checksum は追記しかせず、版が上がるたびに古いエントリが残り
+            # 続ける（home-cluster#562 は registry v4.553.0 の追加が +5/-0 で、
+            # v4.552.0 が残った）。古いエントリを読む者はいないが上限なく増える。
+            # しかも `aqua i` も削除しないので、CI の lint-aqua では気づけない。
+            AQUA_GLOBAL_CONFIG="" aqua update-checksum -a --prune
 
             git add aqua-checksums.json
             if git diff --cached --quiet; then

@@ -132,7 +132,7 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 | **kanidm-backup** (kanidm-backup=true) | (deny world) | kube-apiserver, *.r2.cloudflarestorage.com:443, seaweedfs-filer (seaweedfs):8333 |
 | **kanidm-repl-exchange** (kanidm-repl-exchange=true) | (deny world) | kube-apiserver, seaweedfs-filer (seaweedfs):8333 |
 | **image-digest-audit** (image-digest-audit=true) | (none) | harbor-nginx (harbor):8443 |
-| **aqua-checksum** (aqua-checksum=true) | (deny world) | github.com + api.github.com + *.githubusercontent.com + discord.com :443 |
+| **aqua-checksum** (aqua-checksum=true) | (none) | kube-apiserver, github.com + api.github.com + *.githubusercontent.com + discord.com + tuf-repo-cdn.sigstore.dev :443, seaweedfs-filer (seaweedfs):8333 |
 | **renovate** (renovate=true) | (none) | harbor-nginx (harbor):8443 |
 | **tofu-harbor** (tofu-harbor=true) | (none) | harbor-nginx (harbor):8443 |
 

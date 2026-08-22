@@ -25,6 +25,6 @@ registries:
 
 packages:
   - name: yannh/kubeconform@v0.8.0
-  - name: mikefarah/yq@v4.53.3
+  - name: mikefarah/yq@v4.53.4
   # provides `crane`
   - name: google/go-containerregistry@v0.21.9

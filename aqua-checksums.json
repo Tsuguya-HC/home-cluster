@@ -11,6 +11,11 @@
       "algorithm": "sha512"
     },
     {
+      "id": "github_release/github.com/mikefarah/yq/v4.53.4/yq_linux_amd64",
+      "checksum": "BB684957682B9837373670F5AC25817C5CCBC7E36BAF4F1F8710533640ED0D33171FF1D6E2C0EFA07682C3CD07FFCBEFAB17C60C2B0E5B0D257F90654CD07F67",
+      "algorithm": "sha512"
+    },
+    {
       "id": "github_release/github.com/yannh/kubeconform/v0.8.0/kubeconform-linux-amd64.tar.gz",
       "checksum": "9BC2BFFBF71F261128533EDAF912153948B7FF238F9A531AE6D34466EC287883",
       "algorithm": "sha256"

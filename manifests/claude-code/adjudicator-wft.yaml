@@ -149,36 +149,60 @@ spec:
               exit 0
             fi
 
-            DECISION=$(grep '^DECISION:' /report/result.txt | head -1 | awk '{print $2}')
+            # Leading whitespace is tolerated, but the value itself must match
+            # exactly. Anything else is an unusable verdict, not an approval.
+            DECISION_LINES=$(grep -cE '^[[:space:]]*DECISION:' /report/result.txt || true)
+            DECISION=$(grep -E '^[[:space:]]*DECISION:' /report/result.txt | head -1 \
+              | sed 's/^[[:space:]]*DECISION:[[:space:]]*//' | tr -d '\r' | sed 's/[[:space:]]*$//')
+
+            VALID=0
+            if [ "$DECISION_LINES" = "1" ]; then
+              if [ "$DECISION" = "APPROVE" ] || [ "$DECISION" = "REJECT" ]; then
+                VALID=1
+              fi
+            fi
+
+            if [ "$VALID" != "1" ]; then
+              echo "Unusable verdict (DECISION lines=$DECISION_LINES value='$DECISION')"
+              echo "Falling back to REJECT so $SOURCE_WF does not stay suspended forever"
+              DECISION=REJECT
+            fi
 
             if [ "$DECISION" = "APPROVE" ]; then
               echo "APPROVE: resuming workflow $SOURCE_WF in $SOURCE_NS"
-              WF_JSON=$(kubectl -n "$SOURCE_NS" get wf "$SOURCE_WF" -o json 2>&1)
-              if [ $? -ne 0 ]; then
+              if ! WF_JSON=$(kubectl -n "$SOURCE_NS" get wf "$SOURCE_WF" -o json 2>&1); then
                 echo "Failed to get workflow: $WF_JSON"
-                exit 0
+                exit 1
               fi
               SUSPEND_NODES=$(echo "$WF_JSON" | jq -r '[.status.nodes // {} | to_entries[] | select(.value.type == "Suspend" and .value.phase == "Running")] | length')
               if [ "$SUSPEND_NODES" = "0" ]; then
-                echo "No suspended nodes found in $SOURCE_WF"
+                echo "No suspended nodes found in $SOURCE_WF (already resumed?)"
                 exit 0
               fi
               FINISHED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-              echo "$WF_JSON" | jq --arg fin "$FINISHED" \
+              if ! echo "$WF_JSON" | jq --arg fin "$FINISHED" \
                 '.status.nodes |= with_entries(
                   if .value.type == "Suspend" and .value.phase == "Running"
                   then .value.phase = "Succeeded" | .value.finishedAt = $fin
                   else . end
-                )' | kubectl replace -f - 2>&1
+                )' | kubectl replace -f - 2>&1; then
+                echo "Failed to resume $SOURCE_WF"
+                exit 1
+              fi
               echo "Workflow $SOURCE_WF resumed"
-            elif [ "$DECISION" = "REJECT" ]; then
-              echo "REJECT: stopping workflow $SOURCE_WF in $SOURCE_NS"
-              kubectl -n "$SOURCE_NS" patch wf "$SOURCE_WF" \
-                --type=merge -p '{"spec":{"shutdown":"Stop"}}' 2>&1 || true
-              echo "Workflow $SOURCE_WF stopped"
             else
-              echo "Unknown decision: $DECISION"
+              echo "REJECT: stopping workflow $SOURCE_WF in $SOURCE_NS"
+              if ! kubectl -n "$SOURCE_NS" patch wf "$SOURCE_WF" \
+                --type=merge -p '{"spec":{"shutdown":"Stop"}}' 2>&1; then
+                echo "Failed to stop $SOURCE_WF"
+                exit 1
+              fi
+              echo "Workflow $SOURCE_WF stopped"
             fi
+
+            # A verdict we could not read is a failure worth surfacing, even
+            # though the source workflow was stopped safely above.
+            [ "$VALID" = "1" ] || exit 1
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:

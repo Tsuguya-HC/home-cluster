@@ -23,7 +23,28 @@ nothing either. Either probe moving the output proves the key is read.
 
 Ambiguity always resolves to "live" so that this stays quiet unless it is sure:
 a leaf that cannot be perturbed (empty map, null, empty list) is skipped, and a
-probe that makes the chart fail to render counts as proof the key is read.
+probe that makes the chart fail to render counts as proof the key is read. That
+direction matters more than it looks: this check's answer is "nobody reads this",
+and what someone does with that answer is delete the key. An unread verdict on a
+live key ends with working configuration removed and a note saying it was
+unnecessary.
+
+The volatile-line mask is the one place that breaks that rule, because it
+compares by line number and never looks at what those lines contain. An effect
+landing only inside masked lines is hidden, and hidden reads as unread.
+
+Searching the whole render for the probe value recovers the cases where the
+perturbed value is emitted verbatim. It does not recover the ones where the
+chart encodes the value first: pointing harbor at `certSource: auto` and
+perturbing `expose.tls.auto.commonName` moves 18 lines, all of them masked, and
+the probe string appears nowhere in the output because the common name is inside
+a base64 certificate. Measured, not assumed.
+
+Nothing distinguishes that from an unread key. Masked lines are regenerated on
+every render, so "only masked lines moved" is exactly what an unread key
+produces too. Rather than guess, charts that render non-deterministically are
+named in a warning: what they can hide is one key whose entire effect is
+confined to those lines.
 """
 
 import argparse
@@ -191,7 +212,15 @@ def check(src, targets):
             out = render(chart_dir, src, swapped)
         finally:
             os.unlink(probe_file)
-        return out is not None and same(base, out, mask)
+        if out is None:
+            return False
+        # same() skips the masked lines outright, so an effect that lands
+        # inside one of them is invisible to it. PROBE cannot appear in a
+        # render that did not read the key, so finding it anywhere is proof
+        # the key is live — whichever line it landed on.
+        if any(PROBE in line for line in out):
+            return False
+        return same(base, out, mask)
 
     def probe(rel, absolute, values, path, new):
         if not unchanged(absolute, values, path, new):
@@ -216,7 +245,7 @@ def check(src, targets):
 
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
         results = pool.map(lambda a: probe(*a), jobs)
-    return [r for r in results if r]
+    return [r for r in results if r], len(mask)
 
 
 def load_allowlist():
@@ -252,7 +281,7 @@ def main():
     touched = changed_files(args.changed) if args.changed else None
     allowed = load_allowlist()
 
-    unread, skipped = {}, []
+    unread, skipped, masked = {}, [], {}
     for src in sources():
         # A chart bump is exactly when upstream renames or restructures a key,
         # so a changed apps/ file pulls in all of that chart's values files.
@@ -264,10 +293,13 @@ def main():
         else:
             targets = set(src["files"])
 
-        found = check(src, targets)
-        if found is None:
+        result = check(src, targets)
+        if result is None:
             skipped.append(src["app"])
             continue
+        found, mask_size = result
+        if mask_size:
+            masked[src["app"]] = mask_size
         for rel in targets:
             unread.setdefault(rel, set())
         for rel, key in found:
@@ -292,6 +324,11 @@ def main():
 
     for app in skipped:
         print(f"::warning::{app}: render is not line-stable, cannot check its values")
+    for app, lines in sorted(masked.items()):
+        print(
+            f"::warning::{app}: {lines} line(s) are regenerated on every render and are "
+            "excluded from the comparison; a key whose only effect lands in them reads as unread"
+        )
 
     if new:
         print("Keys no template reads:")

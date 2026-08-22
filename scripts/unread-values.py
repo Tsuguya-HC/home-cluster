@@ -61,6 +61,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ALLOWLIST = os.path.join(ROOT, "scripts", "unread-values-allow.txt")
 CACHE = os.path.join(tempfile.gettempdir(), "unread-values-charts")
 
+SELF = {"scripts/unread-values.py", "scripts/unread-values-allow.txt"}
+
 PROBE = "zzprobe"
 WORKERS = min(8, (os.cpu_count() or 2) * 2)
 MISSING = object()
@@ -279,6 +281,13 @@ def main():
     args = ap.parse_args()
 
     touched = changed_files(args.changed) if args.changed else None
+    # A change to the checker or its allowlist is checked against everything.
+    # Scoping to the touched values files would mean a pull request that edits
+    # this file examines nothing at all and still reports success, which is how
+    # a broken comparison would reach main.
+    if touched is not None and touched & SELF:
+        print("checker changed - examining every chart")
+        touched = None
     allowed = load_allowlist()
 
     unread, skipped, masked = {}, [], {}

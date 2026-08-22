@@ -176,12 +176,13 @@ spec:
 
               if [ "$COUNT" = "1" ]; then
                 VERDICT="$FOUND"
-                head -c 3500 "/work/out/$FOUND/report.md" > /work/report.md 2>/dev/null || true
-                # 切り詰めたことを読み手に伝える。黙って落とすと欠けたことに気づけない
-                if [ "$(wc -c < "/work/out/$FOUND/report.md" 2>/dev/null || echo 0)" -gt 3500 ]; then
-                  echo "" >> /work/report.md
-                  echo "_（レポートが 3500 バイトを超えたため以降を省略。全文は Argo UI のログ参照）_" >> /work/report.md
-                fi
+                # 文字単位で切る（jq のスライスは UTF-8 のコードポイントを割らない）。
+                # 切り詰めたことも同時に伝える。黙って落とすと欠けたことに気づけない
+                jq -Rsr --argjson max 3500 \
+                  'if length > $max
+                   then .[0:$max] + "\n\n_（レポートが長いため以降を省略。全文は Argo UI のログ参照）_"
+                   else . end' \
+                  < "/work/out/$FOUND/report.md" > /work/report.md 2>/dev/null || true
               else
                 VERDICT=indeterminate
                 echo "非空のディレクトリが $COUNT 個ありました（ちょうど 1 個であるべき）。" > /work/report.md
@@ -241,7 +242,10 @@ spec:
           args:
             - |
               VERDICT='{{workflow.outputs.parameters.cnp-check-verdict}}'
-              REPORT=$(printf '%s' '{{workflow.outputs.parameters.cnp-check-report}}' | head -c 3800)
+              # Discord の上限は 4096 "文字"。バイトで切ると UTF-8 を割る
+              REPORT=$(printf '%s' '{{workflow.outputs.parameters.cnp-check-report}}' \
+                | jq -Rsr --argjson max 3900 \
+                    'if length > $max then .[0:$max] + "\n\n_(以降を省略)_" else . end')
               WF_NAME="{{workflow.name}}"
               NS="{{workflow.namespace}}"
               URL="https://argo.infra.tgy.io/workflows/${NS}/${WF_NAME}"

@@ -53,9 +53,11 @@ data:
 
     ## Cilium の強制セマンティクス（読み違えやすいので必ず踏まえる）
 
-    - エンドポイントは **ingress ルールを持つポリシーに選択されて初めて ingress が強制**される。
-      egress も同様に、egress ルールを持つポリシーに選択されて初めて強制される
-    - したがって **egress ルールしか持たないポリシー（CCNP `allow-dns` など）にのみ
+    - エンドポイントは **`ingress` または `ingressDeny` を持つポリシーに選択されて初めて
+      ingress が強制**される。`ingressDeny` しか持たないポリシー（`fromEntities: [world]` だけ、など）
+      でも強制は有効になる。**`ingress` の有無だけで判定しないこと**
+    - egress も同様に、`egress` または `egressDeny` を持つポリシーに選択されて初めて強制される
+    - したがって **egress 系のルールしか持たないポリシー（CCNP `allow-dns` など）にのみ
       選択されているエンドポイントは、egress は絞られるが ingress は無防備**（全許可）になる
     - これを「ingress が全 DENY」と読むと**危険度の評価が反転する**。
       遮断されているのではなく、誰からでも到達できる状態である
@@ -66,7 +68,8 @@ data:
     1. `kubectl get cnp -A -o json` と `kubectl get ccnp -o json` で全ポリシーを取得
     2. `kubectl get pods -A -o json` で全 Pod とラベルを取得
     3. 各 Pod について、**どのポリシーの `endpointSelector` に一致するか**を判定する。
-       一致したポリシーが ingress ルールを持つか / egress ルールを持つかを**分けて**記録する
+       一致したポリシーが `ingress` / `ingressDeny` / `egress` / `egressDeny` のどれを持つかを
+       **キーごとに**記録する。`ingress` が空でも `ingressDeny` があれば ingress は強制される
     4. 直近 24 時間の `POLICY_DENIED` を Loki で確認する
 
     ## Loki
@@ -94,7 +97,7 @@ data:
     | 主張 | 併記する根拠 |
     |---|---|
     | Pod X は未カバー | X のラベルと、照合したポリシー名（一致が無いなら「一致なし」と明記） |
-    | X は ingress が強制されていない | X を選択しているポリシー名と、それが ingress ルールを持たないこと |
+    | X は ingress が強制されていない | X を選択している全ポリシー名と、**そのいずれもが `ingress` と `ingressDeny` の両方を持たない**こと |
     | Y が原因で DENIED になっている | Y を実際に確認したコマンドと結果。ラベル不一致を疑うなら**その Pod のラベルを見る** |
 
     裏が取れなかった主張は、書かないか「未確認の推測」と明記する。
@@ -107,5 +110,7 @@ data:
 
     ## レポート
 
+    **重要な指摘から先に書く。** レポートは 3000 字で打ち切られるため、後ろに置いた内容は
+    人間に届かない。冒頭に結論の箇条書きを置き、詳細をその後に続ける。
+
     namespace ごとの未カバー Pod、`POLICY_DENIED` の送信元・宛先・理由、対処案を簡潔に。
-    3000 字以内。

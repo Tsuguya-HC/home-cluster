@@ -7,3 +7,7 @@
 
 # Node
 node_modules/
+
+# Claude Code worktrees live inside the repo and are untracked, so `git add -A`
+# stages them as an embedded gitlink instead of ignoring them.
+.claude/worktrees/

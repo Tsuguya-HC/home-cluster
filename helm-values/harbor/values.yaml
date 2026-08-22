@@ -93,12 +93,24 @@ portal:
       memory: 128Mi
 
 registry:
-  resources:
-    requests:
-      cpu: 50m
-      memory: 128Mi
-    limits:
-      memory: 512Mi
+  # `registry.resources` はチャートが読まないため、registry / registryctl の
+  # 両コンテナが resources: {} （requests も limits も無し）で動いていた。
+  # このチャートはコンテナごとに registry.registry / registry.controller で
+  # 受ける。実測 (2026-08-22) は registry 26Mi / 7m、registryctl 9Mi / 1m。
+  registry:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        memory: 512Mi
+  controller:
+    resources:
+      requests:
+        cpu: 10m
+        memory: 64Mi
+      limits:
+        memory: 256Mi
   # 起動から 0〜24h のジッタ後に走る upload purger が、SeaweedFS の S3 を
   # walk する途中で必ず panic してプロセスごと落ちる:
   #

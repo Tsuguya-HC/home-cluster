@@ -1,0 +1,57 @@
+# scripts/unread-values.py が「チャートのテンプレートが一度も読まない」と判定した
+# キーのうち、意図して残しているもの。形式は <values ファイル>::<キーのパス>。
+#
+# ここに載せてよいのは「別の設定が理由でそのキーが効かないだけで、意図の記録として
+# 残す価値がある」ものだけ。キー名や階層を間違えているものは直すこと。理由を書けない
+# 行は追加しないこと。
+#
+# 逆に、ここに書いたキーが再現しなくなったら（＝チャート側が読むようになった、
+# あるいは values を直した）検査は失敗する。その時点でこの行を消す。放置すると
+# そのパスで起きた将来の事故を隠してしまう。
+
+# filer はステートレスなので chart ではなく自前 Deployment で動かしている
+# (helm-values/seaweedfs/values.yaml の filer.enabled: false、実体は
+# manifests/seaweedfs/filer-deployment.yaml)。chart 側の filer.* は Deployment を
+# 出さない以上どれも読まれないが、自前 Deployment と設定を突き合わせるときの
+# 参照元として残している。
+helm-values/seaweedfs/values.yaml::filer.replicas
+helm-values/seaweedfs/values.yaml::filer.data.type
+helm-values/seaweedfs/values.yaml::filer.logs.type
+helm-values/seaweedfs/values.yaml::filer.nodeSelector
+helm-values/seaweedfs/values.yaml::filer.tolerations
+helm-values/seaweedfs/values.yaml::filer.extraVolumes
+helm-values/seaweedfs/values.yaml::filer.extraVolumeMounts
+helm-values/seaweedfs/values.yaml::filer.resources.requests.cpu
+helm-values/seaweedfs/values.yaml::filer.resources.requests.memory
+helm-values/seaweedfs/values.yaml::filer.resources.limits.memory
+helm-values/seaweedfs/values.yaml::filer.secretExtraEnvironmentVars.WEED_POSTGRES2_USERNAME.secretKeyRef.name
+helm-values/seaweedfs/values.yaml::filer.secretExtraEnvironmentVars.WEED_POSTGRES2_USERNAME.secretKeyRef.key
+helm-values/seaweedfs/values.yaml::filer.secretExtraEnvironmentVars.WEED_POSTGRES2_PASSWORD.secretKeyRef.name
+helm-values/seaweedfs/values.yaml::filer.secretExtraEnvironmentVars.WEED_POSTGRES2_PASSWORD.secretKeyRef.key
+
+# PDB のテンプレート条件は `podDisruptionBudget.enabled and (replicaCount > 1)`。
+# どれも replicaCount: 1 なので enabled の値に関わらず PDB は出ない。単一
+# レプリカを維持する意思表示として残す（レプリカを増やすときにここを見る）。
+helm-values/oauth2-proxy-hubble/values.yaml::podDisruptionBudget.enabled
+helm-values/oauth2-proxy-rss/values.yaml::podDisruptionBudget.enabled
+helm-values/oauth2-proxy-seaweedfs/values.yaml::podDisruptionBudget.enabled
+
+# registry は S3 (SeaweedFS) 、jobLog は jobLoggers に "file" を含めていないため、
+# どちらも PVC が作られない。storageClass: "-" は PVC を作らせないための保険で、
+# 構成が戻ったときに qnap-nfs を掴まないようにしている。
+helm-values/harbor/values.yaml::persistence.persistentVolumeClaim.registry.storageClass
+helm-values/harbor/values.yaml::persistence.persistentVolumeClaim.jobservice.jobLog.storageClass
+
+# admin バケットは Loki Enterprise 用。deploymentMode: SingleBinary では読まれない
+# が、S3 側にバケットを用意してある3つを揃えて書いておく。
+helm-values/loki/values.yaml::loki.storage.bucketNames.admin
+
+# db-secret は `mariadb.enabled or externalDatabase.enabled or postgresql.enabled`
+# で出るが、認証情報は ExternalSecret 由来の existingSecret を使っているので
+# チャートの Secret は生成させていない。外部 DB を使っている事実の記録として残す。
+helm-values/nextcloud/values.yaml::externalDatabase.enabled
+
+# チャート側の条件は `updateVolumeFsOwnership and (not image.useUnprivilegedImage)`。
+# useUnprivilegedImage: true なのでこの値は効かない。特権イメージに戻したときに
+# fsGroup 付け替えを走らせない意思表示として残す。
+helm-values/qdrant/values.yaml::updateVolumeFsOwnership

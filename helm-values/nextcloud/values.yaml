@@ -91,6 +91,17 @@ nextcloud:
           name: nextcloud-s3-credentials
           key: password
 
+  # チャートが Pod の securityContext に流すのはここ。トップレベルの
+  # `podSecurityContext:` に書かれていたが、このチャートにそのキーは無く
+  # （非推奨の `securityContext:` はある）、まるごと無視されていた。
+  # fsGroup: 33 が Pod に付いていたのは効いていたからではなく、この値が
+  # 空のときにチャートが nginx 無効時のフォールバックとして焼く定数。
+  # seccompProfile の方はどこにも届いていなかった。
+  podSecurityContext:
+    fsGroup: 33
+    seccompProfile:
+      type: RuntimeDefault
+
 internalDatabase:
   enabled: false
 
@@ -115,11 +126,6 @@ persistence:
   enabled: true
   storageClass: qnap-nfs
   size: 5Gi
-
-podSecurityContext:
-  fsGroup: 33
-  seccompProfile:
-    type: RuntimeDefault
 
 startupProbe:
   enabled: true

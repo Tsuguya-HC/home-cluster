@@ -35,6 +35,34 @@ subjects:
     name: agent-cnp-reader
     namespace: claude-code
 ---
+# Argo の executor は自分の結果を workflowtaskresults に書く。これが無いと
+# コンテナが何をしたかに関わらず exit 64 で落ちる。既存の SA は ClusterRole
+# argo-workflows-edit に縛られているが、あれは workflow の create/delete まで
+# 含むので、読むだけの点検には過大。executor が要る最小だけを与える。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: agent-executor
+  namespace: claude-code
+rules:
+  - apiGroups: [argoproj.io]
+    resources: [workflowtaskresults]
+    verbs: [create, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: agent-cnp-reader-executor
+  namespace: claude-code
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: agent-executor
+subjects:
+  - kind: ServiceAccount
+    name: agent-cnp-reader
+    namespace: claude-code
+---
 apiVersion: argoproj.io/v1alpha1
 kind: CronWorkflow
 metadata:

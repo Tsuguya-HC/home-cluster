@@ -6,12 +6,31 @@ metadata:
 # The workflow clones a branch, downloads every package aqua.yaml names so it
 # can hash them, and commits the result back through the API — so it needs
 # github.com for the clone, api.github.com for the commit, and the release
-# CDN for the artifacts themselves. Nothing else.
+# CDN for the artifacts themselves.
+#
+# It also needs the Kubernetes API, which the first version of this policy
+# missed. Argo's `wait` sidecar posts each step's outcome to
+# workflowtaskresults, and with that blocked the container retries until the
+# workflow times out — so every run since this policy was introduced failed,
+# 33 Error and 4 Failed with no successes at all. The pod never reaches the
+# service VIP either: kube-proxy replacement translates 10.96.0.1:443 to the
+# control plane's own address, which is what Hubble records being dropped.
+#
+#   argo/aqua-checksum-… <> 192.168.10.231:6443 (kube-apiserver)
+#     Policy denied DROPPED (TCP Flags: SYN)
+#
+# netpol-workflow-pods excludes these pods by label, so nothing else grants it.
 spec:
   endpointSelector:
     matchLabels:
       aqua-checksum: "true"
   egress:
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "6443"
+              protocol: TCP
     - toFQDNs:
         - matchName: "github.com"
         - matchName: "api.github.com"

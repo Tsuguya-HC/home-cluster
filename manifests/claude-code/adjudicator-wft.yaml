@@ -137,7 +137,7 @@ spec:
         runAsGroup: 65532
         fsGroup: 65532
       container:
-        image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:a9a441abf2e582a3a909204a5547c96dc199a420f27240091ba1ae29a18a9a21
+        image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:b7d1229a8b93c40b7cf10e760b0b113d826febdea2004e59911224262954c719
         command: [sh, -c]
         args:
           - |
@@ -199,7 +199,7 @@ spec:
         runAsUser: 65532
         runAsNonRoot: true
       container:
-        image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:a9a441abf2e582a3a909204a5547c96dc199a420f27240091ba1ae29a18a9a21
+        image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:b7d1229a8b93c40b7cf10e760b0b113d826febdea2004e59911224262954c719
         command: [sh, -c]
         args:
           - |

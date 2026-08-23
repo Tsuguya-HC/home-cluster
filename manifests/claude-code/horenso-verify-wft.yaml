@@ -53,6 +53,12 @@ spec:
           # 本番（CNPG）は PostgreSQL 18。メジャーを揃えてある。
           # Kyverno の署名検証は registry.infra.tgy.io/* のみが対象なので上流イメージで通る
           image: postgres:18-alpine@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2
+          # emissary executor はイメージの entrypoint を知る必要があり、
+          # 自分の index に無いものは registry へ問い合わせに行く。argo から
+          # docker.io への egress は無いので、そこで Pod が Pending のまま止まる。
+          # crane config で読んだ値をそのまま明示して問い合わせを不要にする
+          command: [docker-entrypoint.sh]
+          args: [postgres]
           env:
             - {name: POSTGRES_USER, value: horenso}
             - {name: POSTGRES_PASSWORD, value: horenso}

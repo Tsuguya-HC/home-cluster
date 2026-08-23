@@ -1,3 +1,11 @@
+# 既定は pod,job も対象で、Argo Workflow / CronJob の使い捨て Pod が Pod ごとに
+# スキャンされていた（同じイメージでも Pod が別なら別 Job）。24h で 1,091 Job、
+# 各 Job がイメージ層と DB を /tmp に落として捨てるので wn-03 の NVMe に
+# 約 3 TB/日の書き込み（2026-08-23、NodeDiskIOSaturation 再発で発覚）。
+# replicationcontroller は使っていない。Workflow 用イメージは Harbor 側の
+# Trivy でスキャンされるので pod,job を外してもカバレッジは落ちない。
+targetWorkloads: "replicaset,statefulset,daemonset,cronjob"
+
 operator:
   # `scanJobNamespace: trivy-system` がここにあったが、このチャート
   # (0.35.0) の values にもテンプレートにもそのキーは存在せず、operator の

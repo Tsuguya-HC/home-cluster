@@ -3,6 +3,11 @@ kind: SpinApp
 metadata:
   name: rss-cleaner
   namespace: rss
+  annotations:
+    # After the schema migration in wave 1. Starting the components
+    # against an empty database is what left every request returning
+    # `relation "feeds" does not exist`.
+    argocd.argoproj.io/sync-wave: "2"
 spec:
   image: ghcr.io/tsuguya/home-rss-cleaner:v0.1.1@sha256:23fdc525221195d3b55cbb40b43d1a7d4b9b9fe0dc173dba738b7030b3bb95ce
   replicas: 1

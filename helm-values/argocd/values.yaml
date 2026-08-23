@@ -69,6 +69,31 @@ configs:
       hs.status = "Progressing"
       hs.message = "Waiting for cluster to be ready"
       return hs
+    # Without this a SpinApp is Progressing forever, because ArgoCD cannot read
+    # a CRD it has no rules for. That is not cosmetic: a sync stalls waiting for
+    # the wave to go healthy, so anything in a later wave — the rss schema
+    # migration, for one — never runs. The conditions mirror a Deployment's,
+    # which is what spin-operator creates underneath.
+    resource.customizations.health.core.spinkube.dev_SpinApp: |
+      hs = {}
+      if obj.status ~= nil and obj.status.conditions ~= nil then
+        for _, condition in ipairs(obj.status.conditions) do
+          if condition.type == "Available" then
+            if condition.status == "True" then
+              hs.status = "Healthy"
+              hs.message = condition.message
+              return hs
+            elseif condition.status == "False" then
+              hs.status = "Degraded"
+              hs.message = condition.message
+              return hs
+            end
+          end
+        end
+      end
+      hs.status = "Progressing"
+      hs.message = "Waiting for SpinApp to become available"
+      return hs
     accounts.cluster-bot: apiKey
     url: https://argocd.infra.tgy.io
     oidc.config: |

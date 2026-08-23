@@ -212,6 +212,13 @@ jobs:
     name: image existence
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: read
+      # The home-rss images are private packages; GHCR grants this repository
+      # read access to them. Without this the check would have to skip them
+      # the way it skips the internal Harbor, and a mistyped digest on our own
+      # images would sail through.
+      packages: read # crane auth login ghcr.io
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -220,6 +227,12 @@ jobs:
       - uses: aquaproj/aqua-installer@96a9bc20066c5bf5e275b41019cfc165b25f4e2e # v4.0.5
         with:
           aqua_version: v2.62.3
+
+      - name: Log in to GHCR
+        env:
+          GHCR_USER: ${{ github.repository_owner }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: crane auth login ghcr.io -u "${GHCR_USER}" -p "${GHCR_TOKEN}"
 
       - name: Check image existence
         run: |

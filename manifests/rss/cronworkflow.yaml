@@ -50,7 +50,8 @@ metadata:
   name: rss-fetcher
   namespace: rss
 spec:
-  schedule: "*/15 * * * *"
+  schedules:
+    - "*/15 * * * *"
   timezone: Asia/Tokyo
   concurrencyPolicy: Forbid
   workflowSpec:
@@ -89,7 +90,8 @@ metadata:
   name: rss-cleaner
   namespace: rss
 spec:
-  schedule: "0 3 * * *"
+  schedules:
+    - "0 3 * * *"
   timezone: Asia/Tokyo
   concurrencyPolicy: Forbid
   workflowSpec:

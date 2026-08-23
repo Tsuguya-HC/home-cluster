@@ -11,6 +11,14 @@ metadata:
   name: verify-skip
   namespace: claude-code
 spec:
+  # templateRef で呼ばれるほか、単体でも起動できるようにしておく。
+  # entrypoint と arguments が無いと `argo submit --from` が
+  # `spec.entrypoint is required` で落ちる
+  entrypoint: verify
+  arguments:
+    parameters:
+      - name: repo
+      - name: branch
   templates:
     - name: verify
       inputs:

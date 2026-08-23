@@ -134,6 +134,25 @@ spec:
         - ports:
             - port: "80"
               protocol: TCP
+    # The two below are argoexec's, not the container's: the init/wait sidecars
+    # report node status to the API server and archive logs to the artifact
+    # repository. Without them the Pod never leaves Init and the curl above
+    # never runs. Same pair as talos-build and image-build.
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "6443"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: seaweedfs
+            app.kubernetes.io/component: filer
+            io.kubernetes.pod.namespace: seaweedfs
+      toPorts:
+        - ports:
+            - port: "8333"
+              protocol: TCP
 ---
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy

@@ -3,6 +3,11 @@ kind: SpinApp
 metadata:
   name: rss-server
   namespace: rss
+  annotations:
+    # After the schema migration in wave 1. Starting the components
+    # against an empty database is what left every request returning
+    # `relation "feeds" does not exist`.
+    argocd.argoproj.io/sync-wave: "2"
 spec:
   image: ghcr.io/tsuguya/home-rss-server:v0.1.1@sha256:32c91fd25b07d0a45201df1d75d912aecf1ab0b66f017bcd6db15a1ab2b527b9
   replicas: 1

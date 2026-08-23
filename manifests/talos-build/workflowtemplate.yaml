@@ -225,13 +225,13 @@ spec:
             - amd64
             - --system-extension-image
             # renovate: datasource=docker depName=ghcr.io/siderolabs/iscsi-tools
-            - ghcr.io/siderolabs/iscsi-tools:v0.2.0@sha256:44b290660b71cf480ba2ab237e709dd5dee2af3484b368260ee0fc6c435c820d
+            - ghcr.io/siderolabs/iscsi-tools:v0.2.0@sha256:3a121a4451e746fe50eaee4089429814fdc199ad90758fd11958b3340c70e8f9
             - --system-extension-image
             # renovate: datasource=docker depName=ghcr.io/siderolabs/spin
-            - ghcr.io/siderolabs/spin:v0.25.1@sha256:cf814e779c47f28d59a3fd4ea1355581506c360c0ac55921b83ef09948107741
+            - ghcr.io/siderolabs/spin:v0.25.1@sha256:926d24df1d61fd0e9492106f8f11ee94b9cab5da99709b7fbc274f8a9555e937
             - --system-extension-image
             # renovate: datasource=docker depName=ghcr.io/siderolabs/kata-containers
-            - ghcr.io/siderolabs/kata-containers:3.32.0@sha256:dcbcaf42eff4a15260f5a6743c055f7e020c454774db84cadb585680071b130f
+            - ghcr.io/siderolabs/kata-containers:3.32.0@sha256:287e3cee744f3258a98818a5a3370265255d104ecacb4efa0eed38c77de323fa
             - --base-installer-image
             - "ghcr.io/tsuguya/installer-base:{{inputs.parameters.version}}"
             - --extra-kernel-arg
@@ -363,13 +363,13 @@ spec:
             - amd64
             - --system-extension-image
             # renovate: datasource=docker depName=ghcr.io/siderolabs/iscsi-tools
-            - ghcr.io/siderolabs/iscsi-tools:v0.2.0@sha256:44b290660b71cf480ba2ab237e709dd5dee2af3484b368260ee0fc6c435c820d
+            - ghcr.io/siderolabs/iscsi-tools:v0.2.0@sha256:3a121a4451e746fe50eaee4089429814fdc199ad90758fd11958b3340c70e8f9
             - --system-extension-image
             # renovate: datasource=docker depName=ghcr.io/siderolabs/spin
-            - ghcr.io/siderolabs/spin:v0.25.1@sha256:cf814e779c47f28d59a3fd4ea1355581506c360c0ac55921b83ef09948107741
+            - ghcr.io/siderolabs/spin:v0.25.1@sha256:926d24df1d61fd0e9492106f8f11ee94b9cab5da99709b7fbc274f8a9555e937
             - --system-extension-image
             # renovate: datasource=docker depName=ghcr.io/siderolabs/kata-containers
-            - ghcr.io/siderolabs/kata-containers:3.32.0@sha256:dcbcaf42eff4a15260f5a6743c055f7e020c454774db84cadb585680071b130f
+            - ghcr.io/siderolabs/kata-containers:3.32.0@sha256:287e3cee744f3258a98818a5a3370265255d104ecacb4efa0eed38c77de323fa
             - --base-installer-image
             - "ghcr.io/tsuguya/installer-base:{{inputs.parameters.version}}"
             - --extra-kernel-arg
@@ -405,13 +405,13 @@ spec:
             - amd64
             - --system-extension-image
             # renovate: datasource=docker depName=ghcr.io/siderolabs/iscsi-tools
-            - ghcr.io/siderolabs/iscsi-tools:v0.2.0@sha256:44b290660b71cf480ba2ab237e709dd5dee2af3484b368260ee0fc6c435c820d
+            - ghcr.io/siderolabs/iscsi-tools:v0.2.0@sha256:3a121a4451e746fe50eaee4089429814fdc199ad90758fd11958b3340c70e8f9
             - --system-extension-image
             # renovate: datasource=docker depName=ghcr.io/siderolabs/spin
-            - ghcr.io/siderolabs/spin:v0.25.1@sha256:cf814e779c47f28d59a3fd4ea1355581506c360c0ac55921b83ef09948107741
+            - ghcr.io/siderolabs/spin:v0.25.1@sha256:926d24df1d61fd0e9492106f8f11ee94b9cab5da99709b7fbc274f8a9555e937
             - --system-extension-image
             # renovate: datasource=docker depName=ghcr.io/siderolabs/kata-containers
-            - ghcr.io/siderolabs/kata-containers:3.32.0@sha256:dcbcaf42eff4a15260f5a6743c055f7e020c454774db84cadb585680071b130f
+            - ghcr.io/siderolabs/kata-containers:3.32.0@sha256:287e3cee744f3258a98818a5a3370265255d104ecacb4efa0eed38c77de323fa
             - --base-installer-image
             - "ghcr.io/tsuguya/installer-base:{{inputs.parameters.version}}"
             - --extra-kernel-arg

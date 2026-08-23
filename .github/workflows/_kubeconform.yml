@@ -1,0 +1,40 @@
+name: kubeconform
+
+# kubeconform 単体を workflow_call で公開する leaf。オーケストレーターは ci の
+# `Lint` ワークフロー（lint.yaml）で、必須チェックはそこの `CI Gate` 1 個だけ。
+# 直接のトリガーは持たない — leaf 自身が pull_request で起動すると、同じ
+# コミットに対して gate 経由の結果と重複した check run が並ぶ。
+on:
+  workflow_call:
+
+permissions: {}
+
+jobs:
+  kubeconform:
+    name: kubeconform
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: aquaproj/aqua-installer@96a9bc20066c5bf5e275b41019cfc165b25f4e2e # v4.0.5
+        with:
+          aqua_version: v2.62.3
+
+      - name: Validate manifests
+        run: |
+          kubeconform -strict -ignore-missing-schemas \
+            -schema-location default \
+            -schema-location '.github/schemas/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+            -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+            -summary manifests/
+
+      - name: Validate ArgoCD Applications
+        run: |
+          kubeconform -strict \
+            -schema-location default \
+            -schema-location '.github/schemas/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+            -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+            -summary apps/ argocd/

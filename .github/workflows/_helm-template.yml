@@ -1,0 +1,109 @@
+name: helm template
+
+# helm-template 単体を workflow_call で公開する leaf。オーケストレーターは ci の
+# `Lint` ワークフロー（lint.yaml）で、必須チェックはそこの `CI Gate` 1 個だけ。
+# 直接のトリガーは持たない — leaf 自身が pull_request で起動すると、同じ
+# コミットに対して gate 経由の結果と重複した check run が並ぶ。
+on:
+  workflow_call:
+
+permissions: {}
+
+jobs:
+  helm-template:
+    name: helm template
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: aquaproj/aqua-installer@96a9bc20066c5bf5e275b41019cfc165b25f4e2e # v4.0.5
+        with:
+          aqua_version: v2.62.3
+
+      - name: Validate Helm templates
+        run: |
+          set -euo pipefail
+          declare -A added_repos
+
+          is_oci() { [[ "$1" != https://* && "$1" != http://* ]]; }
+
+          # Phase 1: collect and add all helm repos (skip OCI)
+          for app_file in apps/*.yaml; do
+            source_count=$(yq '.spec.sources | length' "$app_file")
+            [[ "$source_count" == "0" ]] && continue
+            for i in $(seq 0 $((source_count - 1))); do
+              chart=$(yq ".spec.sources[$i].chart" "$app_file")
+              [[ "$chart" == "null" ]] && continue
+              repo_url=$(yq ".spec.sources[$i].repoURL" "$app_file")
+              is_oci "$repo_url" && continue
+              alias="r$(echo "$repo_url" | sha256sum | cut -c1-8)"
+              if [[ -z "${added_repos[$alias]+_}" ]]; then
+                helm repo add "$alias" "$repo_url"
+                added_repos[$alias]=1
+              fi
+            done
+          done
+          helm repo update
+
+          SKIP_CHARTS="harbor"
+
+          # Phase 2: helm template | kubeconform
+          for app_file in apps/*.yaml; do
+            source_count=$(yq '.spec.sources | length' "$app_file")
+            [[ "$source_count" == "0" ]] && continue
+            app_name=$(yq '.metadata.name' "$app_file")
+            [[ " $SKIP_CHARTS " == *" $app_name "* ]] && echo ">>> $app_name: skipped" && continue
+            namespace=$(yq '.spec.destination.namespace' "$app_file")
+            for i in $(seq 0 $((source_count - 1))); do
+              chart=$(yq ".spec.sources[$i].chart" "$app_file")
+              [[ "$chart" == "null" ]] && continue
+              repo_url=$(yq ".spec.sources[$i].repoURL" "$app_file")
+              revision=$(yq ".spec.sources[$i].targetRevision" "$app_file")
+              release_name=$(yq ".spec.sources[$i].helm.releaseName" "$app_file")
+              values_args=()
+              while IFS= read -r vf; do
+                [[ -z "$vf" || "$vf" == "null" ]] && continue
+                actual="${vf/\$values\//}"
+                # Fail rather than drop. Skipping a missing values file renders
+                # the chart with its own defaults, which passes kubeconform and
+                # reports green — while ArgoCD, which cannot resolve the same
+                # path, fails to sync. A rename under helm-values/ or a dropped
+                # $values/ prefix would otherwise reach main unnoticed.
+                if [[ ! -f "$actual" ]]; then
+                  echo "::error file=$app_file::valueFiles entry '$vf' resolves to '$actual', which does not exist"
+                  exit 1
+                fi
+                values_args+=("-f" "$actual")
+              done < <(yq ".spec.sources[$i].helm.valueFiles[]" "$app_file" 2>/dev/null || true)
+              echo ">>> $app_name: $chart@$revision"
+              if is_oci "$repo_url"; then
+                # helm 4 prints the OCI pull result ("Pulled:" / "Digest:") on
+                # stdout, so rendering straight from an oci:// ref puts two
+                # non-manifest lines at the head of the stream and kubeconform
+                # reads them as a document with no kind. helm 3 did not do this,
+                # which is why it only surfaced once the version was pinned.
+                # Pull first with that output discarded, then render the copy.
+                oci_dir=$(mktemp -d)
+                helm pull "oci://${repo_url}/${chart}" \
+                  --version "$revision" --untar --untardir "$oci_dir" >/dev/null
+                chart_ref="$oci_dir/$chart"
+                version_args=()
+              else
+                alias="r$(echo "$repo_url" | sha256sum | cut -c1-8)"
+                chart_ref="$alias/$chart"
+                version_args=(--version "$revision")
+              fi
+              helm template "$release_name" "$chart_ref" \
+                "${version_args[@]}" \
+                --namespace "$namespace" \
+                "${values_args[@]}" \
+                | kubeconform -strict -ignore-missing-schemas \
+                  -schema-location default \
+                  -schema-location '.github/schemas/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+                  -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+                  -summary
+            done
+          done

@@ -1,0 +1,98 @@
+name: argo lint
+
+# argo-lint 単体を workflow_call で公開する leaf。オーケストレーターは ci の
+# `Lint` ワークフロー（lint.yaml）で、必須チェックはそこの `CI Gate` 1 個だけ。
+# 直接のトリガーは持たない — leaf 自身が pull_request で起動すると、同じ
+# コミットに対して gate 経由の結果と重複した check run が並ぶ。
+on:
+  workflow_call:
+
+permissions: {}
+
+jobs:
+  # Argo Workflows drops deprecated spec fields at majors, and its CRDs set
+  # x-kubernetes-preserve-unknown-fields: a removed field keeps applying
+  # cleanly while the controller ignores it. That is how every mutex in this
+  # repo silently stopped serialising at the v4 bump. The CLI version is taken
+  # from the chart's appVersion, so the chart bump PR is what lints against
+  # the version it is about to install.
+  argo-lint:
+    name: argo lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: aquaproj/aqua-installer@96a9bc20066c5bf5e275b41019cfc165b25f4e2e # v4.0.5
+        with:
+          aqua_version: v2.62.3
+
+      - name: Install argo CLI matching the deployed controller
+        run: |
+          set -euo pipefail
+          repo=$(yq '.spec.sources[0].repoURL' apps/argo-workflows.yaml)
+          chart=$(yq '.spec.sources[0].chart' apps/argo-workflows.yaml)
+          chart_version=$(yq '.spec.sources[0].targetRevision' apps/argo-workflows.yaml)
+          helm repo add argo "$repo" >/dev/null
+          app_version=$(helm show chart "argo/$chart" --version "$chart_version" | yq '.appVersion')
+          echo "$chart@$chart_version -> argo-workflows $app_version"
+
+          # app_version reaches a URL that is downloaded, unpacked into
+          # /usr/local/bin and executed, and the checksums.txt it is verified
+          # against comes from that same URL — so the signature check only
+          # proves the two files agree, not where they came from. The value
+          # itself is the appVersion of whatever chart apps/argo-workflows.yaml
+          # points at, which a pull request can change. Constrain its shape
+          # before it becomes a path.
+          if [[ ! "$app_version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::refusing to build a download URL from appVersion '${app_version}'"
+            exit 1
+          fi
+          base="https://github.com/argoproj/argo-workflows/releases/download/${app_version}"
+          curl -fsSL --max-time 120 "$base/argo-linux-amd64.gz" -o argo-linux-amd64.gz
+          curl -fsSL --max-time 60 "$base/argo-workflows-cli-checksums.txt" -o checksums.txt
+          grep ' argo-linux-amd64.gz$' checksums.txt | sha256sum -c -
+          gunzip -c argo-linux-amd64.gz > /usr/local/bin/argo
+          chmod +x /usr/local/bin/argo
+          argo version --short
+
+      - name: Lint workflow manifests
+        run: |
+          set -uo pipefail
+          # every file goes in one invocation: --offline resolves templateRef
+          # against the args, so dropping one breaks the templates using it
+          mapfile -t files < <(
+            grep -rlE '^kind: (Workflow|WorkflowTemplate|ClusterWorkflowTemplate|CronWorkflow)$' \
+              manifests/ kustomize/ | sort -u
+          )
+          printf 'linting %d files\n' "${#files[@]}"
+          # The discovery above matches `kind:` only at column 0, so a manifest
+          # that is indented (embedded in a ConfigMap, a kustomize patch) or
+          # that lives outside these two directories is never linted. There is
+          # no symptom when that happens — argo lint is simply handed fewer
+          # files and reports success — so fail on an empty set at least.
+          if (( ${#files[@]} == 0 )); then
+            echo "::error::no Argo Workflow manifests matched; the discovery above is broken"
+            exit 1
+          fi
+          # a finding exits non-zero and the runner's shell is bash -e, so the
+          # findings have to survive the assignment to be classified below
+          out=$(argo lint --offline --no-color -o simple "${files[@]}" 2>&1) || true
+          echo "$out"
+
+          # discord-notify runs as an exit handler, where {{workflow.failures}}
+          # is bound; offline lint has no such binding and can never resolve
+          # it. Tolerate that one finding, nothing else.
+          known='manifests/argo/cluster-discord-notify-wft.yaml: in "discord-notify" (ClusterWorkflowTemplate): templates.send templates.send: failed to resolve {{workflow.failures}}'
+          # grep exits 1 when it filters everything out, which is the clean
+          # case, so the pipeline must not decide the step's fate either
+          unexpected=$(printf '%s\n' "$out" \
+            | grep -Fvx "$known" \
+            | grep -Fvx 'no linting errors found!' \
+            | sed '/^$/d') || true
+          if [ -n "$unexpected" ]; then
+            echo "::error::argo lint reported findings beyond the known exit-handler one"
+            exit 1
+          fi

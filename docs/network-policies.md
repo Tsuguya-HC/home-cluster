@@ -260,9 +260,9 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 
 | Component | Ingress | Egress |
 |---|---|---|
-| **trivy-operator** | prometheus (monitoring) → 8080; host → 9090 (probes) | kube-apiserver, mirror.gcr.io + registry-1.docker.io + auth.docker.io + production.cloudflare.docker.com + ghcr.io + registry.k8s.io + *.pkg.dev + quay.io + *.quay.io + public.ecr.aws :443 |
+| **trivy-operator** | prometheus (monitoring) → 8080; host → 9090 (probes) | trivy-server:4954 (readiness check before creating scan jobs), kube-apiserver, mirror.gcr.io + registry-1.docker.io + auth.docker.io + production.cloudflare.docker.com + ghcr.io + registry.k8s.io + *.pkg.dev + quay.io + *.quay.io + public.ecr.aws :443 |
 | **scan-jobs** (managed-by: trivy-operator) | deny world | 0.0.0.0/0:443 — registry CDN backends (S3, R2, CloudFront, etc.) are too numerous and dynamic for toFQDNs. Ephemeral pods, HTTPS only; harbor-nginx (harbor):8443; trivy-server:4954 |
-| **trivy-server** | scan-jobs → 4954; host → 4954 (probes) | mirror.gcr.io:443 (vuln DB) |
+| **trivy-server** | scan-jobs, trivy-operator → 4954; host → 4954 (probes) | mirror.gcr.io:443 (vuln DB) |
 | **node-collector** (app: node-collector) | deny world | kube-apiserver |
 
 ## nfs-provisioner (1 policy)

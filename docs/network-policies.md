@@ -167,11 +167,16 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 |---|---|---|
 | **claude-code** (claude-code=true) | (deny world) | kube-apiserver, api.anthropic.com + github.com + api.github.com + *.githubusercontent.com + index.crates.io + static.crates.io + registry.npmjs.org + discord.com + gitmcp.io :443, seaweedfs-filer (seaweedfs):8333, loki-gateway (monitoring):8080, prometheus (monitoring):9090, horenso (horenso):3000, task-dispatch-eventsource (argo):12002, argocd-server (argocd):8080 |
 
-## image-build (1 policy)
+## image-build (2 policies)
 
 | Component | Ingress | Egress |
 |---|---|---|
 | **image-build** (image-build=true) | (deny world) | kube-apiserver, 0.0.0.0/0:443, harbor-nginx (harbor):8443 (internal push), seaweedfs-filer (seaweedfs):8333 |
+| **workflow-pods** (workflows.argoproj.io/workflow が付き image-build=true が付かない Pod) | (deny world) | kube-apiserver, seaweedfs-filer (seaweedfs):8333, discord.com:443 |
+
+`workflow-pods` は「ラベルを持たないまま投入されたワークフローが**自分の失敗を報告できる**」ための
+最小限であって、任意のワークフローを動かすためのものではない。ビルドに要る egress は
+`image-build` 側にある。
 
 ## seaweedfs (4 policies)
 

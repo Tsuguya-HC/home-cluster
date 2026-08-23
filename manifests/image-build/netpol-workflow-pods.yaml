@@ -1,0 +1,55 @@
+# Argo attaches a discord-notify exit hook to every workflow in every namespace
+# (argo-workflows' workflowDefaults), and argoexec needs the API server to report
+# a step's outcome and the artifact repository to store its logs. A workflow pod
+# that matches no policy gets none of that: the run fails, the failure is not
+# reported, and the notification that would have said so is dropped too.
+#
+# `image-build` above covers pods the WorkflowTemplate labels. Anything else
+# submitted into this namespace carries only the labels Argo generates, and
+# argo's netpol-workflow-pods equivalent does not exist here — a workflow
+# without the label was silently cut off from both the API server and the
+# artifact store (204 and 160 POLICY_DENIED from one such run).
+#
+# This is deliberately not a way to make arbitrary workflows work: it grants
+# what a run needs to *report itself*, and nothing it would need to do its job.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: workflow-pods
+  namespace: image-build
+spec:
+  endpointSelector:
+    matchExpressions:
+      - key: workflows.argoproj.io/workflow
+        operator: Exists
+      # Pods the WorkflowTemplate labels keep the narrower `image-build` policy.
+      - key: image-build
+        operator: DoesNotExist
+  ingressDeny:
+    - fromEntities:
+        - world
+  egress:
+    # argoexec reports each step's outcome.
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "6443"
+              protocol: TCP
+    # argoexec stores the step's logs as an artifact.
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: seaweedfs
+            app.kubernetes.io/component: filer
+            io.kubernetes.pod.namespace: seaweedfs
+      toPorts:
+        - ports:
+            - port: "8333"
+              protocol: TCP
+    # The exit hook every workflow inherits from workflowDefaults.
+    - toFQDNs:
+        - matchName: "discord.com"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP

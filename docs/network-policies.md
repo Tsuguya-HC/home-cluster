@@ -256,12 +256,13 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 | **oauth2-proxy-seaweedfs** | ingress → 4180 (L7 HTTP) | seaweedfs-filer (seaweedfs):8888, kanidm (kanidm):8443 |
 | **oauth2-proxy-rss** | ingress, cloudflared (argocd) → 4180 (L7 HTTP) | rss-ui (rss):80, rss-server (rss):80, kanidm (kanidm):8443 |
 
-## trivy-system (3 policies)
+## trivy-system (4 policies)
 
 | Component | Ingress | Egress |
 |---|---|---|
 | **trivy-operator** | prometheus (monitoring) → 8080; host → 9090 (probes) | kube-apiserver, mirror.gcr.io + registry-1.docker.io + auth.docker.io + production.cloudflare.docker.com + ghcr.io + registry.k8s.io + *.pkg.dev + quay.io + *.quay.io + public.ecr.aws :443 |
-| **scan-jobs** (managed-by: trivy-operator) | deny world | 0.0.0.0/0:443 — registry CDN backends (S3, R2, CloudFront, etc.) are too numerous and dynamic for toFQDNs. Ephemeral pods, HTTPS only; harbor-nginx (harbor):8443 |
+| **scan-jobs** (managed-by: trivy-operator) | deny world | 0.0.0.0/0:443 — registry CDN backends (S3, R2, CloudFront, etc.) are too numerous and dynamic for toFQDNs. Ephemeral pods, HTTPS only; harbor-nginx (harbor):8443; trivy-server:4954 |
+| **trivy-server** | scan-jobs → 4954; host → 4954 (probes) | mirror.gcr.io:443 (vuln DB) |
 | **node-collector** (app: node-collector) | deny world | kube-apiserver |
 
 ## nfs-provisioner (1 policy)

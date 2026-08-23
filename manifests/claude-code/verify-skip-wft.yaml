@@ -15,6 +15,13 @@ spec:
   # entrypoint と arguments が無いと `argo submit --from` が
   # `spec.entrypoint is required` で落ちる
   entrypoint: verify
+  # namespace の CNP はこのラベルで選択する。template 側の
+  # `metadata.labels` だけでは、単体起動したとき（呼び出し元の
+  # podMetadata が無いとき）にベースラインのカバレッジから静かに外れ、
+  # github-auth が GitHub に届かず exit 28 で落ちる。
+  podMetadata:
+    labels:
+      claude-code: "true"
   arguments:
     parameters:
       - name: repo

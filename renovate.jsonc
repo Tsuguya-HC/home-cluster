@@ -239,19 +239,6 @@
       "automerge": false
     },
     {
-      "description": [
-        "ghcr.io/tsuguya/home-rss-* are private packages. The GitHub App installation",
-        "token Renovate runs with has packages:write, yet ghcr answers DENIED:",
-        "installation not allowed to Read organization package (measured 2026-08-23) —",
-        "ghcr only honours the Actions GITHUB_TOKEN for App-style auth, not a third-party",
-        "App. Until the images move to Harbor (where Renovate already authenticates)",
-        "every run logs four lookup failures on the Dependency Dashboard; releases are",
-        "bumped by hand from home-rss in the meantime."
-      ],
-      "matchPackageNames": ["ghcr.io/tsuguya/**"],
-      "enabled": false
-    },
-    {
       "description": "Group QNAP CSI packages (chart version + all images)",
       "groupName": "qnap-csi",
       "matchPackageNames": [

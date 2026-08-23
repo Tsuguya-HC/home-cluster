@@ -4,7 +4,7 @@ metadata:
   name: rss-cleaner
   namespace: rss
 spec:
-  image: ghcr.io/tsuguya/home-rss-cleaner:v0.1.0@sha256:97d65e86f054ebad6135737df74e0c8258852069a0f272e91fa1911cf5167a2b
+  image: ghcr.io/tsuguya/home-rss-cleaner:v0.1.1@sha256:23fdc525221195d3b55cbb40b43d1a7d4b9b9fe0dc173dba738b7030b3bb95ce
   replicas: 1
   executor: containerd-shim-spin
   imagePullSecrets:

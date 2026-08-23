@@ -4,7 +4,7 @@ metadata:
   name: rss-fetcher
   namespace: rss
 spec:
-  image: ghcr.io/tsuguya/home-rss-fetcher:v0.1.0@sha256:18de9013de3acb628e9b8f3cea1a9052c9a90e5e931a5656153ea0977640a317
+  image: ghcr.io/tsuguya/home-rss-fetcher:v0.1.1@sha256:3611976453ec439f5b41936fe850f6290d0f9bdcb0696978f86c5055ae379efa
   replicas: 1
   executor: containerd-shim-spin
   imagePullSecrets:

@@ -4,7 +4,7 @@ metadata:
   name: rss-server
   namespace: rss
 spec:
-  image: ghcr.io/tsuguya/home-rss-server:v0.1.0@sha256:aafee1831effaddc3b92d4c2d34881d9a4c19e0fd7d51672751f6ca442654e77
+  image: ghcr.io/tsuguya/home-rss-server:v0.1.1@sha256:32c91fd25b07d0a45201df1d75d912aecf1ab0b66f017bcd6db15a1ab2b527b9
   replicas: 1
   executor: containerd-shim-spin
   imagePullSecrets:

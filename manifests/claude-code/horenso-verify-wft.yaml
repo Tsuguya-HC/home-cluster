@@ -144,9 +144,13 @@ spec:
             export HOME=/tmp
             GITHUB_TOKEN=$(cat /github-token/token)
             git config --global --add safe.directory /work/src
-            git clone --depth 1 --branch "{{inputs.parameters.branch}}" \
-              "https://x-access-token:${GITHUB_TOKEN}@github.com/{{inputs.parameters.repo}}.git" /work/src \
-              2>&1 | tail -2 || fail "ブランチを clone できませんでした"
+            # パイプを挟むと `||` がパイプライン（tail）の終了コードを見てしまい、
+            # clone の失敗を拾えない
+            if ! git clone --depth 1 --branch "{{inputs.parameters.branch}}" \
+                 "https://x-access-token:${GITHUB_TOKEN}@github.com/{{inputs.parameters.repo}}.git" \
+                 /work/src > /tmp/clone.log 2>&1; then
+              fail "ブランチを clone できませんでした: $(tail -c 400 /tmp/clone.log)"
+            fi
             cd /work/src
 
             npm ci > /tmp/install.log 2>&1 || fail "npm ci に失敗: $(tail -c 800 /tmp/install.log)"
@@ -176,43 +180,51 @@ spec:
             # ---- 書き込みパスを通す ----
             # 読み取りが 200 を返すことは、意図した状態変化が起きた証明にならない。
             # 日本語の長文を往復させ、バイト単位で一致するかまで見る（#76 の型）。
-            python3 - <<'PY' > /work/probe.txt 2>&1
-            import json, urllib.request, sys
+            # このイメージに python3 は無い（node / npm / jq / curl / nc のみ）。
+            # node 24 は fetch を持つのでそれで書く。
+            cat > /tmp/probe.mjs <<'JS'
+            const BASE = "http://localhost:3100";
+            const LONG = "復旧手順を確認する。StatefulSet を scale してから PVC を確認する。".repeat(200);
 
-            BASE = "http://localhost:3100"
-            LONG = "復旧手順を確認する。StatefulSet を scale してから PVC を確認する。" * 200
+            async function req(method, path, payload) {
+              const r = await fetch(BASE + path, {
+                method,
+                headers: { "Content-Type": "application/json" },
+                body: payload === undefined ? undefined : JSON.stringify(payload),
+              });
+              if (!r.ok) throw new Error(`${method} ${path} -> HTTP ${r.status}`);
+              return r.json();
+            }
 
-            def req(method, path, payload=None):
-                data = json.dumps(payload).encode() if payload is not None else None
-                r = urllib.request.Request(BASE + path, data=data, method=method,
-                                           headers={"Content-Type": "application/json"})
-                with urllib.request.urlopen(r) as resp:
-                    return json.load(resp)
+            const created = await req("POST", "/tasks", {
+              title: "検証タスク（自動）",
+              description: LONG,
+              category: "investigate",
+            });
+            const id = created.id;
 
-            created = req("POST", "/tasks", {
-                "title": "検証タスク（自動）",
-                "description": LONG,
-                "category": "investigate",
-            })
-            tid = created["id"]
+            await req("PATCH", `/tasks/${id}`, { status: "completed", result: LONG });
+            const got = await req("GET", `/tasks/${id}`);
 
-            req("PATCH", f"/tasks/{tid}", {"status": "completed", "result": LONG})
-            got = req("GET", f"/tasks/{tid}")
+            const problems = [];
+            for (const field of ["description", "result"]) {
+              const back = got[field] ?? "";
+              if (back !== LONG) {
+                const broken = back.slice(-4).includes("\uFFFD");
+                problems.push(
+                  `${field}: 送信 ${LONG.length} 文字 / ${Buffer.byteLength(LONG)} バイト → ` +
+                  `保存 ${back.length} 文字 / ${Buffer.byteLength(back)} バイト` +
+                  (broken ? "（末尾に REPLACEMENT CHARACTER）" : ""));
+              }
+            }
+            if (got.status !== "completed") {
+              problems.push(`status が completed になっていない: ${got.status}`);
+            }
 
-            problems = []
-            for field in ("description", "result"):
-                sent, back = LONG, got.get(field) or ""
-                if back != sent:
-                    problems.append(
-                        f"{field}: 送信 {len(sent)} 文字 / {len(sent.encode())} バイト → "
-                        f"保存 {len(back)} 文字 / {len(back.encode())} バイト"
-                        + ("（末尾に REPLACEMENT CHARACTER）" if "�" in back[-4:] else ""))
-            if got.get("status") != "completed":
-                problems.append(f"status が completed になっていない: {got.get('status')}")
-
-            print(json.dumps({"task": tid, "problems": problems}, ensure_ascii=False))
-            sys.exit(1 if problems else 0)
-            PY
+            console.log(JSON.stringify({ task: id, problems }));
+            process.exit(problems.length ? 1 : 0);
+            JS
+            node /tmp/probe.mjs > /work/probe.txt 2>&1
             PROBE_RC=$?
             kill "$APP_PID" 2>/dev/null || true
 

@@ -1,0 +1,32 @@
+apiVersion: core.spinkube.dev/v1alpha1
+kind: SpinApp
+metadata:
+  name: rss-cleaner
+  namespace: rss
+spec:
+  image: ghcr.io/tsuguya/home-rss-cleaner:v0.1.0@sha256:97d65e86f054ebad6135737df74e0c8258852069a0f272e91fa1911cf5167a2b
+  replicas: 1
+  executor: containerd-shim-spin
+  imagePullSecrets:
+    - name: ghcr-pull
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      memory: 128Mi
+  variables:
+    - name: db_url
+      valueFrom:
+        secretKeyRef:
+          name: rss-pg-credentials
+          key: uri
+    # The component refuses to connect in the clear once this is set, so the
+    # CA is what actually enforces TLS — not the URL, which CNPG generates
+    # without an sslmode at all. Comes from the CNPG-managed CA secret so a
+    # rotation does not need a rebuild.
+    - name: db_ca_root
+      valueFrom:
+        secretKeyRef:
+          name: rss-pg-ca
+          key: ca.crt

@@ -8,6 +8,10 @@ spec:
     matchLabels:
       app.kubernetes.io/instance: oauth2-proxy-rss
   ingress:
+    # reader.tgy.io resolves to the Gateway inside the house and reaches
+    # Cloudflare from outside, so both paths have to be allowed. The tunnel
+    # config has pointed at this Service since March, but nothing could use it
+    # while the upstream did not exist.
     - fromEntities:
         - ingress
       toPorts:
@@ -17,10 +21,27 @@ spec:
           rules:
             http:
               - {}
+    - fromEndpoints:
+        - matchLabels:
+            app: cloudflared
+            io.kubernetes.pod.namespace: argocd
+      toPorts:
+        - ports:
+            - port: "4180"
+              protocol: TCP
+          rules:
+            http:
+              - {}
   egress:
+    # spin-operator labels the Pods it creates with core.spinkube.dev/app-name;
+    # `app: rss-ui` never matched anything. It went unnoticed because the
+    # SpinApps were removed before either side was ever exercised.
     - toEndpoints:
         - matchLabels:
-            app: rss-ui
+            core.spinkube.dev/app-name: rss-ui
+            io.kubernetes.pod.namespace: rss
+        - matchLabels:
+            core.spinkube.dev/app-name: rss-server
             io.kubernetes.pod.namespace: rss
       toPorts:
         - ports:

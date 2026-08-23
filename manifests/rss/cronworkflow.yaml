@@ -1,0 +1,97 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: workflow-executor
+  namespace: rss
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: argo-workflow-executor
+  namespace: rss
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: argo-workflows-edit
+subjects:
+  - kind: ServiceAccount
+    name: workflow-executor
+    namespace: rss
+---
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: rss-fetcher
+  namespace: rss
+spec:
+  activeDeadlineSeconds: 300
+  serviceAccountName: workflow-executor
+  entrypoint: main
+  templates:
+    - name: main
+      metadata:
+        labels:
+          rss-cron: "true"
+      container:
+        image: curlimages/curl:8.18.0@sha256:d94d07ba9e7d6de898b6d96c1a072f6f8266c687af78a74f380087a0addf5d17
+        command: [sh, -c]
+        args:
+          - curl -fsS -X POST http://rss-fetcher:80/fetch
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            memory: 64Mi
+---
+apiVersion: argoproj.io/v1alpha1
+kind: CronWorkflow
+metadata:
+  name: rss-fetcher
+  namespace: rss
+spec:
+  schedule: "*/15 * * * *"
+  timezone: Asia/Tokyo
+  concurrencyPolicy: Forbid
+  workflowSpec:
+    workflowTemplateRef:
+      name: rss-fetcher
+---
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: rss-cleaner
+  namespace: rss
+spec:
+  activeDeadlineSeconds: 300
+  serviceAccountName: workflow-executor
+  entrypoint: main
+  templates:
+    - name: main
+      metadata:
+        labels:
+          rss-cron: "true"
+      container:
+        image: curlimages/curl:8.18.0@sha256:d94d07ba9e7d6de898b6d96c1a072f6f8266c687af78a74f380087a0addf5d17
+        command: [sh, -c]
+        args:
+          - curl -fsS -X POST http://rss-cleaner:80/clean
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            memory: 64Mi
+---
+apiVersion: argoproj.io/v1alpha1
+kind: CronWorkflow
+metadata:
+  name: rss-cleaner
+  namespace: rss
+spec:
+  schedule: "0 3 * * *"
+  timezone: Asia/Tokyo
+  concurrencyPolicy: Forbid
+  workflowSpec:
+    workflowTemplateRef:
+      name: rss-cleaner

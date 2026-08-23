@@ -225,6 +225,10 @@ notifications:
         - on-sync-succeeded
         - on-sync-failed
         - on-health-degraded
+    - recipients:
+        - horenso
+      triggers:
+        - on-health-recovered
   triggers:
     trigger.on-sync-succeeded: |
       - description: Application syncing has succeeded
@@ -241,6 +245,13 @@ notifications:
         send:
           - app-health-degraded
         when: app.status.health.status == 'Degraded'
+    # horenso が health-degraded で自動作成した調査タスクを閉じるため。
+    # Discord には流さない (Healthy は平常なので通知価値がない)。
+    trigger.on-health-recovered: |
+      - description: Application has recovered to Healthy
+        send:
+          - app-health-recovered
+        when: app.status.health.status == 'Healthy'
     trigger.on-deployed: |
       - description: Application is synced and healthy. Triggered once per commit.
         oncePer: app.status.operationState.syncResult.revision
@@ -319,6 +330,17 @@ notifications:
             {
               "app": "{{.app.metadata.name}}",
               "event": "health-degraded",
+              "health_status": "{{.app.status.health.status}}",
+              "url": "{{.context.argocdUrl}}/applications/{{.app.metadata.name}}"
+            }
+    template.app-health-recovered: |
+      webhook:
+        horenso:
+          method: POST
+          body: |
+            {
+              "app": "{{.app.metadata.name}}",
+              "event": "health-recovered",
               "health_status": "{{.app.status.health.status}}",
               "url": "{{.context.argocdUrl}}/applications/{{.app.metadata.name}}"
             }

@@ -31,6 +31,9 @@ spec:
         - matchLabels:
             task-fail-sync: "true"
             io.kubernetes.pod.namespace: argo
+        - matchLabels:
+            horenso-maintenance: "true"
+            io.kubernetes.pod.namespace: argo
       toPorts:
         - ports:
             - port: "3000"

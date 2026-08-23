@@ -1,0 +1,108 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: horenso-maintenance
+  namespace: argo
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: horenso-maintenance
+  namespace: argo
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: argo-workflows-edit
+subjects:
+  - kind: ServiceAccount
+    name: horenso-maintenance
+    namespace: argo
+---
+# ArgoCD Application の health/sync を読むだけ。horenso 本体に ArgoCD の
+# 読み取り権限を持たせず、この WF が集めた現状を渡す。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: horenso-maintenance
+  namespace: argocd
+rules:
+  - apiGroups: [argoproj.io]
+    resources: [applications]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: horenso-maintenance
+  namespace: argocd
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: horenso-maintenance
+subjects:
+  - kind: ServiceAccount
+    name: horenso-maintenance
+    namespace: argo
+---
+# horenso の日次整理。回復イベント (health-recovered / sync-succeeded) の
+# 取りこぼしで残った argocd 由来タスクを現状と突き合わせて閉じ、止まった
+# running を failed にし、古い event 投稿を消す。結果は horenso 自身に
+# report として投稿される (0 件でも投稿 — 沈黙と正常を区別する)。
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: horenso-maintenance
+  namespace: argo
+spec:
+  activeDeadlineSeconds: 300
+  serviceAccountName: horenso-maintenance
+  entrypoint: main
+  templates:
+    - name: main
+      metadata:
+        labels:
+          horenso-maintenance: "true"
+      container:
+        image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:d29e837e2601fadc50e346398e86934c9cf49b309448b89b19b867122c9bf74b
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            memory: 128Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+        env:
+          - name: HOME
+            value: /tmp
+        command: [sh, -c]
+        args:
+          - |
+            set -eu
+
+            kubectl get applications -n argocd -o json \
+              | jq '{apps: [.items[] | {name: .metadata.name, health: .status.health.status, sync: .status.sync.status}]}' \
+              > /tmp/apps.json
+
+            echo "=== $(jq '.apps | length' /tmp/apps.json) applications ==="
+
+            curl -fsS -X POST http://horenso.horenso.svc.cluster.local:3000/maintenance \
+              -H 'Content-Type: application/json' \
+              --data @/tmp/apps.json \
+              | jq .
+---
+apiVersion: argoproj.io/v1alpha1
+kind: CronWorkflow
+metadata:
+  name: horenso-maintenance
+  namespace: argo
+spec:
+  schedules:
+    - "30 4 * * *"
+  timezone: Asia/Tokyo
+  concurrencyPolicy: Replace
+  workflowSpec:
+    workflowTemplateRef:
+      name: horenso-maintenance

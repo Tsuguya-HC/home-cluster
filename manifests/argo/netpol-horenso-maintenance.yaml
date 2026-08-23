@@ -1,0 +1,19 @@
+# kube-apiserver への egress は workflow-pods CNP が持つ。ここは horenso 向けだけ。
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: horenso-maintenance
+  namespace: argo
+spec:
+  endpointSelector:
+    matchLabels:
+      horenso-maintenance: "true"
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            app: horenso
+            io.kubernetes.pod.namespace: horenso
+      toPorts:
+        - ports:
+            - port: "3000"
+              protocol: TCP

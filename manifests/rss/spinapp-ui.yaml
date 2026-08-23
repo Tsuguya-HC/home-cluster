@@ -9,7 +9,7 @@ metadata:
     # `relation "feeds" does not exist`.
     argocd.argoproj.io/sync-wave: "2"
 spec:
-  image: ghcr.io/tsuguya/home-rss-ui:v0.1.2@sha256:c0bcb5602bb5f6ee3063c6e10ecb81141da5d2d8af89b50717b78b27f656df66
+  image: ghcr.io/tsuguya/home-rss-ui:v0.1.3@sha256:1ac83bca17b753f14a2105edb405240d29b078b474feb9a5f47086d9cd85ad3b
   replicas: 1
   executor: containerd-shim-spin
   imagePullSecrets:

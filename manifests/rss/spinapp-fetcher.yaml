@@ -1,0 +1,32 @@
+apiVersion: core.spinkube.dev/v1alpha1
+kind: SpinApp
+metadata:
+  name: rss-fetcher
+  namespace: rss
+spec:
+  image: ghcr.io/tsuguya/home-rss-fetcher:v0.1.1@sha256:3611976453ec439f5b41936fe850f6290d0f9bdcb0696978f86c5055ae379efa
+  replicas: 1
+  executor: containerd-shim-spin
+  imagePullSecrets:
+    - name: ghcr-pull
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      memory: 128Mi
+  variables:
+    - name: db_url
+      valueFrom:
+        secretKeyRef:
+          name: rss-pg-credentials
+          key: uri
+    # The component refuses to connect in the clear once this is set, so the
+    # CA is what actually enforces TLS — not the URL, which CNPG generates
+    # without an sslmode at all. Comes from the CNPG-managed CA secret so a
+    # rotation does not need a rebuild.
+    - name: db_ca_root
+      valueFrom:
+        secretKeyRef:
+          name: rss-pg-ca
+          key: ca.crt

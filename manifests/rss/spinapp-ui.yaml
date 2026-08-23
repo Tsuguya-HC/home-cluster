@@ -1,0 +1,17 @@
+apiVersion: core.spinkube.dev/v1alpha1
+kind: SpinApp
+metadata:
+  name: rss-ui
+  namespace: rss
+spec:
+  image: ghcr.io/tsuguya/home-rss-ui:v0.1.1@sha256:18b83df00aee0e78ef26ff2f9c57bde1cac8659a5ed211386dd365b9811cfc94
+  replicas: 1
+  executor: containerd-shim-spin
+  imagePullSecrets:
+    - name: ghcr-pull
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      memory: 128Mi

@@ -1,0 +1,106 @@
+# claude の実行が「判定を出せなかった」ときに、どの層が失敗したのかを切り分ける。
+#
+# `claude -p ... || true` は終了コードも出力も捨てるので、API 認証エラーも
+# レート制限もエージェントの判断放棄も、すべて同じ indeterminate に潰れていた。
+# 人間に渡す以上、渡す相手が次に何をすべきか（再実行か、調査か）が分かる必要がある。
+#
+# 判定はしない。verdict を決めるのは呼び出し側で、ここは説明を書くだけ。
+# ただし「どちらの層か」は終了コードで返す（0 = エージェント側 / 10 = 基盤側）。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-diagnose
+  namespace: claude-code
+data:
+  claude-diagnose.sh: |
+    # 使い方: sh claude-diagnose.sh <stream-json ログ> <終了コード> [stderr ログ]
+    # 標準出力に markdown を出す。
+    #
+    # 各フィールドの意味は claude-code イメージで実測した (2026-08-23):
+    #
+    #   正常          exit 0 / is_error=false / api_error_status=null
+    #                 subtype=success / terminal_reason=completed
+    #   max-turns     exit 1 / is_error=true  / api_error_status=null
+    #                 subtype=error_max_turns / terminal_reason=max_turns
+    #   認証失敗      exit 1 / is_error=true  / api_error_status=401
+    #                 subtype=**success**
+    #
+    # 最後の行が重要で、`subtype` は API エラーでも "success" のままになる。
+    # `subtype == "success"` を合格条件にすると 401 を成功として通す。
+    # 使えるのは is_error と api_error_status。
+    # 終了コードで層を返す:
+    #   0  = エージェント側（正常完了 / ターン上限など、判断の問題）
+    #   10 = 実行基盤側（API エラー・レート制限・途中終了）。再実行で直りうる
+    set -u
+    LOG="${1:-}"
+    RC="${2:-?}"
+    ERRLOG="${3:-}"
+
+    emit_stderr() {
+      if [ -n "$ERRLOG" ] && [ -s "$ERRLOG" ]; then
+        echo; echo "stderr の末尾:"; echo '```'
+        tail -c 600 "$ERRLOG"; echo '```'
+      fi
+    }
+
+    if [ ! -s "$LOG" ]; then
+      echo "**claude の出力が空です**（終了コード ${RC}）。プロセスが起動していない可能性があります。"
+      emit_stderr
+      exit 10
+    fi
+
+    RESULT=$(jq -c 'select(.type == "result")' "$LOG" 2>/dev/null | tail -1)
+
+    # レート制限は result の有無と関係なく出るので先に見る。
+    # status は正常時 "allowed"。それ以外を制限として扱う
+    RL=$(jq -c 'select(.type == "rate_limit_event") | .rate_limit_info' "$LOG" 2>/dev/null | tail -1)
+    if [ -n "$RL" ]; then
+      RL_STATUS=$(printf '%s' "$RL" | jq -r '.status // "?"')
+      if [ "$RL_STATUS" != "allowed" ]; then
+        RESET=$(printf '%s' "$RL" | jq -r '.resetsAt // empty')
+        echo "**レート制限に当たっています**（status: \`${RL_STATUS}\`）。"
+        [ -n "$RESET" ] && echo "解除予定: $(date -u -d "@${RESET}" 2>/dev/null || echo "epoch ${RESET}")"
+        echo; echo "エージェントの判断の問題ではないので、時間をおいて再実行すれば通る見込みです。"
+        exit 10
+      fi
+    fi
+
+    if [ -z "$RESULT" ]; then
+      echo "**claude が result イベントを出さずに終了しました**（終了コード ${RC}）。"
+      echo "会話の途中で落ちています。エージェントの判断ではなく実行基盤側の問題です。"
+      echo; echo "出たイベント:"; echo '```'
+      jq -r '.type' "$LOG" 2>/dev/null | sort | uniq -c
+      echo '```'
+      emit_stderr
+      exit 10
+    fi
+
+    IS_ERR=$(printf '%s' "$RESULT" | jq -r '.is_error // false')
+    API_STATUS=$(printf '%s' "$RESULT" | jq -r '.api_error_status // empty')
+    SUBTYPE=$(printf '%s' "$RESULT" | jq -r '.subtype // "?"')
+    TERM=$(printf '%s' "$RESULT" | jq -r '.terminal_reason // "?"')
+    TURNS=$(printf '%s' "$RESULT" | jq -r '.num_turns // "?"')
+
+    if [ -n "$API_STATUS" ] && [ "$API_STATUS" != "null" ]; then
+      echo "**API が HTTP ${API_STATUS} を返しています**。エージェントの判断ではなく実行基盤側の問題です。"
+      case "$API_STATUS" in
+        401|403) echo; echo "認証の失敗です。\`claude-code-token\` の期限切れ・失効を確認してください。" ;;
+        429)     echo; echo "レート制限です。時間をおいて再実行すれば通る見込みです。" ;;
+        5*)      echo; echo "API 側の障害の可能性があります。https://status.anthropic.com を確認してください。" ;;
+      esac
+      emit_stderr
+      exit 10
+    fi
+
+    if [ "$IS_ERR" = "true" ]; then
+      echo "**claude がエラー終了しました**（subtype: \`${SUBTYPE}\` / terminal_reason: \`${TERM}\` / ${TURNS} ターン）。"
+      case "$TERM" in
+        max_turns) echo; echo "ターン上限に達しています。タスクが大きすぎるか、同じ手順を繰り返している可能性があります。" ;;
+      esac
+      emit_stderr
+      # エージェントが走った上での失敗なので基盤側ではない
+      exit 0
+    fi
+
+    echo "claude の実行自体は正常に完了しています（${TURNS} ターン / terminal_reason: \`${TERM}\`）。"
+    echo "実行基盤ではなく、エージェントが判定を出せていません。"

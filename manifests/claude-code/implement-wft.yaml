@@ -51,6 +51,9 @@ spec:
       emptyDir: {}
     - name: helpers
       emptyDir: {}
+    - name: diagnose
+      configMap:
+        name: agent-diagnose
     - name: prompt
       projected:
         sources:
@@ -235,7 +238,24 @@ spec:
               --allowedTools "Bash,Read,Write,Edit,Grep,Glob" \
               --model sonnet \
               --max-turns 60 \
-              "$PROMPT" || true
+              "$PROMPT" > /tmp/claude.jsonl 2>/tmp/claude.err
+            CLAUDE_RC=$?
+            # ログは捨てない。判定不能になった理由は後から追えなければ意味がない
+            cat /tmp/claude.jsonl
+            [ -s /tmp/claude.err ] && cat /tmp/claude.err >&2
+
+            # エラーのときは、まず claude 自身が動けていたのかを見る。
+            # API 認証切れもレート制限も、放っておくと「PR が見つかりません」に
+            # 化けて、エージェントが実装に失敗したかのように見える
+            if [ "$CLAUDE_RC" != "0" ]; then
+              sh /diagnose/claude-diagnose.sh /tmp/claude.jsonl "$CLAUDE_RC" /tmp/claude.err > /tmp/diag.md
+              DIAG_RC=$?
+              echo "## 実装フェーズが完走しませんでした"
+              cat /tmp/diag.md
+              # 基盤側の失敗はエージェントの判断ではない。差し戻し予算を
+              # 消費させず、ワークフローとして失敗させて人間に渡す
+              [ "$DIAG_RC" = "10" ] && exit 1
+            fi
 
             cd /workspace
             if git diff --quiet && git diff --cached --quiet; then
@@ -292,6 +312,7 @@ spec:
           - {name: github-token, mountPath: /github-token, readOnly: true}
           - {name: helpers, mountPath: /helpers, readOnly: true}
           - {name: prompt, mountPath: /prompt, readOnly: true}
+          - {name: diagnose, mountPath: /diagnose, readOnly: true}
         resources:
           requests: {cpu: 200m, memory: 1Gi}
           limits: {memory: 6Gi}
@@ -393,6 +414,13 @@ spec:
               | gh pr comment "$PR" --repo "$REPO" --body-file - || true
             exit 0
           fi
+
+          # 取り直す。ループ内の $RAW は Gate が完了した瞬間のもので、
+          # reusable workflow の leaf はまだ起動前のプレースホルダ名
+          # （`argo-lint`）で並んでいる。起動後は `argo-lint / argo lint` という
+          # 別エントリになるので、そのまま出すと落ちた job を取り違える
+          FRESH=$(gh api "repos/${REPO}/commits/${SHA}/check-runs" 2>/dev/null)
+          printf '%s' "$FRESH" | jq -e 'has("check_runs")' >/dev/null 2>&1 && RAW="$FRESH"
 
           GATE_CONCLUSION=$(printf '%s' "$RAW" | jq -r --arg g "$GATE" '[.check_runs[] | select(.name == $g)] | .[0].conclusion')
 
@@ -511,7 +539,10 @@ spec:
               --allowedTools "Bash,Read,Grep,Glob,Write" \
               --model sonnet \
               --max-turns 40 \
-              "$PROMPT" || true
+              "$PROMPT" > /tmp/claude.jsonl 2>/tmp/claude.err
+            CLAUDE_RC=$?
+            cat /tmp/claude.jsonl
+            [ -s /tmp/claude.err ] && cat /tmp/claude.err >&2
 
             # ---- 判定の回収。ここから先はエージェントの発話を一切読まない ----
             FOUND=""; COUNT=0
@@ -527,7 +558,11 @@ spec:
                 < "/work/out/$FOUND/report.md" > /work/report.md 2>/dev/null || true
             else
               VERDICT=indeterminate
-              { echo "非空のディレクトリが $COUNT 個ありました（ちょうど 1 個であるべき）。"; ls -laR /work/out; } > /work/report.md 2>&1
+              # 判定が無いときは、まずレビュアーが動けていたのかを見る。
+              # API 側の失敗とエージェントの判断放棄は、人間の次の一手が違う
+              { echo "非空のディレクトリが $COUNT 個ありました（ちょうど 1 個であるべき）。"; echo;
+                sh /diagnose/claude-diagnose.sh /tmp/claude.jsonl "$CLAUDE_RC" /tmp/claude.err;
+                echo; ls -laR /work/out; } > /work/report.md 2>&1
             fi
             [ -s /work/report.md ] || echo "レポートが空でした。" > /work/report.md
             printf '%s' "$VERDICT" > /work/verdict.txt
@@ -544,6 +579,7 @@ spec:
           - {name: github-token, mountPath: /github-token, readOnly: true}
           - {name: verdict, mountPath: /work}
           - {name: prompt, mountPath: /prompt, readOnly: true}
+          - {name: diagnose, mountPath: /diagnose, readOnly: true}
         resources:
           requests: {cpu: 200m, memory: 512Mi}
           limits: {memory: 4Gi}

@@ -285,7 +285,7 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 | **nextcloud** | ingress, cloudflared (argocd) → 80 | kube-apiserver, shared-pg (database):5432, seaweedfs-filer (seaweedfs):8333, kanidm (kanidm):8443, valkey:6379, *.nextcloud.com:443 (app store/updates), github.com:443 + *.githubusercontent.com:443 + *.github.com:443 (app store downloads) |
 | **valkey** | nextcloud → 6379 | (none) |
 
-## rss (7 policies)
+## rss (8 policies)
 
 | Component | Ingress | Egress |
 |---|---|---|
@@ -295,6 +295,7 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 | **rss-fetcher** | rss-cron → 80 | rss-pg:5432, world:443 |
 | **rss-cleaner** | rss-cron → 80 | rss-pg:5432 |
 | **rss-cron** | (none) | rss-fetcher:80, rss-cleaner:80, kube-apiserver:6443, seaweedfs-filer (seaweedfs):8333 |
+| **rss-workflow-exit** (workflows.argoproj.io/on-exit=true) | (none) | kube-apiserver:6443, seaweedfs-filer (seaweedfs):8333, discord.com:443 |
 | **rss-migration** (Job) | (none) | rss-pg:5432 |
 
 ## horenso (1 policy)

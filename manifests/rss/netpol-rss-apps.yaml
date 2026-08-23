@@ -154,6 +154,43 @@ spec:
             - port: "8333"
               protocol: TCP
 ---
+# argo's workflowDefaults attach a discord-notify exit hook to every workflow,
+# and the Pod it creates carries none of the labels the template sets — so
+# `rss-cron` above does not select it. It needs the API server to report its
+# own status, the artifact repository for its logs, and Discord to deliver the
+# notification.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: rss-workflow-exit
+  namespace: rss
+spec:
+  endpointSelector:
+    matchLabels:
+      workflows.argoproj.io/on-exit: "true"
+  egress:
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "6443"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: seaweedfs
+            app.kubernetes.io/component: filer
+            io.kubernetes.pod.namespace: seaweedfs
+      toPorts:
+        - ports:
+            - port: "8333"
+              protocol: TCP
+    - toFQDNs:
+        - matchName: "discord.com"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+---
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:

@@ -18,32 +18,6 @@ subjects:
     name: horenso-maintenance
     namespace: argo
 ---
-# ArgoCD Application の health/sync を読むだけ。horenso 本体に ArgoCD の
-# 読み取り権限を持たせず、この WF が集めた現状を渡す。
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: horenso-maintenance
-  namespace: argocd
-rules:
-  - apiGroups: [argoproj.io]
-    resources: [applications]
-    verbs: [get, list]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: horenso-maintenance
-  namespace: argocd
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: horenso-maintenance
-subjects:
-  - kind: ServiceAccount
-    name: horenso-maintenance
-    namespace: argo
----
 # horenso の日次整理。回復イベント (health-recovered / sync-succeeded) の
 # 取りこぼしで残った argocd 由来タスクを現状と突き合わせて閉じ、止まった
 # running を failed にし、古い event 投稿を消す。結果は horenso 自身に

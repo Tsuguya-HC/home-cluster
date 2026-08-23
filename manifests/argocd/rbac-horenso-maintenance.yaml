@@ -1,0 +1,26 @@
+# argo-workflows の horenso-maintenance WF (manifests/argo/horenso-maintenance.yaml)
+# が使う読み取り権限。AppProject argo は argocd namespace を配置先に持たないので、
+# argocd namespace 側のリソースはこちら (argocd-config / platform) に置く。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: horenso-maintenance
+  namespace: argocd
+rules:
+  - apiGroups: [argoproj.io]
+    resources: [applications]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: horenso-maintenance
+  namespace: argocd
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: horenso-maintenance
+subjects:
+  - kind: ServiceAccount
+    name: horenso-maintenance
+    namespace: argo

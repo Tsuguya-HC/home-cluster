@@ -1,0 +1,64 @@
+name: unread values
+
+# unread-values 単体を workflow_call で公開する leaf。オーケストレーターは ci の
+# `Lint` ワークフロー（lint.yaml）で、必須チェックはそこの `CI Gate` 1 個だけ。
+# 直接のトリガーは持たない — leaf 自身が pull_request で起動すると、同じ
+# コミットに対して gate 経由の結果と重複した check run が並ぶ。
+on:
+  workflow_call:
+
+permissions: {}
+
+jobs:
+  # A key at the wrong nesting level renders exactly like one that was never
+  # written: Helm ignores it, the chart falls back to its default, and nothing
+  # anywhere says so. values.schema.json does not cover this — only 7 of our
+  # charts ship one and only cert-manager sets additionalProperties: false.
+  # That is how `scanJobsConcurrentLimit` sat at the top level of the
+  # trivy-operator values for months while the operator ran on the chart
+  # default of 10 (#547), and how Cilium's WireGuard strict mode switched
+  # itself off when 1.20 split strictMode into egress:/ingress:.
+  #
+  # This renders each chart, changes one leaf of our values at a time, and
+  # renders again: a key no template reads produces byte-identical output.
+  # On a pull request it only examines the values files the PR touches, plus
+  # every values file of a chart whose targetRevision moved — which is exactly
+  # the Renovate bump PR that would otherwise land the rename silently.
+  unread-values:
+    name: unread values
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # the run below diffs against the PR's base commit
+          fetch-depth: 0
+
+      - uses: aquaproj/aqua-installer@96a9bc20066c5bf5e275b41019cfc165b25f4e2e # v4.0.5
+        with:
+          aqua_version: v2.62.3
+
+      # This job's verdict is "render, change one leaf, render again, compare",
+      # so the renderer is the measuring instrument. Record which one produced
+      # the result.
+      - name: helm version
+        run: helm version --short
+
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
+
+      - name: Check for values keys no chart reads
+        env:
+          # オーケストレーターは pull_request でしか起動しないので、実際には
+          # 常に base SHA が入る。空になる経路（= 全チャート検査）は、将来
+          # workflow_dispatch や push を足したときのためにそのまま残してある。
+          # 式を run の中に展開しないのは、ref をスクリプトに補間させないため。
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
+        run: |
+          set -euo pipefail
+          if [ -n "${BASE_SHA}" ]; then
+            python3 scripts/unread-values.py --changed "${BASE_SHA}"
+          else
+            python3 scripts/unread-values.py
+          fi

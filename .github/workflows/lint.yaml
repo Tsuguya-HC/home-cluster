@@ -1,8 +1,25 @@
 name: Lint
 
+# 必須ステータスチェックを単一 gate に集約するオーケストレーター。
+# 各検査は workflow_call の leaf に切り出してあり、ここはそれを組み立てるだけ。
+# ruleset に登録する必須チェックは末尾の `CI Gate` 1 個。
+#
+# トリガーに paths フィルタは付けない。leaf をトリガー側で絞ると、該当しない
+# PR ではチェックが報告されず、必須化された context が
+# "Expected — Waiting for status to be reported" のまま永久にブロックする。
+# home-rss はこれを踏んで workflows → renovate 設定と 2 度リストを継ぎ足した
+# 末に、README だけの変更でまた止まった。触るファイルを列挙しきる形は
+# デッドロック回避の手段として間違っている。
+#
+# 代わりに起動は常にして、`detect` が leaf ごとの実行要否を出す。skip した
+# leaf は gate から見て `skipped` = 合格扱いになるので、報告は常に発生する。
+#
+# push トリガーは持たない。main は ruleset で直 push を禁じており PR 経由で
+# しか更新されない（= マージ時点で CI Gate 通過済み）ため push CI は冗長。
+#
+# workflow_run で `Lint` の完了を待つ claude-fix-ci.yml があるので、この
+# ワークフローの `name` は変えないこと。
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
     # `edited` on top of the default opened/synchronize/reopened. Changing a
@@ -11,11 +28,16 @@ on:
     # a CI Gate check at all — the required context stays "Expected — Waiting
     # for status to be reported" and the PR cannot merge until someone pushes
     # to it. digest-cooldown.yml already subscribes to `edited`.
+    #
+    # retarget では head SHA が変わらないので、`edited` が無いと旧 base で
+    # 計算した detect の結果（= leaf を skip した緑）がそのまま新 base の
+    # 必須チェックに流用できてしまう。leaf の実行要否を base 差分で決める以上、
+    # これは fail-open になる。
     types: [opened, synchronize, reopened, edited]
 
-# Nothing here needs the token by default. The one job that does (zizmor's
-# SARIF upload) names its own scope, so a new job added below starts with no
-# permissions rather than inheriting write access.
+# Nothing here needs the token by default. Each job names its own scope, so a
+# new job added below starts with no permissions rather than inheriting write
+# access.
 #
 # The Claude reviewer and CI fixer used to live in this file. They now sit in
 # claude-review.yml / claude-fix-ci.yml, because claude-code-action validates
@@ -24,452 +46,140 @@ on:
 permissions: {}
 
 concurrency:
-  # PR は最新の push だけ残す。push / dispatch は SHA ごとに別グループにして
-  # 互いをキャンセルさせない（タグ push のリリースビルドを後続が消さないため）。
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.event.number || github.sha }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ github.event.number }}
+  cancel-in-progress: true
 
 jobs:
-  kubeconform:
-    name: kubeconform
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - uses: aquaproj/aqua-installer@96a9bc20066c5bf5e275b41019cfc165b25f4e2e # v4.0.5
-        with:
-          aqua_version: v2.62.3
-
-      - name: Validate manifests
-        run: |
-          kubeconform -strict -ignore-missing-schemas \
-            -schema-location default \
-            -schema-location '.github/schemas/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
-            -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
-            -summary manifests/
-
-      - name: Validate ArgoCD Applications
-        run: |
-          kubeconform -strict \
-            -schema-location default \
-            -schema-location '.github/schemas/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
-            -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
-            -summary apps/ argocd/
-
-  helm-template:
-    name: helm template
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - uses: aquaproj/aqua-installer@96a9bc20066c5bf5e275b41019cfc165b25f4e2e # v4.0.5
-        with:
-          aqua_version: v2.62.3
-
-      - name: Validate Helm templates
-        run: |
-          set -euo pipefail
-          declare -A added_repos
-
-          is_oci() { [[ "$1" != https://* && "$1" != http://* ]]; }
-
-          # Phase 1: collect and add all helm repos (skip OCI)
-          for app_file in apps/*.yaml; do
-            source_count=$(yq '.spec.sources | length' "$app_file")
-            [[ "$source_count" == "0" ]] && continue
-            for i in $(seq 0 $((source_count - 1))); do
-              chart=$(yq ".spec.sources[$i].chart" "$app_file")
-              [[ "$chart" == "null" ]] && continue
-              repo_url=$(yq ".spec.sources[$i].repoURL" "$app_file")
-              is_oci "$repo_url" && continue
-              alias="r$(echo "$repo_url" | sha256sum | cut -c1-8)"
-              if [[ -z "${added_repos[$alias]+_}" ]]; then
-                helm repo add "$alias" "$repo_url"
-                added_repos[$alias]=1
-              fi
-            done
-          done
-          helm repo update
-
-          SKIP_CHARTS="harbor"
-
-          # Phase 2: helm template | kubeconform
-          for app_file in apps/*.yaml; do
-            source_count=$(yq '.spec.sources | length' "$app_file")
-            [[ "$source_count" == "0" ]] && continue
-            app_name=$(yq '.metadata.name' "$app_file")
-            [[ " $SKIP_CHARTS " == *" $app_name "* ]] && echo ">>> $app_name: skipped" && continue
-            namespace=$(yq '.spec.destination.namespace' "$app_file")
-            for i in $(seq 0 $((source_count - 1))); do
-              chart=$(yq ".spec.sources[$i].chart" "$app_file")
-              [[ "$chart" == "null" ]] && continue
-              repo_url=$(yq ".spec.sources[$i].repoURL" "$app_file")
-              revision=$(yq ".spec.sources[$i].targetRevision" "$app_file")
-              release_name=$(yq ".spec.sources[$i].helm.releaseName" "$app_file")
-              values_args=()
-              while IFS= read -r vf; do
-                [[ -z "$vf" || "$vf" == "null" ]] && continue
-                actual="${vf/\$values\//}"
-                # Fail rather than drop. Skipping a missing values file renders
-                # the chart with its own defaults, which passes kubeconform and
-                # reports green — while ArgoCD, which cannot resolve the same
-                # path, fails to sync. A rename under helm-values/ or a dropped
-                # $values/ prefix would otherwise reach main unnoticed.
-                if [[ ! -f "$actual" ]]; then
-                  echo "::error file=$app_file::valueFiles entry '$vf' resolves to '$actual', which does not exist"
-                  exit 1
-                fi
-                values_args+=("-f" "$actual")
-              done < <(yq ".spec.sources[$i].helm.valueFiles[]" "$app_file" 2>/dev/null || true)
-              echo ">>> $app_name: $chart@$revision"
-              if is_oci "$repo_url"; then
-                # helm 4 prints the OCI pull result ("Pulled:" / "Digest:") on
-                # stdout, so rendering straight from an oci:// ref puts two
-                # non-manifest lines at the head of the stream and kubeconform
-                # reads them as a document with no kind. helm 3 did not do this,
-                # which is why it only surfaced once the version was pinned.
-                # Pull first with that output discarded, then render the copy.
-                oci_dir=$(mktemp -d)
-                helm pull "oci://${repo_url}/${chart}" \
-                  --version "$revision" --untar --untardir "$oci_dir" >/dev/null
-                chart_ref="$oci_dir/$chart"
-                version_args=()
-              else
-                alias="r$(echo "$repo_url" | sha256sum | cut -c1-8)"
-                chart_ref="$alias/$chart"
-                version_args=(--version "$revision")
-              fi
-              helm template "$release_name" "$chart_ref" \
-                "${version_args[@]}" \
-                --namespace "$namespace" \
-                "${values_args[@]}" \
-                | kubeconform -strict -ignore-missing-schemas \
-                  -schema-location default \
-                  -schema-location '.github/schemas/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
-                  -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
-                  -summary
-            done
-          done
-
-  # A key at the wrong nesting level renders exactly like one that was never
-  # written: Helm ignores it, the chart falls back to its default, and nothing
-  # anywhere says so. values.schema.json does not cover this — only 7 of our
-  # charts ship one and only cert-manager sets additionalProperties: false.
-  # That is how `scanJobsConcurrentLimit` sat at the top level of the
-  # trivy-operator values for months while the operator ran on the chart
-  # default of 10 (#547), and how Cilium's WireGuard strict mode switched
-  # itself off when 1.20 split strictMode into egress:/ingress:.
+  # 変更ファイル種別を判定し、各 leaf を実行すべきかを outputs で返す。
+  # merge-base 等のエッジケースを正しく扱うため dorny/paths-filter を使う。
   #
-  # This renders each chart, changes one leaf of our values at a time, and
-  # renders again: a key no template reads produces byte-identical output.
-  # On a pull request it only examines the values files the PR touches, plus
-  # every values file of a chart whose targetRevision moved — which is exactly
-  # the Renovate bump PR that would otherwise land the rename silently.
-  unread-values:
-    name: unread values
+  # aqua.yaml / aqua-checksums.json は lint-aqua だけの入力ではない。
+  # kubeconform・helm・yq・crane は全てそこでピンされているので、ピンが動いたら
+  # それを使う leaf も走らせる。ツール更新で壊れるなら、壊した PR で赤くする。
+  #
+  # leaf 自身のワークフローファイルも各フィルタに入れてある（自己参照）。leaf の
+  # 中身を変えた PR がその leaf を走らせないのでは検証にならない。
+  detect:
+    name: detect changes
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          # the run below diffs against the PR's base commit
-          fetch-depth: 0
-
-      - uses: aquaproj/aqua-installer@96a9bc20066c5bf5e275b41019cfc165b25f4e2e # v4.0.5
-        with:
-          aqua_version: v2.62.3
-
-      # This job's verdict is "render, change one leaf, render again, compare",
-      # so the renderer is the measuring instrument. Record which one produced
-      # the result.
-      - name: helm version
-        run: helm version --short
-
-      - name: Install PyYAML
-        run: pip install --quiet pyyaml
-
-      - name: Check for values keys no chart reads
-        env:
-          # Empty on push, which makes the script check every chart. Kept out
-          # of the script body so the ref cannot be interpolated into it.
-          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
-        run: |
-          set -euo pipefail
-          if [ -n "${BASE_SHA}" ]; then
-            python3 scripts/unread-values.py --changed "${BASE_SHA}"
-          else
-            python3 scripts/unread-values.py
-          fi
-
-  image-existence:
-    name: image existence
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 5
     permissions:
       contents: read
-      # The home-rss images are private packages; GHCR grants this repository
-      # read access to them. Without this the check would have to skip them
-      # the way it skips the internal Harbor, and a mistyped digest on our own
-      # images would sail through.
+      pull-requests: read # dorny/paths-filter が PR の変更ファイル一覧を API 取得するために必要
+    outputs:
+      kubeconform: ${{ steps.filter.outputs.kubeconform }}
+      charts: ${{ steps.filter.outputs.charts }}
+      unread: ${{ steps.filter.outputs.unread }}
+      images: ${{ steps.filter.outputs.images }}
+      argo: ${{ steps.filter.outputs.argo }}
+      mcp: ${{ steps.filter.outputs.mcp }}
+      workflows: ${{ steps.filter.outputs.workflows }}
+      renovate: ${{ steps.filter.outputs.renovate }}
+      aqua: ${{ steps.filter.outputs.aqua }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: filter
+        with:
+          filters: |
+            kubeconform:
+              - 'manifests/**'
+              - 'apps/**'
+              - 'argocd/**'
+              - '.github/schemas/**'
+              - '.github/workflows/_kubeconform.yml'
+              - 'aqua.yaml'
+              - 'aqua-checksums.json'
+            charts:
+              - 'apps/**'
+              - 'helm-values/**'
+              - '.github/workflows/_helm-template.yml'
+              - 'aqua.yaml'
+              - 'aqua-checksums.json'
+            unread:
+              - 'apps/**'
+              - 'helm-values/**'
+              - 'scripts/unread-values.py'
+              - '.github/workflows/_unread-values.yml'
+              - 'aqua.yaml'
+              - 'aqua-checksums.json'
+            images:
+              - 'apps/**'
+              - 'manifests/**'
+              - 'kustomize/**'
+              - 'helm-values/**'
+              - '.github/workflows/_image-existence.yml'
+              - 'aqua.yaml'
+              - 'aqua-checksums.json'
+            argo:
+              - 'manifests/**'
+              - 'kustomize/**'
+              # CLI のバージョンはこのファイルの appVersion から取る。
+              - 'apps/argo-workflows.yaml'
+              - '.github/workflows/_argo-lint.yml'
+              - 'aqua.yaml'
+              - 'aqua-checksums.json'
+            mcp:
+              - '.github/mcp/**'
+              - '.github/workflows/_mcp.yml'
+            workflows:
+              - '.github/workflows/**'
+              - '.github/zizmor.yml'
+            renovate:
+              - 'renovate.json*'
+            aqua:
+              - 'aqua.yaml'
+              - 'aqua-checksums.json'
+              - 'aqua/**'
+
+  kubeconform:
+    needs: detect
+    if: ${{ needs.detect.outputs.kubeconform == 'true' }}
+    uses: ./.github/workflows/_kubeconform.yml
+    permissions:
+      contents: read
+
+  helm-template:
+    needs: detect
+    if: ${{ needs.detect.outputs.charts == 'true' }}
+    uses: ./.github/workflows/_helm-template.yml
+    permissions:
+      contents: read
+
+  unread-values:
+    needs: detect
+    if: ${{ needs.detect.outputs.unread == 'true' }}
+    uses: ./.github/workflows/_unread-values.yml
+    permissions:
+      contents: read
+
+  image-existence:
+    needs: detect
+    if: ${{ needs.detect.outputs.images == 'true' }}
+    uses: ./.github/workflows/_image-existence.yml
+    permissions:
+      contents: read
+      # leaf 側が GHCR の private パッケージ (home-rss) を読む。reusable では
+      # 呼び出し側の permissions が上限になるので、ここで渡さないと leaf の
+      # job-level 宣言だけでは足りない。
       packages: read # crane auth login ghcr.io
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
 
-      - uses: aquaproj/aqua-installer@96a9bc20066c5bf5e275b41019cfc165b25f4e2e # v4.0.5
-        with:
-          aqua_version: v2.62.3
-
-      - name: Log in to GHCR
-        env:
-          GHCR_USER: ${{ github.repository_owner }}
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: crane auth login ghcr.io -u "${GHCR_USER}" -p "${GHCR_TOKEN}"
-
-      - name: Check image existence
-        run: |
-          set -euo pipefail
-          declare -A added_repos
-          failed_images=()
-
-          is_oci() { [[ "$1" != https://* && "$1" != http://* ]]; }
-
-          # Phase 1: collect helm repos
-          for app_file in apps/*.yaml; do
-            source_count=$(yq '.spec.sources | length' "$app_file")
-            [[ "$source_count" == "0" ]] && continue
-            for i in $(seq 0 $((source_count - 1))); do
-              chart=$(yq ".spec.sources[$i].chart" "$app_file")
-              [[ "$chart" == "null" ]] && continue
-              repo_url=$(yq ".spec.sources[$i].repoURL" "$app_file")
-              is_oci "$repo_url" && continue
-              alias="r$(echo "$repo_url" | sha256sum | cut -c1-8)"
-              if [[ -z "${added_repos[$alias]+_}" ]]; then
-                helm repo add "$alias" "$repo_url"
-                added_repos[$alias]=1
-              fi
-            done
-          done
-          helm repo update
-
-          SKIP_CHARTS="harbor"
-
-          # Phase 2: helm template every chart into one file
-          all_yaml=$(mktemp)
-          for app_file in apps/*.yaml; do
-            source_count=$(yq '.spec.sources | length' "$app_file")
-            [[ "$source_count" == "0" ]] && continue
-            app_name=$(yq '.metadata.name' "$app_file")
-            [[ " $SKIP_CHARTS " == *" $app_name "* ]] && continue
-            namespace=$(yq '.spec.destination.namespace' "$app_file")
-            for i in $(seq 0 $((source_count - 1))); do
-              chart=$(yq ".spec.sources[$i].chart" "$app_file")
-              [[ "$chart" == "null" ]] && continue
-              repo_url=$(yq ".spec.sources[$i].repoURL" "$app_file")
-              revision=$(yq ".spec.sources[$i].targetRevision" "$app_file")
-              release_name=$(yq ".spec.sources[$i].helm.releaseName" "$app_file")
-              values_args=()
-              while IFS= read -r vf; do
-                [[ -z "$vf" || "$vf" == "null" ]] && continue
-                actual="${vf/\$values\//}"
-                # Fail rather than drop. Skipping a missing values file renders
-                # the chart with its own defaults, which passes kubeconform and
-                # reports green — while ArgoCD, which cannot resolve the same
-                # path, fails to sync. A rename under helm-values/ or a dropped
-                # $values/ prefix would otherwise reach main unnoticed.
-                if [[ ! -f "$actual" ]]; then
-                  echo "::error file=$app_file::valueFiles entry '$vf' resolves to '$actual', which does not exist"
-                  exit 1
-                fi
-                values_args+=("-f" "$actual")
-              done < <(yq ".spec.sources[$i].helm.valueFiles[]" "$app_file" 2>/dev/null || true)
-              if is_oci "$repo_url"; then
-                chart_ref="oci://${repo_url}/${chart}"
-              else
-                alias="r$(echo "$repo_url" | sha256sum | cut -c1-8)"
-                chart_ref="$alias/$chart"
-              fi
-              # `|| true` used to hide this entirely. Whether the chart renders
-              # at all is helm-template's job; what matters here is that a
-              # failure drops that chart's images out of the set below without
-              # changing this step's result, so the check quietly covers less
-              # than it reports. Name the chart instead of losing it silently.
-              if ! helm template "$release_name" "$chart_ref" \
-                   --version "$revision" \
-                   --namespace "$namespace" \
-                   "${values_args[@]}" >> "$all_yaml" 2>/dev/null; then
-                echo "::warning file=$app_file::helm template failed for ${chart}@${revision}; its images are not being checked"
-              fi
-              echo "---" >> "$all_yaml"
-            done
-          done
-
-          # Phase 3: include raw manifests/
-          find manifests -name '*.yaml' -exec cat {} + >> "$all_yaml" 2>/dev/null
-          find kustomize -name '*.yaml' -exec cat {} + >> "$all_yaml" 2>/dev/null
-
-          # Phase 4: extract unique images and verify with crane
-          # Skip internal Harbor: requires auth from external CI runner.
-          mapfile -t images < <(grep -hE '^\s*image:\s+' "$all_yaml" \
-            | sed -E 's/^\s*image:\s*//; s/^["'\'']//; s/["'\'']$//' \
-            | grep -vE '^\s*$|\{\{|^null$|^registry\.infra\.tgy\.io/' \
-            | sort -u)
-
-          echo "Checking ${#images[@]} unique images..."
-          # A collapse here means the extraction broke, not that the cluster
-          # shrank: the images come from `image:` lines in rendered charts, and
-          # a chart moving to repository/tag fields, an indentation change, or
-          # an over-broad exclude above would quietly reduce this to a handful
-          # while every remaining image still passes. 74 as of 2026-08-21, of
-          # which 14 come from manifests/ and kustomize/ — so anything near
-          # that floor means the helm half produced nothing. Re-baseline this
-          # deliberately when the real number moves.
-          MIN_IMAGES=60
-          if (( ${#images[@]} < MIN_IMAGES )); then
-            echo "::error::only ${#images[@]} images extracted, expected at least ${MIN_IMAGES} — the extraction pipeline is broken, not the cluster"
-            exit 1
-          fi
-          for img in "${images[@]}"; do
-            if crane manifest "$img" >/dev/null 2>&1; then
-              echo "  OK   $img"
-            else
-              echo "  FAIL $img"
-              failed_images+=("$img")
-            fi
-          done
-
-          if [[ ${#failed_images[@]} -gt 0 ]]; then
-            echo ""
-            echo "ERROR: ${#failed_images[@]} image(s) cannot be pulled from their registries:"
-            printf '  - %s\n' "${failed_images[@]}"
-            echo ""
-            echo "This usually means an upstream chart bumped its appVersion before the"
-            echo "matching container image was pushed. Wait for the upstream image build"
-            echo "to complete, or pin the chart to a previous version."
-            exit 1
-          fi
-
-  # Argo Workflows drops deprecated spec fields at majors, and its CRDs set
-  # x-kubernetes-preserve-unknown-fields: a removed field keeps applying
-  # cleanly while the controller ignores it. That is how every mutex in this
-  # repo silently stopped serialising at the v4 bump. The CLI version is taken
-  # from the chart's appVersion, so the chart bump PR is what lints against
-  # the version it is about to install.
   argo-lint:
-    name: argo lint
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
+    needs: detect
+    if: ${{ needs.detect.outputs.argo == 'true' }}
+    uses: ./.github/workflows/_argo-lint.yml
+    permissions:
+      contents: read
 
-      - uses: aquaproj/aqua-installer@96a9bc20066c5bf5e275b41019cfc165b25f4e2e # v4.0.5
-        with:
-          aqua_version: v2.62.3
-
-      - name: Install argo CLI matching the deployed controller
-        run: |
-          set -euo pipefail
-          repo=$(yq '.spec.sources[0].repoURL' apps/argo-workflows.yaml)
-          chart=$(yq '.spec.sources[0].chart' apps/argo-workflows.yaml)
-          chart_version=$(yq '.spec.sources[0].targetRevision' apps/argo-workflows.yaml)
-          helm repo add argo "$repo" >/dev/null
-          app_version=$(helm show chart "argo/$chart" --version "$chart_version" | yq '.appVersion')
-          echo "$chart@$chart_version -> argo-workflows $app_version"
-
-          # app_version reaches a URL that is downloaded, unpacked into
-          # /usr/local/bin and executed, and the checksums.txt it is verified
-          # against comes from that same URL — so the signature check only
-          # proves the two files agree, not where they came from. The value
-          # itself is the appVersion of whatever chart apps/argo-workflows.yaml
-          # points at, which a pull request can change. Constrain its shape
-          # before it becomes a path.
-          if [[ ! "$app_version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
-            echo "::error::refusing to build a download URL from appVersion '${app_version}'"
-            exit 1
-          fi
-          base="https://github.com/argoproj/argo-workflows/releases/download/${app_version}"
-          curl -fsSL --max-time 120 "$base/argo-linux-amd64.gz" -o argo-linux-amd64.gz
-          curl -fsSL --max-time 60 "$base/argo-workflows-cli-checksums.txt" -o checksums.txt
-          grep ' argo-linux-amd64.gz$' checksums.txt | sha256sum -c -
-          gunzip -c argo-linux-amd64.gz > /usr/local/bin/argo
-          chmod +x /usr/local/bin/argo
-          argo version --short
-
-      - name: Lint workflow manifests
-        run: |
-          set -uo pipefail
-          # every file goes in one invocation: --offline resolves templateRef
-          # against the args, so dropping one breaks the templates using it
-          mapfile -t files < <(
-            grep -rlE '^kind: (Workflow|WorkflowTemplate|ClusterWorkflowTemplate|CronWorkflow)$' \
-              manifests/ kustomize/ | sort -u
-          )
-          printf 'linting %d files\n' "${#files[@]}"
-          # The discovery above matches `kind:` only at column 0, so a manifest
-          # that is indented (embedded in a ConfigMap, a kustomize patch) or
-          # that lives outside these two directories is never linted. There is
-          # no symptom when that happens — argo lint is simply handed fewer
-          # files and reports success — so fail on an empty set at least.
-          if (( ${#files[@]} == 0 )); then
-            echo "::error::no Argo Workflow manifests matched; the discovery above is broken"
-            exit 1
-          fi
-          # a finding exits non-zero and the runner's shell is bash -e, so the
-          # findings have to survive the assignment to be classified below
-          out=$(argo lint --offline --no-color -o simple "${files[@]}" 2>&1) || true
-          echo "$out"
-
-          # discord-notify runs as an exit handler, where {{workflow.failures}}
-          # is bound; offline lint has no such binding and can never resolve
-          # it. Tolerate that one finding, nothing else.
-          known='manifests/argo/cluster-discord-notify-wft.yaml: in "discord-notify" (ClusterWorkflowTemplate): templates.send templates.send: failed to resolve {{workflow.failures}}'
-          # grep exits 1 when it filters everything out, which is the clean
-          # case, so the pipeline must not decide the step's fate either
-          unexpected=$(printf '%s\n' "$out" \
-            | grep -Fvx "$known" \
-            | grep -Fvx 'no linting errors found!' \
-            | sed '/^$/d') || true
-          if [ -n "$unexpected" ]; then
-            echo "::error::argo lint reported findings beyond the known exit-handler one"
-            exit 1
-          fi
-
-  # The MCP server the ai-review job runs. Type-checking it against the
-  # installed tree is what makes a lock-file refresh or a transitive security
-  # bump safe to automerge: nothing else in this repo exercises that package,
-  # and it runs in Actions with contents/pull-requests write.
   mcp:
-    name: mcp config
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: "24"
-          cache: npm
-          cache-dependency-path: .github/mcp/pr-review/package-lock.json
-
-      - name: Install (lock file must resolve)
-        run: npm ci
-        working-directory: .github/mcp/pr-review
-
-      - name: Type-check
-        run: npx tsc --noEmit
-        working-directory: .github/mcp/pr-review
+    needs: detect
+    if: ${{ needs.detect.outputs.mcp == 'true' }}
+    uses: ./.github/workflows/_mcp.yml
+    permissions:
+      contents: read
 
   # Most of this file is bash inside `run:` blocks, and none of it is exercised
   # until a push runs it. actionlint checks the expressions and the job graph,
@@ -478,6 +188,8 @@ jobs:
   # ワークフローの lint は 6 リポジトリ共通なので home-actions に寄せてある。
   # ツールのピンは向こう側にあり、ここは呼び先の SHA を追うだけ。
   lint-workflows:
+    needs: detect
+    if: ${{ needs.detect.outputs.workflows == 'true' }}
     uses: Tsuguya/home-actions/.github/workflows/lint-workflows.yml@10834ead7a2c2ca71677a6b818cd066d329eacbb # v1.2.0
     permissions:
       contents: read
@@ -486,6 +198,8 @@ jobs:
   # 出ない）、バリデータだけがこの層の間違いを検出できる。home-cluster は
   # `ignoredAuthors` の綴り違いを 5 週間放置していた。
   lint-renovate:
+    needs: detect
+    if: ${{ needs.detect.outputs.renovate == 'true' }}
     uses: Tsuguya/home-actions/.github/workflows/lint-renovate.yml@10834ead7a2c2ca71677a6b818cd066d329eacbb # v1.2.0
     permissions:
       contents: read
@@ -495,12 +209,31 @@ jobs:
   # 実インストール後の git 差分で見る。直すのはクラスタ側の aqua-checksum
   # ワークフローで、こちらはそれが直せていないことを赤にする側。
   lint-aqua:
+    needs: detect
+    if: ${{ needs.detect.outputs.aqua == 'true' }}
     uses: Tsuguya/home-actions/.github/workflows/lint-aqua.yml@10834ead7a2c2ca71677a6b818cd066d329eacbb # v1.2.0
     permissions:
       contents: read
+
+  # 唯一の必須チェック。全 leaf の結果を集計し、success/skipped なら合格、
+  # failure/cancelled が 1 つでもあれば fail させる。
+  #
+  # `detect` も needs に含める。detect が失敗すると全 leaf の `if` が偽になって
+  # skip され、skip は合格扱いなので、detect を見ていないと「何も検査していない
+  # 緑」が必須チェックを満たしてしまう。
   gate:
     name: CI Gate
-    needs: [kubeconform, helm-template, unread-values, image-existence, mcp, argo-lint, lint-workflows, lint-renovate, lint-aqua]
+    needs:
+      - detect
+      - kubeconform
+      - helm-template
+      - unread-values
+      - image-existence
+      - mcp
+      - argo-lint
+      - lint-workflows
+      - lint-renovate
+      - lint-aqua
     # `!cancelled()` rather than `always()`: under always(), cancelling a run
     # leaves every leaf reporting `cancelled`, which falls through the case
     # below and records the required check as a failure. A cancelled run has no
@@ -527,3 +260,4 @@ jobs:
               *) echo "::error::A required job concluded with: ${r}"; exit 1 ;;
             esac
           done
+          echo "All required jobs passed or were correctly skipped."

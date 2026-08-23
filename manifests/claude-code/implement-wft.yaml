@@ -339,19 +339,34 @@ spec:
             exit 0
           fi
 
-          # CI が出そろうまで待つ。出そろわないまま時間切れなら判定不能
+          # CI が出そろうまで待つ。出そろわないまま時間切れなら判定不能。
+          #
+          # `gh pr checks` は pending や failure があると **JSON を出したうえで非ゼロ終了する**。
+          # `$(... || echo '[]')` と書くと実データの後ろに `[]` が連結され、`jq length` が
+          # 2 行を返して数値比較が常に偽になる。終了コードは出力と分けて扱う。
+          #
+          # 毎回ログを出す。出さないと、20 分回って何も分からないという今日踏んだ状態になる。
           DONE=0
-          for _ in $(seq 1 60); do
-            RAW=$(gh pr checks "$PR" --repo "$REPO" --json name,state 2>/dev/null || echo '[]')
-            PENDING=$(echo "$RAW" | jq '[.[] | select(.state == "PENDING" or .state == "QUEUED" or .state == "IN_PROGRESS")] | length')
-            TOTAL=$(echo "$RAW" | jq 'length')
-            if [ "$TOTAL" -gt 0 ] && [ "$PENDING" = "0" ]; then DONE=1; break; fi
-            sleep 20
+          for i in $(seq 1 40); do
+            RAW=$(gh pr checks "$PR" --repo "$REPO" --json name,state 2>/tmp/gh.err)
+            RC=$?
+            if ! printf '%s' "$RAW" | jq -e 'type == "array"' >/dev/null 2>&1; then
+              echo "poll $i: rc=$RC 出力が配列でない: $(printf '%s' "$RAW" | head -c 120) / err=$(head -c 120 /tmp/gh.err)"
+              sleep 15
+              continue
+            fi
+            TOTAL=$(printf '%s' "$RAW" | jq 'length')
+            PENDING=$(printf '%s' "$RAW" | jq '[.[] | select(.state == "PENDING" or .state == "QUEUED" or .state == "IN_PROGRESS" or .state == "REQUESTED" or .state == "WAITING")] | length')
+            echo "poll $i: rc=$RC total=$TOTAL pending=$PENDING"
+            if [ "$TOTAL" -gt 0 ] && [ "$PENDING" -eq 0 ]; then DONE=1; break; fi
+            sleep 15
           done
 
           if [ "$DONE" != "1" ]; then
             printf '%s' indeterminate > /verdict/verdict.txt
-            echo "CI が時間内に完了しませんでした（判定不能）。" > /verdict/report.md
+            { echo "## CI が時間内に完了しませんでした（判定不能）"; echo;
+              echo "最後に観測した状態:"; echo '```';
+              printf '%s' "$RAW" | head -c 800; echo; echo '```'; } > /verdict/report.md
             exit 0
           fi
 

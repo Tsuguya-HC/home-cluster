@@ -182,6 +182,10 @@ spec:
               git checkout "${BRANCH}" 2>/dev/null || git checkout -b "${BRANCH}"
               git config user.name "tgy-cluster-bot[bot]"
               git config user.email "tgy-cluster-bot[bot]@users.noreply.github.com"
+              # 署名コミットのスクリプトは argo-tools イメージにあり、main の
+              # claude-code イメージには無い。workspace 経由で渡す
+              mkdir -p /workspace/.bin
+              cp /usr/local/bin/github-signed-commit.sh /workspace/.bin/
           env:
             - {name: HOME, value: /tmp}
           securityContext:
@@ -202,6 +206,8 @@ spec:
         args:
           - |
             export GITHUB_TOKEN=$(cat /github-token/token)
+            # init が書いた ~/.gitconfig は別コンテナなので届かない。ここで設定し直す
+            git config --global --add safe.directory /workspace
             PROMPT="$(cat /prompt/implement.md)
 
             ## このタスク
@@ -237,16 +243,25 @@ spec:
             # ローカルの git commit + push では署名が付かず ruleset に弾かれる
             git add -A
             export GH_TOKEN="$GITHUB_TOKEN"
-            github-signed-commit.sh \
-              -r "{{workflow.parameters.repo}}" \
-              -b "{{workflow.parameters.branch}}" \
+            REPO="{{workflow.parameters.repo}}"
+            BRANCH="{{workflow.parameters.branch}}"
+
+            # github-signed-commit.sh は **既存 ref を PATCH するだけ**で ref を作らない。
+            # ローカルの checkout -b はリモートに存在しないので、先に main から生やす。
+            # 差し戻しの 2 周目以降は既にあるので 422 になるが、それでよい。
+            if ! gh api "repos/${REPO}/git/ref/heads/${BRANCH}" >/dev/null 2>&1; then
+              BASE_SHA=$(gh api "repos/${REPO}/git/ref/heads/main" -q '.object.sha')
+              gh api "repos/${REPO}/git/refs" -f ref="refs/heads/${BRANCH}" -f sha="$BASE_SHA" >/dev/null
+              echo "ブランチ ${BRANCH} を作成しました"
+            fi
+
+            /workspace/.bin/github-signed-commit.sh \
+              -r "$REPO" \
+              -b "$BRANCH" \
               -m "{{workflow.parameters.pr-title}}"
 
             # ドラフト PR を先に作る。以降の CI はリポジトリ側の定義が走るので
             # ビルド検証をこのワークフローに再実装しない（drift の元になる）
-            export GH_TOKEN="$GITHUB_TOKEN"
-            REPO="{{workflow.parameters.repo}}"
-            BRANCH="{{workflow.parameters.branch}}"
             if ! gh pr list --repo "$REPO" --head "$BRANCH" --json number -q '.[0].number' | grep -q .; then
               gh pr create --repo "$REPO" --head "$BRANCH" --base main --draft \
                 --title "{{workflow.parameters.pr-title}}" \
@@ -504,27 +519,23 @@ spec:
         command: [sh]
         source: |
           set -u
-          rank() {
-            case "$1" in
-              pass) echo 0 ;;
-              rework) echo 1 ;;
-              escalate) echo 2 ;;
-              "") echo -1 ;;          # 未実行。順位に影響させない
-              *) echo 3 ;;            # 語彙の外はすべて indeterminate 扱い
-            esac
-          }
+          # フェーズは逐次で、review は check が pass のときだけ走る。
+          # よって「最も不利が勝つ」は「check が pass でなければ check の判定」に
+          # 帰着する。スキップされたステップの output は空文字ではなく
+          # 宣言した default を返すので、値の有無では実行有無を判定できない。
           C='{{inputs.parameters.check}}'
           R='{{inputs.parameters.review}}'
-          WORST=-1; VERDICT=indeterminate
-          for v in "$C" "$R"; do
-            r=$(rank "$v")
-            if [ "$r" -gt "$WORST" ]; then
-              WORST=$r
-              case "$r" in 0) VERDICT=pass ;; 1) VERDICT=rework ;; 2) VERDICT=escalate ;; 3) VERDICT=indeterminate ;; esac
-            fi
-          done
-          # どちらも未実行なら判定不能。承認に倒さない
-          [ "$WORST" -lt 0 ] && VERDICT=indeterminate
+          normalize() {
+            case "$1" in
+              pass|rework|escalate) printf '%s' "$1" ;;
+              *) printf '%s' indeterminate ;;   # 語彙の外はすべて判定不能
+            esac
+          }
+          if [ "$(normalize "$C")" != "pass" ]; then
+            VERDICT=$(normalize "$C")
+          else
+            VERDICT=$(normalize "$R")
+          fi
           printf '%s' "$VERDICT" > /tmp/verdict.txt
           echo "check=$C review=$R -> $VERDICT"
         securityContext:

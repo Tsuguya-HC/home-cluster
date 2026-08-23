@@ -1,0 +1,641 @@
+# Issue を受けて実装し、自分の変更を検証し、判定に応じて PR を出すか差し戻すか決める。
+#
+# 構造の意図:
+#   - 判定は文章ではなく「どこに置いたか」で表す。回収側は ls するだけで発話を読まない
+#   - out/ は別 uid の所有で 0555 なので、エージェントは語彙の外を表現できない
+#   - 安いゲート（ビルド）を先に置き、落ちたらレビューを回さない
+#   - 差し戻しは再帰。予算は減るだけで、尽きたら人間に上げる
+#   - 非空ディレクトリがちょうど 1 つでなければ indeterminate。判定不能は承認ではない
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: implement
+  namespace: claude-code
+spec:
+  activeDeadlineSeconds: 5400
+  serviceAccountName: claude-code-executor
+  entrypoint: main
+  # onExit は書かない。argo-workflows の workflowDefaults が
+  # discord-notify を全ワークフローに付けるので、書くと通知が二重になる
+  arguments:
+    parameters:
+      - name: repo
+      - name: branch
+      - name: task            # 何をするか。原因や方針は書かない
+      - name: pr-title
+      - name: pr-labels
+        default: ""
+      - name: build-cmd       # check フェーズが走らせる決定論的な検証
+        default: "pnpm install --frozen-lockfile && pnpm build"
+      - name: workdir
+        default: "."
+      - name: rework-budget
+        default: "2"
+  # namespace の CNP はこのラベルで選択する。フェーズ別ラベルだけにすると
+  # ベースラインのカバレッジから静かに外れ、argoexec が API server に届かない
+  podMetadata:
+    labels:
+      claude-code: "true"
+  securityContext:
+    seccompProfile:
+      type: RuntimeDefault
+  volumes:
+    - name: workspace
+      emptyDir: {}
+    - name: claude-home
+      emptyDir: {}
+    - name: github-token
+      emptyDir: {}
+    - name: github-app-secret
+      secret:
+        secretName: github-app-private-key
+    - name: verdict
+      emptyDir: {}
+    - name: prompt
+      projected:
+        sources:
+          - configMap:
+              name: agent-verdict-protocol
+          - configMap:
+              name: implement-prompts
+  affinity:
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          preference:
+            matchExpressions:
+              - key: kubernetes.io/hostname
+                operator: In
+                values: [wn-03]
+  templates:
+    - name: main
+      steps:
+        - - name: cycle
+            template: implement-cycle
+            arguments:
+              parameters:
+                - name: budget
+                  value: "{{workflow.parameters.rework-budget}}"
+                - name: round
+                  value: "1"
+
+    # implement -> check -> review -> 判定に応じて PR / 再帰 / エスカレーション
+    - name: implement-cycle
+      inputs:
+        parameters:
+          - name: budget
+          - name: round
+      steps:
+        - - name: implement
+            template: implement
+            arguments:
+              parameters:
+                - name: round
+                  value: "{{inputs.parameters.round}}"
+                - name: budget
+                  value: "{{inputs.parameters.budget}}"
+        # 安いゲートを先に。落ちたらレビューにトークンを使わない
+        - - name: check
+            template: check
+        - - name: review
+            template: review
+            when: "{{steps.check.outputs.parameters.verdict}} == pass"
+            arguments:
+              parameters:
+                - name: check-report
+                  value: "{{steps.check.outputs.parameters.report}}"
+        # 合成規則は固定: 最も不利な verdict が勝つ
+        - - name: combine
+            template: combine
+            arguments:
+              parameters:
+                - name: check
+                  value: "{{steps.check.outputs.parameters.verdict}}"
+                - name: review
+                  value: "{{steps.review.outputs.parameters.verdict}}"
+        - - name: ready-for-review
+            template: ready-for-review
+            when: "{{steps.combine.outputs.parameters.verdict}} == pass"
+          - name: again
+            template: implement-cycle
+            when: "{{steps.combine.outputs.parameters.verdict}} == rework && {{inputs.parameters.budget}} > 0"
+            arguments:
+              parameters:
+                - name: budget
+                  value: "{{=asInt(inputs.parameters.budget) - 1}}"
+                - name: round
+                  value: "{{=asInt(inputs.parameters.round) + 1}}"
+          # 予算切れの rework と、明示的な escalate / indeterminate は同じ扱い
+          - name: escalate
+            template: escalate
+            when: "({{steps.combine.outputs.parameters.verdict}} == rework && {{inputs.parameters.budget}} <= 0) || {{steps.combine.outputs.parameters.verdict}} != pass && {{steps.combine.outputs.parameters.verdict}} != rework"
+            arguments:
+              parameters:
+                - name: verdict
+                  value: "{{steps.combine.outputs.parameters.verdict}}"
+
+    # ---- Implementing: エージェントが変更してブランチに push する ----
+    - name: implement
+      inputs:
+        parameters:
+          - name: round
+          - name: budget
+      metadata:
+        labels:
+          agent.tgy.io/phase: implementing
+      securityContext:
+        runAsUser: 65532
+        runAsNonRoot: true
+        runAsGroup: 65532
+        fsGroup: 65532
+      initContainers:
+        - name: github-auth
+          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:d29e837e2601fadc50e346398e86934c9cf49b309448b89b19b867122c9bf74b
+          command: [github-auth.sh]
+          env:
+            - name: GITHUB_APP_ID
+              value: "2998228"
+            - name: GITHUB_APP_INSTALLATION_ID
+              value: "113765957"
+          securityContext:
+            runAsUser: 65532
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: github-app-secret, mountPath: /github-app, readOnly: true}
+            - {name: github-token, mountPath: /github-token}
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {memory: 64Mi}
+        - name: setup
+          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:d29e837e2601fadc50e346398e86934c9cf49b309448b89b19b867122c9bf74b
+          command: [sh, -c]
+          args:
+            - |
+              set -eu
+              GITHUB_TOKEN=$(cat /github-token/token)
+              REPO="{{workflow.parameters.repo}}"
+              BRANCH="{{workflow.parameters.branch}}"
+              git config --global --add safe.directory /workspace
+              git clone "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git" /workspace
+              cd /workspace
+              # 差し戻しで 2 周目以降はブランチが既にある
+              git checkout "${BRANCH}" 2>/dev/null || git checkout -b "${BRANCH}"
+              git config user.name "tgy-cluster-bot[bot]"
+              git config user.email "tgy-cluster-bot[bot]@users.noreply.github.com"
+          env:
+            - {name: HOME, value: /tmp}
+          securityContext:
+            runAsUser: 65532
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: workspace, mountPath: /workspace}
+            - {name: github-token, mountPath: /github-token, readOnly: true}
+          resources:
+            requests: {cpu: 10m, memory: 64Mi}
+            limits: {memory: 256Mi}
+      container:
+        image: registry.infra.tgy.io/tools/claude-code:latest@sha256:d18dbca36308e573509c2617ab6c57e050facfb0723ed29386101117408c0b1f
+        command: [sh, -c]
+        workingDir: /workspace
+        args:
+          - |
+            export GITHUB_TOKEN=$(cat /github-token/token)
+            PROMPT="$(cat /prompt/implement.md)
+
+            ## このタスク
+
+            {{workflow.parameters.task}}
+
+            ## 対象
+
+            リポジトリ: {{workflow.parameters.repo}}（/workspace に clone 済み、ブランチ {{workflow.parameters.branch}}）
+            作業ディレクトリ: {{workflow.parameters.workdir}}
+
+            ## 今の状態
+
+            - **{{inputs.parameters.round}} 周目**（1 周目なら新規、2 周目以降は差し戻し）
+            - 残りの差し戻し回数: **{{inputs.parameters.budget}}**
+            - これが尽きた状態でさらに差し戻されると、自動では進まず人間に渡る"
+
+            claude -p \
+              --verbose \
+              --output-format stream-json \
+              --dangerously-skip-permissions \
+              --allowedTools "Bash,Read,Write,Edit,Grep,Glob" \
+              --model sonnet \
+              --max-turns 60 \
+              "$PROMPT" || true
+
+            cd /workspace
+            if git diff --quiet && git diff --cached --quiet; then
+              echo "変更なし"
+              exit 0
+            fi
+            # 署名コミットは staged changes から GitHub API 経由で作る。
+            # ローカルの git commit + push では署名が付かず ruleset に弾かれる
+            git add -A
+            export GH_TOKEN="$GITHUB_TOKEN"
+            github-signed-commit.sh \
+              -r "{{workflow.parameters.repo}}" \
+              -b "{{workflow.parameters.branch}}" \
+              -m "{{workflow.parameters.pr-title}}"
+
+            # ドラフト PR を先に作る。以降の CI はリポジトリ側の定義が走るので
+            # ビルド検証をこのワークフローに再実装しない（drift の元になる）
+            export GH_TOKEN="$GITHUB_TOKEN"
+            REPO="{{workflow.parameters.repo}}"
+            BRANCH="{{workflow.parameters.branch}}"
+            if ! gh pr list --repo "$REPO" --head "$BRANCH" --json number -q '.[0].number' | grep -q .; then
+              gh pr create --repo "$REPO" --head "$BRANCH" --base main --draft \
+                --title "{{workflow.parameters.pr-title}}" \
+                --body "自律実装フローによる変更。検証とレビューを通過するまでドラフトのままです。" 2>&1 | tail -2
+            fi
+
+            # 記録は PR コメントに積む。人間が見る場所と次周が読む場所を同じにする
+            PR=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number -q '.[0].number')
+            if [ -n "$PR" ] && [ -s /tmp/report.md ]; then
+              { echo "### implement"; echo; jq -Rsr --argjson max 3000 \
+                  'if length > $max then .[0:$max] + "\n\n_（以降を省略）_" else . end' < /tmp/report.md; } \
+                | gh pr comment "$PR" --repo "$REPO" --body-file - || true
+            fi
+        env:
+          - {name: HOME, value: /tmp}
+          - name: CLAUDE_CODE_OAUTH_TOKEN
+            valueFrom:
+              secretKeyRef: {name: claude-code-token, key: credential}
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities: {drop: [ALL]}
+        volumeMounts:
+          - {name: workspace, mountPath: /workspace}
+          - {name: claude-home, mountPath: /claude-home}
+          - {name: github-token, mountPath: /github-token, readOnly: true}
+          - {name: prompt, mountPath: /prompt, readOnly: true}
+        resources:
+          requests: {cpu: 200m, memory: 1Gi}
+          limits: {memory: 6Gi}
+
+    # ---- Checks: リポジトリ側の CI を待ち、その結果を verdict に変換する ----
+    # ビルドをこのワークフローに再実装しない。同じことを 2 箇所に書くと必ず drift する。
+    # 外部で起きた結果を「自分が回収した verdict」に落とすのがこのステップの役目で、
+    # 制御フローが GitHub の状態を直接読むことはない。
+    - name: check
+      metadata:
+        labels:
+          agent.tgy.io/phase: checks
+      initContainers:
+        - name: github-auth
+          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:d29e837e2601fadc50e346398e86934c9cf49b309448b89b19b867122c9bf74b
+          command: [github-auth.sh]
+          env:
+            - {name: GITHUB_APP_ID, value: "2998228"}
+            - {name: GITHUB_APP_INSTALLATION_ID, value: "113765957"}
+          securityContext:
+            runAsUser: 65532
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: github-app-secret, mountPath: /github-app, readOnly: true}
+            - {name: github-token, mountPath: /github-token}
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {memory: 64Mi}
+      script:
+        image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:d29e837e2601fadc50e346398e86934c9cf49b309448b89b19b867122c9bf74b
+        command: [sh]
+        source: |
+          set -u
+          export GH_TOKEN=$(cat /github-token/token)
+          export HOME=/tmp
+          REPO="{{workflow.parameters.repo}}"
+          BRANCH="{{workflow.parameters.branch}}"
+
+          PR=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number -q '.[0].number' 2>/dev/null || true)
+          if [ -z "$PR" ]; then
+            printf '%s' escalate > /verdict/verdict.txt
+            echo "ドラフト PR が見つかりません。実装フェーズが変更を出せていない可能性があります。" > /verdict/report.md
+            exit 0
+          fi
+
+          # CI が出そろうまで待つ。出そろわないまま時間切れなら判定不能
+          DONE=0
+          for _ in $(seq 1 60); do
+            RAW=$(gh pr checks "$PR" --repo "$REPO" --json name,state 2>/dev/null || echo '[]')
+            PENDING=$(echo "$RAW" | jq '[.[] | select(.state == "PENDING" or .state == "QUEUED" or .state == "IN_PROGRESS")] | length')
+            TOTAL=$(echo "$RAW" | jq 'length')
+            if [ "$TOTAL" -gt 0 ] && [ "$PENDING" = "0" ]; then DONE=1; break; fi
+            sleep 20
+          done
+
+          if [ "$DONE" != "1" ]; then
+            printf '%s' indeterminate > /verdict/verdict.txt
+            echo "CI が時間内に完了しませんでした（判定不能）。" > /verdict/report.md
+            exit 0
+          fi
+
+          FAILED=$(echo "$RAW" | jq -r '[.[] | select(.state == "FAILURE" or .state == "ERROR" or .state == "CANCELLED")] | .[].name' | head -20)
+          if [ -n "$FAILED" ]; then
+            printf '%s' rework > /verdict/verdict.txt
+            { echo "## CI 失敗"; echo; echo "$FAILED" | sed 's/^/- /'; } > /verdict/report.md
+          else
+            printf '%s' pass > /verdict/verdict.txt
+            { echo "## CI 通過"; echo; echo "$RAW" | jq -r '.[] | "- \(.name): \(.state)"'; } > /verdict/report.md
+          fi
+
+          # 記録を PR コメントに積む
+          { echo "### check"; echo; cat /verdict/report.md; } \
+            | gh pr comment "$PR" --repo "$REPO" --body-file - || true
+        securityContext:
+          runAsUser: 65532
+          runAsNonRoot: true
+          allowPrivilegeEscalation: false
+          capabilities: {drop: [ALL]}
+        volumeMounts:
+          - {name: github-token, mountPath: /github-token, readOnly: true}
+          - {name: verdict, mountPath: /verdict}
+        resources:
+          requests: {cpu: 10m, memory: 64Mi}
+          limits: {memory: 256Mi}
+      outputs:
+        parameters:
+          - name: verdict
+            valueFrom: {path: /verdict/verdict.txt, default: indeterminate}
+          - name: report
+            valueFrom: {path: /verdict/report.md, default: "検証結果を取得できませんでした。"}
+
+    # ---- Review: エージェントが diff を読む。判定はディレクトリで受ける ----
+    - name: review
+      inputs:
+        parameters:
+          - name: check-report
+      metadata:
+        labels:
+          agent.tgy.io/phase: review
+      securityContext:
+        # out/ を作る init は 65532、エージェントは 65533。所有者が違うので
+        # エージェントは out/ を chmod し直すことも新しい分類を生やすこともできない
+        runAsUser: 65533
+        runAsNonRoot: true
+        runAsGroup: 65532
+        fsGroup: 65532
+      initContainers:
+        - name: github-auth
+          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:d29e837e2601fadc50e346398e86934c9cf49b309448b89b19b867122c9bf74b
+          command: [github-auth.sh]
+          env:
+            - {name: GITHUB_APP_ID, value: "2998228"}
+            - {name: GITHUB_APP_INSTALLATION_ID, value: "113765957"}
+          securityContext:
+            runAsUser: 65532
+            runAsGroup: 65532
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: github-app-secret, mountPath: /github-app, readOnly: true}
+            - {name: github-token, mountPath: /github-token}
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {memory: 64Mi}
+        - name: prepare
+          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:d29e837e2601fadc50e346398e86934c9cf49b309448b89b19b867122c9bf74b
+          command: [sh, -c]
+          args:
+            - |
+              set -eu
+              mkdir -p /verdict/out/pass /verdict/out/rework /verdict/out/escalate
+              chmod 0775 /verdict/out/pass /verdict/out/rework /verdict/out/escalate
+              chmod 0555 /verdict/out
+              ls -la /verdict/out
+          securityContext:
+            runAsUser: 65532
+            runAsGroup: 65532
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: verdict, mountPath: /verdict}
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {memory: 64Mi}
+      container:
+        image: registry.infra.tgy.io/tools/claude-code:latest@sha256:d18dbca36308e573509c2617ab6c57e050facfb0723ed29386101117408c0b1f
+        command: [sh, -c]
+        args:
+          - |
+            export GITHUB_TOKEN=$(cat /github-token/token)
+            PROMPT="$(cat /prompt/review.md; echo; cat /prompt/verdict-protocol.md)
+
+            ## 対象
+
+            リポジトリ: {{workflow.parameters.repo}}
+            ブランチ: {{workflow.parameters.branch}}
+            依頼された内容: {{workflow.parameters.task}}
+
+            diff は次で取得する:
+            gh api repos/{{workflow.parameters.repo}}/compare/main...{{workflow.parameters.branch}}
+
+            ## 決定論的な検証の結果（既に実行済み）
+
+            {{inputs.parameters.check-report}}"
+
+            claude -p \
+              --verbose \
+              --output-format stream-json \
+              --dangerously-skip-permissions \
+              --allowedTools "Bash,Read,Grep,Glob,Write" \
+              --model sonnet \
+              --max-turns 40 \
+              "$PROMPT" || true
+
+            # ---- 判定の回収。ここから先はエージェントの発話を一切読まない ----
+            FOUND=""; COUNT=0
+            for v in pass rework escalate; do
+              if [ -n "$(ls -A "/verdict/out/$v" 2>/dev/null)" ]; then
+                FOUND="$v"; COUNT=$((COUNT + 1))
+              fi
+            done
+            if [ "$COUNT" = "1" ]; then
+              VERDICT="$FOUND"
+              jq -Rsr --argjson max 3000 \
+                'if length > $max then .[0:$max] + "\n\n_（以降を省略）_" else . end' \
+                < "/verdict/out/$FOUND/report.md" > /verdict/report.md 2>/dev/null || true
+            else
+              VERDICT=indeterminate
+              { echo "非空のディレクトリが $COUNT 個ありました（ちょうど 1 個であるべき）。"; ls -laR /verdict/out; } > /verdict/report.md 2>&1
+            fi
+            [ -s /verdict/report.md ] || echo "レポートが空でした。" > /verdict/report.md
+            printf '%s' "$VERDICT" > /verdict/verdict.txt
+            echo "verdict: $VERDICT"
+        env:
+          - {name: HOME, value: /tmp}
+          - name: CLAUDE_CODE_OAUTH_TOKEN
+            valueFrom:
+              secretKeyRef: {name: claude-code-token, key: credential}
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities: {drop: [ALL]}
+        volumeMounts:
+          - {name: github-token, mountPath: /github-token, readOnly: true}
+          - {name: verdict, mountPath: /verdict}
+          - {name: prompt, mountPath: /prompt, readOnly: true}
+        resources:
+          requests: {cpu: 200m, memory: 512Mi}
+          limits: {memory: 4Gi}
+      outputs:
+        parameters:
+          - name: verdict
+            valueFrom: {path: /verdict/verdict.txt, default: indeterminate}
+          - name: report
+            valueFrom: {path: /verdict/report.md, default: "レビュー結果を取得できませんでした。"}
+
+    # ---- 合成: 最も不利な verdict が勝つ。設定可能にしない ----
+    # review は check が pass のときだけ走るので、未実行なら空文字で渡る。
+    - name: combine
+      inputs:
+        parameters:
+          - {name: check}
+          - {name: review}
+      script:
+        image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:d29e837e2601fadc50e346398e86934c9cf49b309448b89b19b867122c9bf74b
+        command: [sh]
+        source: |
+          set -u
+          rank() {
+            case "$1" in
+              pass) echo 0 ;;
+              rework) echo 1 ;;
+              escalate) echo 2 ;;
+              "") echo -1 ;;          # 未実行。順位に影響させない
+              *) echo 3 ;;            # 語彙の外はすべて indeterminate 扱い
+            esac
+          }
+          C='{{inputs.parameters.check}}'
+          R='{{inputs.parameters.review}}'
+          WORST=-1; VERDICT=indeterminate
+          for v in "$C" "$R"; do
+            r=$(rank "$v")
+            if [ "$r" -gt "$WORST" ]; then
+              WORST=$r
+              case "$r" in 0) VERDICT=pass ;; 1) VERDICT=rework ;; 2) VERDICT=escalate ;; 3) VERDICT=indeterminate ;; esac
+            fi
+          done
+          # どちらも未実行なら判定不能。承認に倒さない
+          [ "$WORST" -lt 0 ] && VERDICT=indeterminate
+          printf '%s' "$VERDICT" > /tmp/verdict.txt
+          echo "check=$C review=$R -> $VERDICT"
+        securityContext:
+          runAsUser: 65532
+          runAsNonRoot: true
+          allowPrivilegeEscalation: false
+          capabilities: {drop: [ALL]}
+        resources:
+          requests: {cpu: 10m, memory: 32Mi}
+          limits: {memory: 64Mi}
+      outputs:
+        parameters:
+          - name: verdict
+            valueFrom: {path: /tmp/verdict.txt, default: indeterminate}
+
+    # ---- 判定が pass のとき、ドラフトを ready-for-review にする ----
+    # PR は implement がドラフトで作成済み。ここでやるのは状態の遷移だけで、
+    # PR の状態は判定の「結果」であって判定そのものではない。
+    - name: ready-for-review
+      initContainers:
+        - name: github-auth
+          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:d29e837e2601fadc50e346398e86934c9cf49b309448b89b19b867122c9bf74b
+          command: [github-auth.sh]
+          env:
+            - {name: GITHUB_APP_ID, value: "2998228"}
+            - {name: GITHUB_APP_INSTALLATION_ID, value: "113765957"}
+          securityContext:
+            runAsUser: 65532
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: github-app-secret, mountPath: /github-app, readOnly: true}
+            - {name: github-token, mountPath: /github-token}
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {memory: 64Mi}
+      script:
+        image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:d29e837e2601fadc50e346398e86934c9cf49b309448b89b19b867122c9bf74b
+        command: [sh]
+        source: |
+          set -eu
+          export GH_TOKEN=$(cat /github-token/token)
+          export HOME=/tmp
+          REPO="{{workflow.parameters.repo}}"
+          PR=$(gh pr list --repo "$REPO" --head "{{workflow.parameters.branch}}" --json number -q '.[0].number')
+          [ -n "$PR" ] || { echo "PR が見つかりません"; exit 1; }
+          gh pr ready "$PR" --repo "$REPO"
+          LABELS="{{workflow.parameters.pr-labels}}"
+          [ -n "$LABELS" ] && gh pr edit "$PR" --repo "$REPO" --add-label "$LABELS" || true
+          echo "PR #$PR を ready-for-review にしました"
+        securityContext:
+          runAsUser: 65532
+          runAsNonRoot: true
+          allowPrivilegeEscalation: false
+          capabilities: {drop: [ALL]}
+        volumeMounts:
+          - {name: github-token, mountPath: /github-token, readOnly: true}
+        resources:
+          requests: {cpu: 10m, memory: 64Mi}
+          limits: {memory: 256Mi}
+
+    # ---- 人間に上げる。予算切れ / escalate / 判定不能 ----
+    - name: escalate
+      inputs:
+        parameters: [{name: verdict}]
+      initContainers:
+        - name: github-auth
+          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:d29e837e2601fadc50e346398e86934c9cf49b309448b89b19b867122c9bf74b
+          command: [github-auth.sh]
+          env:
+            - {name: GITHUB_APP_ID, value: "2998228"}
+            - {name: GITHUB_APP_INSTALLATION_ID, value: "113765957"}
+          securityContext:
+            runAsUser: 65532
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: github-app-secret, mountPath: /github-app, readOnly: true}
+            - {name: github-token, mountPath: /github-token}
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {memory: 64Mi}
+      script:
+        image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:d29e837e2601fadc50e346398e86934c9cf49b309448b89b19b867122c9bf74b
+        command: [sh]
+        source: |
+          set -u
+          export GH_TOKEN=$(cat /github-token/token)
+          export HOME=/tmp
+          REPO="{{workflow.parameters.repo}}"
+          PR=$(gh pr list --repo "$REPO" --head "{{workflow.parameters.branch}}" --json number -q '.[0].number' 2>/dev/null || true)
+          # ドラフトのまま残す。人間が見に行く場所と、経緯が積まれている場所を同じにする
+          if [ -n "$PR" ]; then
+            gh pr edit "$PR" --repo "$REPO" --add-label "needs-human" || true
+            printf '%s\n' "### escalate" "" "判定: {{inputs.parameters.verdict}}" "" \
+              "自動では進められませんでした。ドラフトのまま人間の判断を待ちます。" \
+              | gh pr comment "$PR" --repo "$REPO" --body-file - || true
+          fi
+          echo "escalated: verdict={{inputs.parameters.verdict}} pr=${PR:-none}"
+          exit 1
+        securityContext:
+          runAsUser: 65532
+          runAsNonRoot: true
+          allowPrivilegeEscalation: false
+          capabilities: {drop: [ALL]}
+        volumeMounts:
+          - {name: github-token, mountPath: /github-token, readOnly: true}
+        resources:
+          requests: {cpu: 10m, memory: 32Mi}
+          limits: {memory: 64Mi}

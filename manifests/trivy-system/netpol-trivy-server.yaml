@@ -11,6 +11,8 @@ spec:
     - fromEndpoints:
         - matchLabels:
             app.kubernetes.io/managed-by: trivy-operator
+        - matchLabels:
+            app.kubernetes.io/name: trivy-operator
       toPorts:
         - ports:
             - port: "4954"

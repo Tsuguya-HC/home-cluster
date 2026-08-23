@@ -531,7 +531,7 @@ spec:
         - command:
             - /trident-operator
             - --log-level=info
-            - --qts-cgi-image=qnapsystem/qnap-csi-backend-qts-sidecar:v1.6.2
+            - --qts-cgi-image=qnapsystem/qnap-csi-backend-qts-sidecar:v1.6.2@sha256:bf3b861cc49c72f25c5f39f7e750687d4886bee99f643e1401cd8bd119357aef
           env:
             - name: POD_NAME
               valueFrom:
@@ -539,7 +539,7 @@ spec:
                   fieldPath: metadata.name
             - name: OPERATOR_NAME
               value: trident-operator
-          image: qnapsystem/qnap-csi-operator:v1.6.2
+          image: qnapsystem/qnap-csi-operator:v1.6.2@sha256:1269a7bf04496f2eb0f99662e3028bf9acba48f24d82f60370b22a0e7691b147
           imagePullPolicy: IfNotPresent
           name: trident-operator
           resources:
@@ -578,4 +578,4 @@ metadata:
 spec:
   debug: false
   namespace: trident
-  tridentImage: qnapsystem/qnap-csi:v1.6.2
+  tridentImage: qnapsystem/qnap-csi:v1.6.2@sha256:3760c6e9885948ab1a4e73583a6b1544dc0fb70fa3de5b7ff36efb53e499b15d

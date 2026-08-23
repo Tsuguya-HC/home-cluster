@@ -1,0 +1,39 @@
+name: configmap scripts
+
+# ConfigMap に入ったスクリプトの構文検査を workflow_call で公開する leaf。
+# オーケストレーターは `Lint` (lint.yaml) で、必須チェックはそこの `CI Gate`
+# 1 個だけ。直接のトリガーは持たない — leaf 自身が pull_request で起動すると、
+# 同じコミットに対して gate 経由の結果と重複した check run が並ぶ。
+on:
+  workflow_call:
+
+permissions: {}
+
+jobs:
+  # YAML の中の文字列は、クラスタに適用されて Pod が落ちるまで誰も構文を見ない。
+  # horenso-verify はネストしたヒアドキュメントの引用符を間違え、イメージに無い
+  # インタプリタを呼び、どちらも実 Pod の失敗で初めて分かった。スクリプトを
+  # ConfigMap のキーとして持てば、ここで検査できる。
+  #
+  # シェルは `sh -n` ではなく shellcheck をかける。文法だけ見ても
+  # `cd dir` が失敗して次に進む型の穴は通ってしまう（実際に通っていた）。
+  configmap-scripts:
+    name: configmap scripts
+    # shellcheck と node が要る。どちらも ubuntu-latest には入っているが、
+    # ubuntu-slim には無い。
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
+
+      # 検査に使った実装を記録する。指摘の有無はバージョンで変わる。
+      - name: shellcheck version
+        run: shellcheck --version
+
+      - name: Check scripts embedded in ConfigMaps
+        run: python3 scripts/lint-configmap-scripts.py

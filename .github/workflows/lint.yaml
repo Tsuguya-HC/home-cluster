@@ -75,6 +75,7 @@ jobs:
       images: ${{ steps.filter.outputs.images }}
       argo: ${{ steps.filter.outputs.argo }}
       mcp: ${{ steps.filter.outputs.mcp }}
+      cmscripts: ${{ steps.filter.outputs.cmscripts }}
       workflows: ${{ steps.filter.outputs.workflows }}
       renovate: ${{ steps.filter.outputs.renovate }}
       aqua: ${{ steps.filter.outputs.aqua }}
@@ -127,6 +128,11 @@ jobs:
             mcp:
               - '.github/mcp/**'
               - '.github/workflows/_mcp.yml'
+            cmscripts:
+              - 'manifests/**'
+              - 'kustomize/**'
+              - 'scripts/lint-configmap-scripts.py'
+              - '.github/workflows/_configmap-scripts.yml'
             workflows:
               - '.github/workflows/**'
               - '.github/zizmor.yml'
@@ -183,6 +189,13 @@ jobs:
     permissions:
       contents: read
 
+  configmap-scripts:
+    needs: detect
+    if: ${{ needs.detect.outputs.cmscripts == 'true' }}
+    uses: ./.github/workflows/_configmap-scripts.yml
+    permissions:
+      contents: read
+
   # Most of this file is bash inside `run:` blocks, and none of it is exercised
   # until a push runs it. actionlint checks the expressions and the job graph,
   # and shells out to shellcheck for every script — which is where the real
@@ -233,6 +246,7 @@ jobs:
       - image-existence
       - mcp
       - argo-lint
+      - configmap-scripts
       - lint-workflows
       - lint-renovate
       - lint-aqua

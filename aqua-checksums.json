@@ -6,8 +6,8 @@
       "algorithm": "sha256"
     },
     {
-      "id": "github_release/github.com/mikefarah/yq/v4.53.4/yq_linux_amd64",
-      "checksum": "BB684957682B9837373670F5AC25817C5CCBC7E36BAF4F1F8710533640ED0D33171FF1D6E2C0EFA07682C3CD07FFCBEFAB17C60C2B0E5B0D257F90654CD07F67",
+      "id": "github_release/github.com/mikefarah/yq/v4.53.6/yq_linux_amd64",
+      "checksum": "508F4EE34C6D093D136FF3C1B36DB4105E686C3D68D435C064448BA16E2616D528EFAFB2CB0A1890B7724890373A226A38B7DA27E6796396EE759BED39A8C671",
       "algorithm": "sha512"
     },
     {

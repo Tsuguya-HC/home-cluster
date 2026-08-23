@@ -341,22 +341,30 @@ spec:
 
           # CI が出そろうまで待つ。出そろわないまま時間切れなら判定不能。
           #
-          # `gh pr checks` は pending や failure があると **JSON を出したうえで非ゼロ終了する**。
-          # `$(... || echo '[]')` と書くと実データの後ろに `[]` が連結され、`jq length` が
-          # 2 行を返して数値比較が常に偽になる。終了コードは出力と分けて扱う。
+          # `gh pr checks` は使わない。GraphQL の statusCheckRollup を引くが、
+          # この GitHub App のトークンではそこが 403 になる:
+          #   GraphQL: Resource not accessible by integration (node.statusCheckRollup...)
+          # REST の check-runs は同じトークンで読める（実測）。
           #
-          # 毎回ログを出す。出さないと、20 分回って何も分からないという今日踏んだ状態になる。
+          # 毎回ログを出す。出さないと、時間切れになった理由が実行後に分からない。
+          SHA=$(gh api "repos/${REPO}/git/ref/heads/${BRANCH}" -q '.object.sha' 2>/dev/null)
+          if [ -z "$SHA" ]; then
+            printf '%s' escalate > /verdict/verdict.txt
+            echo "ブランチ ${BRANCH} の head を取得できませんでした。" > /verdict/report.md
+            exit 0
+          fi
+
           DONE=0
           for i in $(seq 1 40); do
-            RAW=$(gh pr checks "$PR" --repo "$REPO" --json name,state 2>/tmp/gh.err)
+            RAW=$(gh api "repos/${REPO}/commits/${SHA}/check-runs" 2>/tmp/gh.err)
             RC=$?
-            if ! printf '%s' "$RAW" | jq -e 'type == "array"' >/dev/null 2>&1; then
-              echo "poll $i: rc=$RC 出力が配列でない: $(printf '%s' "$RAW" | head -c 120) / err=$(head -c 120 /tmp/gh.err)"
+            if ! printf '%s' "$RAW" | jq -e 'has("check_runs")' >/dev/null 2>&1; then
+              echo "poll $i: rc=$RC 応答が想定外: $(printf '%s' "$RAW" | head -c 120) / err=$(head -c 160 /tmp/gh.err)"
               sleep 15
               continue
             fi
-            TOTAL=$(printf '%s' "$RAW" | jq 'length')
-            PENDING=$(printf '%s' "$RAW" | jq '[.[] | select(.state == "PENDING" or .state == "QUEUED" or .state == "IN_PROGRESS" or .state == "REQUESTED" or .state == "WAITING")] | length')
+            TOTAL=$(printf '%s' "$RAW" | jq '.check_runs | length')
+            PENDING=$(printf '%s' "$RAW" | jq '[.check_runs[] | select(.status != "completed")] | length')
             echo "poll $i: rc=$RC total=$TOTAL pending=$PENDING"
             if [ "$TOTAL" -gt 0 ] && [ "$PENDING" -eq 0 ]; then DONE=1; break; fi
             sleep 15
@@ -366,17 +374,19 @@ spec:
             printf '%s' indeterminate > /verdict/verdict.txt
             { echo "## CI が時間内に完了しませんでした（判定不能）"; echo;
               echo "最後に観測した状態:"; echo '```';
-              printf '%s' "$RAW" | head -c 800; echo; echo '```'; } > /verdict/report.md
+              printf '%s' "$RAW" | jq -r '.check_runs[]? | "\(.name): \(.status) \(.conclusion // "")"' 2>/dev/null | head -20;
+              echo '```'; } > /verdict/report.md
             exit 0
           fi
 
-          FAILED=$(echo "$RAW" | jq -r '[.[] | select(.state == "FAILURE" or .state == "ERROR" or .state == "CANCELLED")] | .[].name' | head -20)
+          # neutral / skipped は失敗にしない。GitHub 側の conclusion の語彙に合わせる
+          FAILED=$(printf '%s' "$RAW" | jq -r '[.check_runs[] | select(.conclusion == "failure" or .conclusion == "cancelled" or .conclusion == "timed_out" or .conclusion == "action_required")] | .[].name' | head -20)
           if [ -n "$FAILED" ]; then
             printf '%s' rework > /verdict/verdict.txt
-            { echo "## CI 失敗"; echo; echo "$FAILED" | sed 's/^/- /'; } > /verdict/report.md
+            { echo "## CI 失敗"; echo; printf '%s\n' "$FAILED" | sed 's/^/- /'; } > /verdict/report.md
           else
             printf '%s' pass > /verdict/verdict.txt
-            { echo "## CI 通過"; echo; echo "$RAW" | jq -r '.[] | "- \(.name): \(.state)"'; } > /verdict/report.md
+            { echo "## CI 通過"; echo; printf '%s' "$RAW" | jq -r '.check_runs[] | "- \(.name): \(.conclusion // .status)"'; } > /verdict/report.md
           fi
 
           # 記録を PR コメントに積む

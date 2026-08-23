@@ -76,15 +76,24 @@ spec:
               parameters:
                 - name: budget
                   value: "{{workflow.parameters.rework-budget}}"
+                - name: round
+                  value: "1"
 
     # implement -> check -> review -> 判定に応じて PR / 再帰 / エスカレーション
     - name: implement-cycle
       inputs:
         parameters:
           - name: budget
+          - name: round
       steps:
         - - name: implement
             template: implement
+            arguments:
+              parameters:
+                - name: round
+                  value: "{{inputs.parameters.round}}"
+                - name: budget
+                  value: "{{inputs.parameters.budget}}"
         # 安いゲートを先に。落ちたらレビューにトークンを使わない
         - - name: check
             template: check
@@ -104,8 +113,8 @@ spec:
                   value: "{{steps.check.outputs.parameters.verdict}}"
                 - name: review
                   value: "{{steps.review.outputs.parameters.verdict}}"
-        - - name: create-pr
-            template: create-pr
+        - - name: ready-for-review
+            template: ready-for-review
             when: "{{steps.combine.outputs.parameters.verdict}} == pass"
           - name: again
             template: implement-cycle
@@ -114,6 +123,8 @@ spec:
               parameters:
                 - name: budget
                   value: "{{=asInt(inputs.parameters.budget) - 1}}"
+                - name: round
+                  value: "{{=asInt(inputs.parameters.round) + 1}}"
           # 予算切れの rework と、明示的な escalate / indeterminate は同じ扱い
           - name: escalate
             template: escalate
@@ -125,6 +136,10 @@ spec:
 
     # ---- Implementing: エージェントが変更してブランチに push する ----
     - name: implement
+      inputs:
+        parameters:
+          - name: round
+          - name: budget
       metadata:
         labels:
           agent.tgy.io/phase: implementing
@@ -198,7 +213,13 @@ spec:
             ## 対象
 
             リポジトリ: {{workflow.parameters.repo}}（/workspace に clone 済み、ブランチ {{workflow.parameters.branch}}）
-            作業ディレクトリ: {{workflow.parameters.workdir}}"
+            作業ディレクトリ: {{workflow.parameters.workdir}}
+
+            ## 今の状態
+
+            - **{{inputs.parameters.round}} 周目**（1 周目なら新規、2 周目以降は差し戻し）
+            - 残りの差し戻し回数: **{{inputs.parameters.budget}}**
+            - これが尽きた状態でさらに差し戻されると、自動では進まず人間に渡る"
 
             claude -p \
               --verbose \
@@ -222,6 +243,25 @@ spec:
               -r "{{workflow.parameters.repo}}" \
               -b "{{workflow.parameters.branch}}" \
               -m "{{workflow.parameters.pr-title}}"
+
+            # ドラフト PR を先に作る。以降の CI はリポジトリ側の定義が走るので
+            # ビルド検証をこのワークフローに再実装しない（drift の元になる）
+            export GH_TOKEN="$GITHUB_TOKEN"
+            REPO="{{workflow.parameters.repo}}"
+            BRANCH="{{workflow.parameters.branch}}"
+            if ! gh pr list --repo "$REPO" --head "$BRANCH" --json number -q '.[0].number' | grep -q .; then
+              gh pr create --repo "$REPO" --head "$BRANCH" --base main --draft \
+                --title "{{workflow.parameters.pr-title}}" \
+                --body "自律実装フローによる変更。検証とレビューを通過するまでドラフトのままです。" 2>&1 | tail -2
+            fi
+
+            # 記録は PR コメントに積む。人間が見る場所と次周が読む場所を同じにする
+            PR=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number -q '.[0].number')
+            if [ -n "$PR" ] && [ -s /tmp/report.md ]; then
+              { echo "### implement"; echo; jq -Rsr --argjson max 3000 \
+                  'if length > $max then .[0:$max] + "\n\n_（以降を省略）_" else . end' < /tmp/report.md; } \
+                | gh pr comment "$PR" --repo "$REPO" --body-file - || true
+            fi
         env:
           - {name: HOME, value: /tmp}
           - name: CLAUDE_CODE_OAUTH_TOKEN
@@ -239,18 +279,14 @@ spec:
           requests: {cpu: 200m, memory: 1Gi}
           limits: {memory: 6Gi}
 
-    # ---- Checks: 決定論的な検証。LLM を使わないので語彙の強制は不要 ----
-    # ビルドの exit 0 は「プロセスが 0 で終了した」ことしか証明しない。
-    # 成果物が整合しているか（index.html が参照する資産が実在するか）まで見る。
+    # ---- Checks: リポジトリ側の CI を待ち、その結果を verdict に変換する ----
+    # ビルドをこのワークフローに再実装しない。同じことを 2 箇所に書くと必ず drift する。
+    # 外部で起きた結果を「自分が回収した verdict」に落とすのがこのステップの役目で、
+    # 制御フローが GitHub の状態を直接読むことはない。
     - name: check
       metadata:
         labels:
           agent.tgy.io/phase: checks
-      securityContext:
-        runAsUser: 65532
-        runAsNonRoot: true
-        runAsGroup: 65532
-        fsGroup: 65532
       initContainers:
         - name: github-auth
           image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:d29e837e2601fadc50e346398e86934c9cf49b309448b89b19b867122c9bf74b
@@ -269,64 +305,62 @@ spec:
           resources:
             requests: {cpu: 10m, memory: 32Mi}
             limits: {memory: 64Mi}
-      container:
-        image: registry.infra.tgy.io/tools/claude-code:latest@sha256:d18dbca36308e573509c2617ab6c57e050facfb0723ed29386101117408c0b1f
-        command: [sh, -c]
-        args:
-          - |
-            set -u
-            GITHUB_TOKEN=$(cat /github-token/token)
-            git config --global --add safe.directory /workspace
-            git clone --depth 1 --branch "{{workflow.parameters.branch}}" \
-              "https://x-access-token:${GITHUB_TOKEN}@github.com/{{workflow.parameters.repo}}.git" \
-              /workspace 2>&1 | tail -2 || {
-                printf '%s' rework > /verdict/verdict.txt
-                echo "ブランチを clone できませんでした" > /verdict/report.md
-                exit 0
-              }
-            cd "/workspace/{{workflow.parameters.workdir}}"
+      script:
+        image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:d29e837e2601fadc50e346398e86934c9cf49b309448b89b19b867122c9bf74b
+        command: [sh]
+        source: |
+          set -u
+          export GH_TOKEN=$(cat /github-token/token)
+          export HOME=/tmp
+          REPO="{{workflow.parameters.repo}}"
+          BRANCH="{{workflow.parameters.branch}}"
 
-            LOG=/tmp/build.log
-            if ! sh -c "{{workflow.parameters.build-cmd}}" > "$LOG" 2>&1; then
-              printf '%s' rework > /verdict/verdict.txt
-              { echo "## ビルド失敗"; echo; echo '```'; tail -c 3000 "$LOG"; echo '```'; } > /verdict/report.md
-              exit 0
-            fi
+          PR=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number -q '.[0].number' 2>/dev/null || true)
+          if [ -z "$PR" ]; then
+            printf '%s' escalate > /verdict/verdict.txt
+            echo "ドラフト PR が見つかりません。実装フェーズが変更を出せていない可能性があります。" > /verdict/report.md
+            exit 0
+          fi
 
-            # exit 0 は成果物の整合を保証しない。index.html が参照する資産の実在まで確認する
-            OUT=""
-            for d in dist build out; do [ -d "$d" ] && OUT="$d" && break; done
-            if [ -z "$OUT" ] || [ ! -f "$OUT/index.html" ]; then
-              printf '%s' rework > /verdict/verdict.txt
-              echo "ビルドは成功したが成果物（dist/build/out の index.html）が見つかりません" > /verdict/report.md
-              exit 0
-            fi
-            MISSING=""
-            for ref in $(grep -oE '(src|href)="[^"]+"' "$OUT/index.html" | sed 's/.*"\(.*\)"/\1/'); do
-              case "$ref" in http*|//*|\#*|data:*) continue ;; esac
-              p="$OUT/${ref#/}"
-              [ -f "$p" ] || MISSING="$MISSING $ref"
-            done
-            if [ -n "$MISSING" ]; then
-              printf '%s' rework > /verdict/verdict.txt
-              { echo "## 成果物が不整合"; echo "index.html が参照する以下が存在しません:"; echo "$MISSING"; } > /verdict/report.md
-              exit 0
-            fi
+          # CI が出そろうまで待つ。出そろわないまま時間切れなら判定不能
+          DONE=0
+          for _ in $(seq 1 60); do
+            RAW=$(gh pr checks "$PR" --repo "$REPO" --json name,state 2>/dev/null || echo '[]')
+            PENDING=$(echo "$RAW" | jq '[.[] | select(.state == "PENDING" or .state == "QUEUED" or .state == "IN_PROGRESS")] | length')
+            TOTAL=$(echo "$RAW" | jq 'length')
+            if [ "$TOTAL" -gt 0 ] && [ "$PENDING" = "0" ]; then DONE=1; break; fi
+            sleep 20
+          done
 
+          if [ "$DONE" != "1" ]; then
+            printf '%s' indeterminate > /verdict/verdict.txt
+            echo "CI が時間内に完了しませんでした（判定不能）。" > /verdict/report.md
+            exit 0
+          fi
+
+          FAILED=$(echo "$RAW" | jq -r '[.[] | select(.state == "FAILURE" or .state == "ERROR" or .state == "CANCELLED")] | .[].name' | head -20)
+          if [ -n "$FAILED" ]; then
+            printf '%s' rework > /verdict/verdict.txt
+            { echo "## CI 失敗"; echo; echo "$FAILED" | sed 's/^/- /'; } > /verdict/report.md
+          else
             printf '%s' pass > /verdict/verdict.txt
-            { echo "## ビルド成功"; echo "成果物: $OUT（index.html の参照はすべて実在）"; } > /verdict/report.md
-        env:
-          - {name: HOME, value: /tmp}
+            { echo "## CI 通過"; echo; echo "$RAW" | jq -r '.[] | "- \(.name): \(.state)"'; } > /verdict/report.md
+          fi
+
+          # 記録を PR コメントに積む
+          { echo "### check"; echo; cat /verdict/report.md; } \
+            | gh pr comment "$PR" --repo "$REPO" --body-file - || true
         securityContext:
+          runAsUser: 65532
+          runAsNonRoot: true
           allowPrivilegeEscalation: false
           capabilities: {drop: [ALL]}
         volumeMounts:
-          - {name: workspace, mountPath: /workspace}
           - {name: github-token, mountPath: /github-token, readOnly: true}
           - {name: verdict, mountPath: /verdict}
         resources:
-          requests: {cpu: 500m, memory: 1Gi}
-          limits: {memory: 4Gi}
+          requests: {cpu: 10m, memory: 64Mi}
+          limits: {memory: 256Mi}
       outputs:
         parameters:
           - name: verdict
@@ -508,8 +542,10 @@ spec:
           - name: verdict
             valueFrom: {path: /tmp/verdict.txt, default: indeterminate}
 
-    # ---- PR 作成。署名コミットに置き換えてから出す ----
-    - name: create-pr
+    # ---- 判定が pass のとき、ドラフトを ready-for-review にする ----
+    # PR は implement がドラフトで作成済み。ここでやるのは状態の遷移だけで、
+    # PR の状態は判定の「結果」であって判定そのものではない。
+    - name: ready-for-review
       initContainers:
         - name: github-auth
           image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:d29e837e2601fadc50e346398e86934c9cf49b309448b89b19b867122c9bf74b
@@ -536,24 +572,12 @@ spec:
           export GH_TOKEN=$(cat /github-token/token)
           export HOME=/tmp
           REPO="{{workflow.parameters.repo}}"
-          BRANCH="{{workflow.parameters.branch}}"
-          # 署名コミットは implement 側で作成済み。ここは PR を出すだけ
-          if gh pr list --repo "$REPO" --head "$BRANCH" --json number -q '.[0].number' | grep -q .; then
-            echo "PR は既に存在します"
-            exit 0
-          fi
+          PR=$(gh pr list --repo "$REPO" --head "{{workflow.parameters.branch}}" --json number -q '.[0].number')
+          [ -n "$PR" ] || { echo "PR が見つかりません"; exit 1; }
+          gh pr ready "$PR" --repo "$REPO"
           LABELS="{{workflow.parameters.pr-labels}}"
-          if [ -n "$LABELS" ]; then
-            gh pr create --repo "$REPO" --head "$BRANCH" --base main \
-              --title "{{workflow.parameters.pr-title}}" --body-file /dev/stdin --label "$LABELS" <<'BODY'
-          自律実装フローによる変更。ビルド検証とレビューを通過しています。
-          BODY
-          else
-            gh pr create --repo "$REPO" --head "$BRANCH" --base main \
-              --title "{{workflow.parameters.pr-title}}" --body-file /dev/stdin <<'BODY'
-          自律実装フローによる変更。ビルド検証とレビューを通過しています。
-          BODY
-          fi
+          [ -n "$LABELS" ] && gh pr edit "$PR" --repo "$REPO" --add-label "$LABELS" || true
+          echo "PR #$PR を ready-for-review にしました"
         securityContext:
           runAsUser: 65532
           runAsNonRoot: true
@@ -569,18 +593,49 @@ spec:
     - name: escalate
       inputs:
         parameters: [{name: verdict}]
+      initContainers:
+        - name: github-auth
+          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:d29e837e2601fadc50e346398e86934c9cf49b309448b89b19b867122c9bf74b
+          command: [github-auth.sh]
+          env:
+            - {name: GITHUB_APP_ID, value: "2998228"}
+            - {name: GITHUB_APP_INSTALLATION_ID, value: "113765957"}
+          securityContext:
+            runAsUser: 65532
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: github-app-secret, mountPath: /github-app, readOnly: true}
+            - {name: github-token, mountPath: /github-token}
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {memory: 64Mi}
       script:
         image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:d29e837e2601fadc50e346398e86934c9cf49b309448b89b19b867122c9bf74b
         command: [sh]
         source: |
-          echo "escalated: verdict={{inputs.parameters.verdict}}"
-          echo "ブランチ {{workflow.parameters.branch}} は人間の判断が要ります"
+          set -u
+          export GH_TOKEN=$(cat /github-token/token)
+          export HOME=/tmp
+          REPO="{{workflow.parameters.repo}}"
+          PR=$(gh pr list --repo "$REPO" --head "{{workflow.parameters.branch}}" --json number -q '.[0].number' 2>/dev/null || true)
+          # ドラフトのまま残す。人間が見に行く場所と、経緯が積まれている場所を同じにする
+          if [ -n "$PR" ]; then
+            gh pr edit "$PR" --repo "$REPO" --add-label "needs-human" || true
+            printf '%s\n' "### escalate" "" "判定: {{inputs.parameters.verdict}}" "" \
+              "自動では進められませんでした。ドラフトのまま人間の判断を待ちます。" \
+              | gh pr comment "$PR" --repo "$REPO" --body-file - || true
+          fi
+          echo "escalated: verdict={{inputs.parameters.verdict}} pr=${PR:-none}"
           exit 1
         securityContext:
           runAsUser: 65532
           runAsNonRoot: true
           allowPrivilegeEscalation: false
           capabilities: {drop: [ALL]}
+        volumeMounts:
+          - {name: github-token, mountPath: /github-token, readOnly: true}
         resources:
           requests: {cpu: 10m, memory: 32Mi}
           limits: {memory: 64Mi}

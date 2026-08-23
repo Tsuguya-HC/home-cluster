@@ -33,6 +33,7 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 | Workflow pods (talos-build) | SeaweedFS filer (seaweedfs) | 8333 | Artifact/log storage |
 | Workflow pods (image-build) | SeaweedFS filer (seaweedfs) | 8333 | Artifact/log storage |
 | Workflow pods (claude-code) | SeaweedFS filer (seaweedfs) | 8333 | Artifact/log storage |
+| Workflow pods (rss) | SeaweedFS filer (seaweedfs) | 8333 | Artifact/log storage |
 | Workflow pods (claude-code) | Loki gateway (monitoring) | 8080 | Log query (logcli) |
 | PXE sync pods (argo) | SeaweedFS filer (seaweedfs) | 8333 | Artifact/log storage |
 | Etcd backup (argo) | SeaweedFS filer (seaweedfs) | 8333 | Backup storage |
@@ -178,7 +179,7 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 |---|---|---|
 | **master** | master/volume/filer/bucket-hook → 9333/19333; prometheus (monitoring) → 9327 | master (self):9333/19333, volume:8080/18080, filer:8888/18888 |
 | **volume** | master/filer/volume (self) → 8080/18080; prometheus (monitoring) → 9327 | master:9333/19333, volume (self):8080/18080 |
-| **filer** | loki (monitoring), tempo (monitoring), workflow-pods (argo), workflow-pods (talos-build), workflow-pods (image-build), workflow-pods (claude-code), workflows-server (argo), etcd-backup (argo), pxe-sync (argo), kanidm-backup (argo), kanidm-repl-exchange (argo), nextcloud (nextcloud), harbor-registry (harbor), trading (collector) → 8333; filer/master/bucket-hook/oauth2-proxy-seaweedfs (oauth2-proxy) → 8888/18888; prometheus (monitoring) → 9327 | master:9333/19333, volume:8080/18080, filer (self):8888/18888, shared-pg (database):5432 |
+| **filer** | loki (monitoring), tempo (monitoring), workflow-pods (argo), workflow-pods (talos-build), workflow-pods (image-build), workflow-pods (claude-code), workflow-pods (rss), workflows-server (argo), etcd-backup (argo), pxe-sync (argo), kanidm-backup (argo), kanidm-repl-exchange (argo), nextcloud (nextcloud), harbor-registry (harbor), trading (collector) → 8333; filer/master/bucket-hook/oauth2-proxy-seaweedfs (oauth2-proxy) → 8888/18888; prometheus (monitoring) → 9327 | master:9333/19333, volume:8080/18080, filer (self):8888/18888, shared-pg (database):5432 |
 | **bucket-hook** (Job) | (deny world) | master:9333/19333, filer:8888/18888 |
 
 ## kube-system (6 policies)
@@ -293,7 +294,7 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 | **rss-ui** | oauth2-proxy-rss (oauth2-proxy) → 80 | rss-pg:5432 |
 | **rss-fetcher** | rss-cron → 80 | rss-pg:5432, world:443 |
 | **rss-cleaner** | rss-cron → 80 | rss-pg:5432 |
-| **rss-cron** | (none) | rss-fetcher:80, rss-cleaner:80 |
+| **rss-cron** | (none) | rss-fetcher:80, rss-cleaner:80, kube-apiserver:6443, seaweedfs-filer (seaweedfs):8333 |
 | **rss-migration** (Job) | (none) | rss-pg:5432 |
 
 ## horenso (1 policy)

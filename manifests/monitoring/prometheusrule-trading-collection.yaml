@@ -14,7 +14,7 @@ spec:
         #
         # 「Job が失敗した」ではなく「成功した実行が無い」で見るのは、
         # そもそも起動しなかった場合（スケジューラ異常・ノード逼迫・suspend）も拾うため。
-        # 閾値は CronJob ごとに変える —— webull-snapshot は平日のみなので、
+        # 閾値は CronJob ごとに変える —— webull-snapshot / webull-universe は平日のみなので、
         # 金曜の実行から月曜の実行まで正常に 72 時間空く。
         - alert: TradingCollectionStale
           expr: |
@@ -31,7 +31,7 @@ spec:
         - alert: TradingCollectionStale
           expr: |
             time() - max by (cronjob) (
-              kube_cronjob_status_last_successful_time{namespace="trading", cronjob="webull-snapshot"}
+              kube_cronjob_status_last_successful_time{namespace="trading", cronjob=~"webull-snapshot|webull-universe"}
             ) > 80 * 3600
           for: 10m
           labels:

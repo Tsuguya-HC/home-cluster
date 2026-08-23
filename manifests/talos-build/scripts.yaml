@@ -20,7 +20,8 @@ data:
   push-iso.sh: |
     #!/bin/sh
     set -euo pipefail
-    export GITHUB_TOKEN=$(cat /github-token/token)
+    GITHUB_TOKEN="$(cat /github-token/token)"
+    export GITHUB_TOKEN
     export GH_TOKEN="$GITHUB_TOKEN"
 
     wget -qO /tmp/jq "https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64"
@@ -55,7 +56,8 @@ data:
   finalize-release.sh: |
     #!/bin/sh
     set -euo pipefail
-    export GH_TOKEN=$(cat /github-token/token)
+    GH_TOKEN="$(cat /github-token/token)"
+    export GH_TOKEN
     wget -qO /tmp/gh.tar.gz "https://github.com/cli/cli/releases/download/v2.74.1/gh_2.74.1_linux_amd64.tar.gz"
     tar xzf /tmp/gh.tar.gz -C /tmp gh_2.74.1_linux_amd64/bin/gh --strip-components=2
     chmod +x /tmp/gh

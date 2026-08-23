@@ -1,0 +1,116 @@
+# horenso-verify が実行するスクリプト。
+#
+# YAML の中の文字列ではなくファイルとして持つ。埋め込みだと
+#   - `sh -n` / `node --check` を CI でかけられない
+#   - ネストしたヒアドキュメントの引用符がバグになる（実際になった）
+# スクリプト側は Argo のテンプレート置換を使わない。
+# パラメータは環境変数（REPO / BRANCH）で渡す
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: horenso-verify-scripts
+  namespace: claude-code
+data:
+  verify.sh: |
+    set -u
+    fail() {
+      printf '%s' rework > /work/verdict.txt
+      { echo "## 検証失敗"; echo; echo "$1"; } > /work/report.md
+      exit 0
+    }
+
+    export HOME=/tmp
+    GITHUB_TOKEN=$(cat /github-token/token)
+    git config --global --add safe.directory /work/src
+    # パイプを挟むと `||` がパイプライン（tail）の終了コードを見てしまい、
+    # clone の失敗を拾えない
+    if ! git clone --depth 1 --branch "${BRANCH}" \
+         "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git" \
+         /work/src > /tmp/clone.log 2>&1; then
+      fail "ブランチを clone できませんでした: $(tail -c 400 /tmp/clone.log)"
+    fi
+    cd /work/src || fail "clone したはずのディレクトリがありません"
+
+    npm ci > /tmp/install.log 2>&1 || fail "npm ci に失敗: $(tail -c 800 /tmp/install.log)"
+    npm run build > /tmp/build.log 2>&1 || fail "ビルドに失敗: $(tail -c 800 /tmp/build.log)"
+
+    # DISCORD_WEBHOOK_URL と TASK_DISPATCH_URL は設定しない。
+    # どちらも未設定なら何もしない実装なので、検証実行が通知や
+    # タスク投入といった外向きの副作用を起こさない
+    export DATABASE_URL="postgres://horenso:horenso@localhost:5432/horenso"
+    export PORT=3100
+
+    for _ in $(seq 1 30); do
+      nc -z localhost 5432 2>/dev/null && break
+      sleep 2
+    done
+    nc -z localhost 5432 2>/dev/null || fail "サイドカーの PostgreSQL が起動しませんでした"
+
+    node dist/index.js > /tmp/app.log 2>&1 &
+    APP_PID=$!
+    for _ in $(seq 1 30); do
+      curl -sf -o /dev/null "http://localhost:3100/health" && break
+      sleep 2
+    done
+    curl -sf -o /dev/null "http://localhost:3100/health" \
+      || fail "アプリが起動しませんでした: $(tail -c 800 /tmp/app.log)"
+
+    # ---- 書き込みパスを通す ----
+    # 読み取りが 200 を返すことは、意図した状態変化が起きた証明にならない。
+    # 日本語の長文を往復させ、バイト単位で一致するかまで見る（#76 の型）。
+    # このイメージに python3 は無い（node / npm / jq / curl / nc のみ）。
+    # node 24 は fetch を持つのでそれで書く。
+    node /scripts/probe.mjs > /work/probe.txt 2>&1
+    PROBE_RC=$?
+    kill "$APP_PID" 2>/dev/null || true
+
+    if [ "$PROBE_RC" != "0" ]; then
+      fail "$(cat /work/probe.txt)"
+    fi
+
+    printf '%s' pass > /work/verdict.txt
+    { echo "## 検証通過"; echo;
+      echo "使い捨ての PostgreSQL に対してブランチのコードを起動し、書き込みパスを往復させた。";
+      echo;
+      echo '```'; cat /work/probe.txt; echo '```'; } > /work/report.md
+  probe.mjs: |
+    const BASE = "http://localhost:3100";
+    const LONG = "復旧手順を確認する。StatefulSet を scale してから PVC を確認する。".repeat(200);
+
+    async function req(method, path, payload) {
+      const r = await fetch(BASE + path, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: payload === undefined ? undefined : JSON.stringify(payload),
+      });
+      if (!r.ok) throw new Error(`${method} ${path} -> HTTP ${r.status}`);
+      return r.json();
+    }
+
+    const created = await req("POST", "/tasks", {
+      title: "検証タスク（自動）",
+      description: LONG,
+      category: "investigate",
+    });
+    const id = created.id;
+
+    await req("PATCH", `/tasks/${id}`, { status: "completed", result: LONG });
+    const got = await req("GET", `/tasks/${id}`);
+
+    const problems = [];
+    for (const field of ["description", "result"]) {
+      const back = got[field] ?? "";
+      if (back !== LONG) {
+        const broken = back.slice(-4).includes("\uFFFD");
+        problems.push(
+          `${field}: 送信 ${LONG.length} 文字 / ${Buffer.byteLength(LONG)} バイト → ` +
+          `保存 ${back.length} 文字 / ${Buffer.byteLength(back)} バイト` +
+          (broken ? "（末尾に REPLACEMENT CHARACTER）" : ""));
+      }
+    }
+    if (got.status !== "completed") {
+      problems.push(`status が completed になっていない: ${got.status}`);
+    }
+
+    console.log(JSON.stringify({ task: id, problems }));
+    process.exit(problems.length ? 1 : 0);

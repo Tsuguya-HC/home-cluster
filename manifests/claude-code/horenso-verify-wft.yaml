@@ -1,0 +1,197 @@
+# horenso の変更を、実際に動かして確かめる。
+#
+# CI が緑でも「意図した状態変化が起きた」ことは証明されない。ここでやるのは
+# 使い捨ての PostgreSQL を横に立て、ブランチのコードをそのまま起動し、
+# 書き込みパスを通して保存先で読み戻すこと。
+#
+# 検証内容は #76（result が 3800 バイトで切り詰められ UTF-8 が壊れる）の型に合わせてある。
+# 読み取り系が 200 を返すこと、workflow が Succeeded になることは、
+# あのバグを 7 週間見逃した理由そのものだった。
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: horenso-verify
+  namespace: claude-code
+spec:
+  templates:
+    - name: verify
+      inputs:
+        parameters:
+          - name: repo
+          - name: branch
+      metadata:
+        labels:
+          agent.tgy.io/phase: verifying
+      securityContext:
+        runAsUser: 65532
+        runAsNonRoot: true
+        runAsGroup: 65532
+        fsGroup: 65532
+      # 呼び出し元の workflow が宣言した volume に依存しない。
+      # templateRef で他所から呼ばれる前提なので、名前の一致を規約に頼らない
+      volumes:
+        - name: work
+          emptyDir: {}
+        - name: pgdata
+          emptyDir: {}
+        - name: github-token
+          emptyDir: {}
+        - name: github-app-secret
+          secret:
+            secretName: github-app-private-key
+      # 使い捨ての PostgreSQL。本番 DB には一切触れない
+      sidecars:
+        - name: postgres
+          # 本番（CNPG）は PostgreSQL 18。メジャーを揃えてある。
+          # Kyverno の署名検証は registry.infra.tgy.io/* のみが対象なので上流イメージで通る
+          image: postgres:18-alpine@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2
+          env:
+            - {name: POSTGRES_USER, value: horenso}
+            - {name: POSTGRES_PASSWORD, value: horenso}
+            - {name: POSTGRES_DB, value: horenso}
+            - {name: PGDATA, value: /pgdata/db}
+          securityContext:
+            # イメージ既定は root。非 root で動かすので、PGDATA は
+            # 自分で mkdir できる場所（/pgdata/db）に置く。親は fsGroup で g+w
+            runAsUser: 70
+            runAsGroup: 65532
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: pgdata, mountPath: /pgdata}
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {memory: 512Mi}
+      initContainers:
+        - name: github-auth
+          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:d29e837e2601fadc50e346398e86934c9cf49b309448b89b19b867122c9bf74b
+          command: [github-auth.sh]
+          env:
+            - {name: GITHUB_APP_ID, value: "2998228"}
+            - {name: GITHUB_APP_INSTALLATION_ID, value: "113765957"}
+          securityContext:
+            runAsUser: 65532
+            runAsGroup: 65532
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: github-app-secret, mountPath: /github-app, readOnly: true}
+            - {name: github-token, mountPath: /github-token}
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {memory: 64Mi}
+      container:
+        image: registry.infra.tgy.io/tools/claude-code:latest@sha256:d18dbca36308e573509c2617ab6c57e050facfb0723ed29386101117408c0b1f
+        command: [sh, -c]
+        args:
+          - |
+            set -u
+            fail() {
+              printf '%s' rework > /work/verdict.txt
+              { echo "## 検証失敗"; echo; echo "$1"; } > /work/report.md
+              exit 0
+            }
+
+            export HOME=/tmp
+            GITHUB_TOKEN=$(cat /github-token/token)
+            git config --global --add safe.directory /src
+            git clone --depth 1 --branch "{{inputs.parameters.branch}}" \
+              "https://x-access-token:${GITHUB_TOKEN}@github.com/{{inputs.parameters.repo}}.git" /src \
+              2>&1 | tail -2 || fail "ブランチを clone できませんでした"
+            cd /src
+
+            npm ci > /tmp/install.log 2>&1 || fail "npm ci に失敗: $(tail -c 800 /tmp/install.log)"
+            npm run build > /tmp/build.log 2>&1 || fail "ビルドに失敗: $(tail -c 800 /tmp/build.log)"
+
+            # DISCORD_WEBHOOK_URL と TASK_DISPATCH_URL は設定しない。
+            # どちらも未設定なら何もしない実装なので、検証実行が通知や
+            # タスク投入といった外向きの副作用を起こさない
+            export DATABASE_URL="postgres://horenso:horenso@localhost:5432/horenso"
+            export PORT=3100
+
+            for _ in $(seq 1 30); do
+              nc -z localhost 5432 2>/dev/null && break
+              sleep 2
+            done
+            nc -z localhost 5432 2>/dev/null || fail "サイドカーの PostgreSQL が起動しませんでした"
+
+            node dist/index.js > /tmp/app.log 2>&1 &
+            APP_PID=$!
+            for _ in $(seq 1 30); do
+              curl -sf -o /dev/null "http://localhost:3100/health" && break
+              sleep 2
+            done
+            curl -sf -o /dev/null "http://localhost:3100/health" \
+              || fail "アプリが起動しませんでした: $(tail -c 800 /tmp/app.log)"
+
+            # ---- 書き込みパスを通す ----
+            # 読み取りが 200 を返すことは、意図した状態変化が起きた証明にならない。
+            # 日本語の長文を往復させ、バイト単位で一致するかまで見る（#76 の型）。
+            python3 - <<'PY' > /work/probe.txt 2>&1
+            import json, urllib.request, sys
+
+            BASE = "http://localhost:3100"
+            LONG = "復旧手順を確認する。StatefulSet を scale してから PVC を確認する。" * 200
+
+            def req(method, path, payload=None):
+                data = json.dumps(payload).encode() if payload is not None else None
+                r = urllib.request.Request(BASE + path, data=data, method=method,
+                                           headers={"Content-Type": "application/json"})
+                with urllib.request.urlopen(r) as resp:
+                    return json.load(resp)
+
+            created = req("POST", "/tasks", {
+                "title": "検証タスク（自動）",
+                "description": LONG,
+                "category": "investigate",
+            })
+            tid = created["id"]
+
+            req("PATCH", f"/tasks/{tid}", {"status": "completed", "result": LONG})
+            got = req("GET", f"/tasks/{tid}")
+
+            problems = []
+            for field in ("description", "result"):
+                sent, back = LONG, got.get(field) or ""
+                if back != sent:
+                    problems.append(
+                        f"{field}: 送信 {len(sent)} 文字 / {len(sent.encode())} バイト → "
+                        f"保存 {len(back)} 文字 / {len(back.encode())} バイト"
+                        + ("（末尾に REPLACEMENT CHARACTER）" if "�" in back[-4:] else ""))
+            if got.get("status") != "completed":
+                problems.append(f"status が completed になっていない: {got.get('status')}")
+
+            print(json.dumps({"task": tid, "problems": problems}, ensure_ascii=False))
+            sys.exit(1 if problems else 0)
+            PY
+            PROBE_RC=$?
+            kill "$APP_PID" 2>/dev/null || true
+
+            if [ "$PROBE_RC" != "0" ]; then
+              fail "$(cat /work/probe.txt)"
+            fi
+
+            printf '%s' pass > /work/verdict.txt
+            { echo "## 検証通過"; echo;
+              echo "使い捨ての PostgreSQL に対してブランチのコードを起動し、書き込みパスを往復させた。";
+              echo;
+              echo '```'; cat /work/probe.txt; echo '```'; } > /work/report.md
+        env:
+          - {name: HOME, value: /tmp}
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities: {drop: [ALL]}
+        volumeMounts:
+          - {name: work, mountPath: /work}
+          - {name: github-token, mountPath: /github-token, readOnly: true}
+        resources:
+          requests: {cpu: 200m, memory: 512Mi}
+          limits: {memory: 2Gi}
+      outputs:
+        parameters:
+          - name: verdict
+            valueFrom: {path: /work/verdict.txt, default: indeterminate}
+          - name: report
+            valueFrom: {path: /work/report.md, default: "検証結果を取得できませんでした。"}

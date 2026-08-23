@@ -60,3 +60,33 @@ spec:
           selector:
             matchLabels:
               gateway-access: "true"
+    # reader.tgy.io reaches Cloudflare from outside, but CoreDNS has answered
+    # with this Gateway's address since March and nothing terminated it here.
+    # The certificate comes from the cluster-issuer annotation above, the same
+    # way nc-tgy-io-tls does.
+    - name: https-reader
+      hostname: "reader.tgy.io"
+      port: 443
+      protocol: HTTPS
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - group: ""
+            kind: Secret
+            name: reader-tgy-io-tls
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              gateway-access: "true"
+    - name: http-reader
+      hostname: "reader.tgy.io"
+      port: 80
+      protocol: HTTP
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              gateway-access: "true"

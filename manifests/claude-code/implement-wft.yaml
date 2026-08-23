@@ -354,6 +354,16 @@ spec:
             exit 0
           fi
 
+          # 見るのは **CI Gate 一本だけ**。
+          #
+          # 個々の check run を数えると「まだ始まっていない」と「対象外で走らない」が
+          # 区別できず、後者を pass 扱いする気持ちの悪い判定になる。Gate はリポジトリ
+          # 自身が定義した「CI が通った」の表明であり、`if: !cancelled()` で必ず報告する。
+          # 対象ジョブが無い変更なら、全ジョブ skipped の Gate が success で返る。
+          #
+          # Gate が現れないのは「CI がまだ」か「そのリポジトリに Gate が無い」のどちらか。
+          # 前者は待てばよく、後者は待っても来ないので判定不能として人間に渡す。
+          GATE="CI Gate"
           DONE=0
           for i in $(seq 1 40); do
             RAW=$(gh api "repos/${REPO}/commits/${SHA}/check-runs" 2>/tmp/gh.err)
@@ -363,30 +373,38 @@ spec:
               sleep 15
               continue
             fi
-            TOTAL=$(printf '%s' "$RAW" | jq '.check_runs | length')
-            PENDING=$(printf '%s' "$RAW" | jq '[.check_runs[] | select(.status != "completed")] | length')
-            echo "poll $i: rc=$RC total=$TOTAL pending=$PENDING"
-            if [ "$TOTAL" -gt 0 ] && [ "$PENDING" -eq 0 ]; then DONE=1; break; fi
+            G=$(printf '%s' "$RAW" | jq -r --arg g "$GATE" '[.check_runs[] | select(.name == $g)] | .[0] // empty | "\(.status) \(.conclusion // "")"')
+            echo "poll $i: rc=$RC gate=${G:-未出現} total=$(printf '%s' "$RAW" | jq '.check_runs | length')"
+            case "$G" in
+              "completed "*) DONE=1; break ;;
+            esac
             sleep 15
           done
 
           if [ "$DONE" != "1" ]; then
             printf '%s' indeterminate > /work/verdict.txt
-            { echo "## CI が時間内に完了しませんでした（判定不能）"; echo;
-              echo "最後に観測した状態:"; echo '```';
+            { echo "## CI Gate が完了しませんでした（判定不能）"; echo;
+              echo "\`${GATE}\` を 10 分待って完了を確認できませんでした。";
+              echo "リポジトリに Gate が無いか、CI が起動していない可能性があります。"; echo;
+              echo "最後に観測した check run:"; echo '```';
               printf '%s' "$RAW" | jq -r '.check_runs[]? | "\(.name): \(.status) \(.conclusion // "")"' 2>/dev/null | head -20;
               echo '```'; } > /work/report.md
+            { echo "### check"; echo; cat /work/report.md; } \
+              | gh pr comment "$PR" --repo "$REPO" --body-file - || true
             exit 0
           fi
 
-          # neutral / skipped は失敗にしない。GitHub 側の conclusion の語彙に合わせる
-          FAILED=$(printf '%s' "$RAW" | jq -r '[.check_runs[] | select(.conclusion == "failure" or .conclusion == "cancelled" or .conclusion == "timed_out" or .conclusion == "action_required")] | .[].name' | head -20)
-          if [ -n "$FAILED" ]; then
-            printf '%s' rework > /work/verdict.txt
-            { echo "## CI 失敗"; echo; printf '%s\n' "$FAILED" | sed 's/^/- /'; } > /work/report.md
-          else
+          GATE_CONCLUSION=$(printf '%s' "$RAW" | jq -r --arg g "$GATE" '[.check_runs[] | select(.name == $g)] | .[0].conclusion')
+
+          # Gate の結論をそのまま採る。個別ジョブは Gate が既に集約している
+          if [ "$GATE_CONCLUSION" = "success" ]; then
             printf '%s' pass > /work/verdict.txt
-            { echo "## CI 通過"; echo; printf '%s' "$RAW" | jq -r '.check_runs[] | "- \(.name): \(.conclusion // .status)"'; } > /work/report.md
+            { echo "## CI 通過（${GATE}: success）"; echo;
+              printf '%s' "$RAW" | jq -r '.check_runs[] | "- \(.name): \(.conclusion // .status)"'; } > /work/report.md
+          else
+            printf '%s' rework > /work/verdict.txt
+            { echo "## CI 失敗（${GATE}: ${GATE_CONCLUSION}）"; echo;
+              printf '%s' "$RAW" | jq -r '[.check_runs[] | select(.conclusion != "success" and .conclusion != "skipped" and .conclusion != "neutral")] | .[] | "- \(.name): \(.conclusion // .status)"'; } > /work/report.md
           fi
 
           # 記録を PR コメントに積む

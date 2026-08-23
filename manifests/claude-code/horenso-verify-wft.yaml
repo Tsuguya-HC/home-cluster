@@ -7,6 +7,29 @@
 # 検証内容は #76（result が 3800 バイトで切り詰められ UTF-8 が壊れる）の型に合わせてある。
 # 読み取り系が 200 を返すこと、workflow が Succeeded になることは、
 # あのバグを 7 週間見逃した理由そのものだった。
+# 検証実行専用の ServiceAccount。クラスタ上の何も読まない。
+# 必要なのは argoexec が自分の結果を報告する権限だけで、GitHub の資格情報は
+# volume 経由で渡るので RBAC は要らない。
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: agent-verify
+  namespace: claude-code
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: agent-verify-executor
+  namespace: claude-code
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: agent-executor
+subjects:
+  - kind: ServiceAccount
+    name: agent-verify
+    namespace: claude-code
+---
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
@@ -17,6 +40,9 @@ spec:
   # entrypoint と arguments が無いと `argo submit --from` が
   # `spec.entrypoint is required` で落ちる
   entrypoint: verify
+  # 単体起動では呼び出し元がいないので、ここで指定しないと `default` が使われ、
+  # argoexec が workflowtaskresults を作れず exit 64 になる
+  serviceAccountName: agent-verify
   # namespace の CNP はこのラベルで選択する。template 側の
   # `metadata.labels` だけでは、単体起動したとき（呼び出し元の
   # podMetadata が無いとき）にベースラインのカバレッジから静かに外れ、
@@ -117,11 +143,11 @@ spec:
 
             export HOME=/tmp
             GITHUB_TOKEN=$(cat /github-token/token)
-            git config --global --add safe.directory /src
+            git config --global --add safe.directory /work/src
             git clone --depth 1 --branch "{{inputs.parameters.branch}}" \
-              "https://x-access-token:${GITHUB_TOKEN}@github.com/{{inputs.parameters.repo}}.git" /src \
+              "https://x-access-token:${GITHUB_TOKEN}@github.com/{{inputs.parameters.repo}}.git" /work/src \
               2>&1 | tail -2 || fail "ブランチを clone できませんでした"
-            cd /src
+            cd /work/src
 
             npm ci > /tmp/install.log 2>&1 || fail "npm ci に失敗: $(tail -c 800 /tmp/install.log)"
             npm run build > /tmp/build.log 2>&1 || fail "ビルドに失敗: $(tail -c 800 /tmp/build.log)"

@@ -24,6 +24,12 @@ operator:
   #       | grep OPERATOR_CONCURRENT_SCAN_JOBS_LIMIT
   #   OPERATOR_CONCURRENT_SCAN_JOBS_LIMIT: "10"   ← 3 が届いていなかった
   scanJobsConcurrentLimit: 3
+  # 脆弱性 DB を持つ trivy server を常駐させ、scan job は client として問い合わせる。
+  # Standalone では job ごとに DB (+ Java DB) をダウンロードして捨てていたので、
+  # job が増えるほど wn-03 の NVMe 書き込みとレジストリ往復が比例して増えていた。
+  # trivy.mode / trivy.serverURL はこのフラグが上書きする（values に書いても無視）。
+  # trivy.clientServerSkipUpdate もこの分岐では出力されない (0.35.0 の templates/configmaps/trivy.yaml)
+  builtInTrivyServer: true
 
 resources:
   requests:
@@ -35,6 +41,30 @@ resources:
 
 trivy:
   ignoreUnfixed: true
+  # server の DB キャッシュは再起動時に落とせばよいので emptyDir。
+  # PVC にすると既定の qnap-nfs に bbolt (trivy-db) を置くことになる
+  storageClassEnabled: false
+  server:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 512Mi
+      limits:
+        cpu: null
+        memory: 1Gi
+    podSecurityContext:
+      runAsUser: 65534
+      runAsNonRoot: true
+      fsGroup: 65534
+      seccompProfile:
+        type: RuntimeDefault
+    securityContext:
+      privileged: false
+      readOnlyRootFilesystem: true
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+          - ALL
   configFile:
     cache:
       backend: memory

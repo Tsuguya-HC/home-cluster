@@ -1,0 +1,42 @@
+# Verifying フェーズの既定。何も検証しない。
+#
+# フェーズを「存在しないことがある」ものにすると、呼び出し側で空文字の分岐が要り、
+# `argo lint` も参照を解決できなくなる。フェーズは常に存在し、既定の handler が
+# 「検証していない」と明示的に述べる形にする。
+#
+# 黙って pass するのと、検証していないと言って pass するのは別物。
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: verify-skip
+  namespace: claude-code
+spec:
+  templates:
+    - name: verify
+      inputs:
+        parameters:
+          - name: repo
+          - name: branch
+      script:
+        image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:d29e837e2601fadc50e346398e86934c9cf49b309448b89b19b867122c9bf74b
+        command: [sh]
+        source: |
+          printf '%s' pass > /tmp/verdict.txt
+          { echo "## 検証なし";
+            echo;
+            echo "この flow には Verifying の handler が指名されていません。";
+            echo "**変更が実際に動くことは確かめられていません。**"; } > /tmp/report.md
+        securityContext:
+          runAsUser: 65532
+          runAsNonRoot: true
+          allowPrivilegeEscalation: false
+          capabilities: {drop: [ALL]}
+        resources:
+          requests: {cpu: 10m, memory: 32Mi}
+          limits: {memory: 64Mi}
+      outputs:
+        parameters:
+          - name: verdict
+            valueFrom: {path: /tmp/verdict.txt, default: indeterminate}
+          - name: report
+            valueFrom: {path: /tmp/report.md, default: "検証結果を取得できませんでした。"}

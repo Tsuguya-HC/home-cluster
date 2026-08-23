@@ -49,6 +49,8 @@ spec:
         secretName: github-app-private-key
     - name: verdict
       emptyDir: {}
+    - name: helpers
+      emptyDir: {}
     - name: prompt
       projected:
         sources:
@@ -183,9 +185,9 @@ spec:
               git config user.name "tgy-cluster-bot[bot]"
               git config user.email "tgy-cluster-bot[bot]@users.noreply.github.com"
               # 署名コミットのスクリプトは argo-tools イメージにあり、main の
-              # claude-code イメージには無い。workspace 経由で渡す
-              mkdir -p /workspace/.bin
-              cp /usr/local/bin/github-signed-commit.sh /workspace/.bin/
+              # claude-code イメージには無い。専用ボリューム経由で渡す。
+              # 作業ツリーの中に置くと git add -A が拾って PR に混入する
+              cp /usr/local/bin/github-signed-commit.sh /helpers/
           env:
             - {name: HOME, value: /tmp}
           securityContext:
@@ -196,6 +198,7 @@ spec:
           volumeMounts:
             - {name: workspace, mountPath: /workspace}
             - {name: github-token, mountPath: /github-token, readOnly: true}
+            - {name: helpers, mountPath: /helpers}
           resources:
             requests: {cpu: 10m, memory: 64Mi}
             limits: {memory: 256Mi}
@@ -255,7 +258,7 @@ spec:
               echo "ブランチ ${BRANCH} を作成しました"
             fi
 
-            /workspace/.bin/github-signed-commit.sh \
+            /helpers/github-signed-commit.sh \
               -r "$REPO" \
               -b "$BRANCH" \
               -m "{{workflow.parameters.pr-title}}"
@@ -287,6 +290,7 @@ spec:
           - {name: workspace, mountPath: /workspace}
           - {name: claude-home, mountPath: /claude-home}
           - {name: github-token, mountPath: /github-token, readOnly: true}
+          - {name: helpers, mountPath: /helpers, readOnly: true}
           - {name: prompt, mountPath: /prompt, readOnly: true}
         resources:
           requests: {cpu: 200m, memory: 1Gi}

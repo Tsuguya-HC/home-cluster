@@ -334,8 +334,8 @@ spec:
 
           PR=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number -q '.[0].number' 2>/dev/null || true)
           if [ -z "$PR" ]; then
-            printf '%s' escalate > /verdict/verdict.txt
-            echo "ドラフト PR が見つかりません。実装フェーズが変更を出せていない可能性があります。" > /verdict/report.md
+            printf '%s' escalate > /work/verdict.txt
+            echo "ドラフト PR が見つかりません。実装フェーズが変更を出せていない可能性があります。" > /work/report.md
             exit 0
           fi
 
@@ -349,8 +349,8 @@ spec:
           # 毎回ログを出す。出さないと、時間切れになった理由が実行後に分からない。
           SHA=$(gh api "repos/${REPO}/git/ref/heads/${BRANCH}" -q '.object.sha' 2>/dev/null)
           if [ -z "$SHA" ]; then
-            printf '%s' escalate > /verdict/verdict.txt
-            echo "ブランチ ${BRANCH} の head を取得できませんでした。" > /verdict/report.md
+            printf '%s' escalate > /work/verdict.txt
+            echo "ブランチ ${BRANCH} の head を取得できませんでした。" > /work/report.md
             exit 0
           fi
 
@@ -371,26 +371,26 @@ spec:
           done
 
           if [ "$DONE" != "1" ]; then
-            printf '%s' indeterminate > /verdict/verdict.txt
+            printf '%s' indeterminate > /work/verdict.txt
             { echo "## CI が時間内に完了しませんでした（判定不能）"; echo;
               echo "最後に観測した状態:"; echo '```';
               printf '%s' "$RAW" | jq -r '.check_runs[]? | "\(.name): \(.status) \(.conclusion // "")"' 2>/dev/null | head -20;
-              echo '```'; } > /verdict/report.md
+              echo '```'; } > /work/report.md
             exit 0
           fi
 
           # neutral / skipped は失敗にしない。GitHub 側の conclusion の語彙に合わせる
           FAILED=$(printf '%s' "$RAW" | jq -r '[.check_runs[] | select(.conclusion == "failure" or .conclusion == "cancelled" or .conclusion == "timed_out" or .conclusion == "action_required")] | .[].name' | head -20)
           if [ -n "$FAILED" ]; then
-            printf '%s' rework > /verdict/verdict.txt
-            { echo "## CI 失敗"; echo; printf '%s\n' "$FAILED" | sed 's/^/- /'; } > /verdict/report.md
+            printf '%s' rework > /work/verdict.txt
+            { echo "## CI 失敗"; echo; printf '%s\n' "$FAILED" | sed 's/^/- /'; } > /work/report.md
           else
-            printf '%s' pass > /verdict/verdict.txt
-            { echo "## CI 通過"; echo; printf '%s' "$RAW" | jq -r '.check_runs[] | "- \(.name): \(.conclusion // .status)"'; } > /verdict/report.md
+            printf '%s' pass > /work/verdict.txt
+            { echo "## CI 通過"; echo; printf '%s' "$RAW" | jq -r '.check_runs[] | "- \(.name): \(.conclusion // .status)"'; } > /work/report.md
           fi
 
           # 記録を PR コメントに積む
-          { echo "### check"; echo; cat /verdict/report.md; } \
+          { echo "### check"; echo; cat /work/report.md; } \
             | gh pr comment "$PR" --repo "$REPO" --body-file - || true
         securityContext:
           runAsUser: 65532
@@ -399,16 +399,16 @@ spec:
           capabilities: {drop: [ALL]}
         volumeMounts:
           - {name: github-token, mountPath: /github-token, readOnly: true}
-          - {name: verdict, mountPath: /verdict}
+          - {name: verdict, mountPath: /work}
         resources:
           requests: {cpu: 10m, memory: 64Mi}
           limits: {memory: 256Mi}
       outputs:
         parameters:
           - name: verdict
-            valueFrom: {path: /verdict/verdict.txt, default: indeterminate}
+            valueFrom: {path: /work/verdict.txt, default: indeterminate}
           - name: report
-            valueFrom: {path: /verdict/report.md, default: "検証結果を取得できませんでした。"}
+            valueFrom: {path: /work/report.md, default: "検証結果を取得できませんでした。"}
 
     # ---- Review: エージェントが diff を読む。判定はディレクトリで受ける ----
     - name: review
@@ -450,10 +450,10 @@ spec:
           args:
             - |
               set -eu
-              mkdir -p /verdict/out/pass /verdict/out/rework /verdict/out/escalate
-              chmod 0775 /verdict/out/pass /verdict/out/rework /verdict/out/escalate
-              chmod 0555 /verdict/out
-              ls -la /verdict/out
+              mkdir -p /work/out/pass /work/out/rework /work/out/escalate
+              chmod 0775 /work/out/pass /work/out/rework /work/out/escalate
+              chmod 0555 /work/out
+              ls -la /work/out
           securityContext:
             runAsUser: 65532
             runAsGroup: 65532
@@ -461,7 +461,7 @@ spec:
             allowPrivilegeEscalation: false
             capabilities: {drop: [ALL]}
           volumeMounts:
-            - {name: verdict, mountPath: /verdict}
+            - {name: verdict, mountPath: /work}
           resources:
             requests: {cpu: 10m, memory: 32Mi}
             limits: {memory: 64Mi}
@@ -498,7 +498,7 @@ spec:
             # ---- 判定の回収。ここから先はエージェントの発話を一切読まない ----
             FOUND=""; COUNT=0
             for v in pass rework escalate; do
-              if [ -n "$(ls -A "/verdict/out/$v" 2>/dev/null)" ]; then
+              if [ -n "$(ls -A "/work/out/$v" 2>/dev/null)" ]; then
                 FOUND="$v"; COUNT=$((COUNT + 1))
               fi
             done
@@ -506,13 +506,13 @@ spec:
               VERDICT="$FOUND"
               jq -Rsr --argjson max 3000 \
                 'if length > $max then .[0:$max] + "\n\n_（以降を省略）_" else . end' \
-                < "/verdict/out/$FOUND/report.md" > /verdict/report.md 2>/dev/null || true
+                < "/work/out/$FOUND/report.md" > /work/report.md 2>/dev/null || true
             else
               VERDICT=indeterminate
-              { echo "非空のディレクトリが $COUNT 個ありました（ちょうど 1 個であるべき）。"; ls -laR /verdict/out; } > /verdict/report.md 2>&1
+              { echo "非空のディレクトリが $COUNT 個ありました（ちょうど 1 個であるべき）。"; ls -laR /work/out; } > /work/report.md 2>&1
             fi
-            [ -s /verdict/report.md ] || echo "レポートが空でした。" > /verdict/report.md
-            printf '%s' "$VERDICT" > /verdict/verdict.txt
+            [ -s /work/report.md ] || echo "レポートが空でした。" > /work/report.md
+            printf '%s' "$VERDICT" > /work/verdict.txt
             echo "verdict: $VERDICT"
         env:
           - {name: HOME, value: /tmp}
@@ -524,7 +524,7 @@ spec:
           capabilities: {drop: [ALL]}
         volumeMounts:
           - {name: github-token, mountPath: /github-token, readOnly: true}
-          - {name: verdict, mountPath: /verdict}
+          - {name: verdict, mountPath: /work}
           - {name: prompt, mountPath: /prompt, readOnly: true}
         resources:
           requests: {cpu: 200m, memory: 512Mi}
@@ -532,9 +532,9 @@ spec:
       outputs:
         parameters:
           - name: verdict
-            valueFrom: {path: /verdict/verdict.txt, default: indeterminate}
+            valueFrom: {path: /work/verdict.txt, default: indeterminate}
           - name: report
-            valueFrom: {path: /verdict/report.md, default: "レビュー結果を取得できませんでした。"}
+            valueFrom: {path: /work/report.md, default: "レビュー結果を取得できませんでした。"}
 
     # ---- 合成: 最も不利な verdict が勝つ。設定可能にしない ----
     # review は check が pass のときだけ走るので、未実行なら空文字で渡る。

@@ -36,3 +36,26 @@ spec:
           annotations:
             summary: "OOMKilled で再起動 ({{ $labels.namespace }}/{{ $labels.pod }} {{ $labels.container }})"
             description: "{{ $labels.namespace }}/{{ $labels.pod }} の {{ $labels.container }} が memory limit に当たって落ちた。即座に復帰するので気づきにくいが、その瞬間の接続は切れている。limit を見直すか、使用量の跳ね方を調べる。"
+
+        # 上の ContainerOOMKilled は「再起動が起きた」ことを条件にしているため、
+        # restartPolicy: Never / OnFailure の Pod（Job・CronJob・使い捨て Pod）が
+        # OOMKilled で止まったまま復帰しない場合は増えない restarts_total が
+        # 条件を満たさず素通りする。
+        #
+        # 2026-08-24 15:15Z、ollama namespace の Pod model-disagreement の
+        # ollama コンテナが OOMKilled (exit 137) のまま 7 時間放置されたが、
+        # 上のルールでは検知できなかった。
+        #
+        # kube_pod_container_status_terminated_reason は「現在コンテナが
+        # Terminated 状態で、その理由が reason」を表す（last_terminated_reason
+        # と違い再起動後 Running に戻ると消える）。これが OOMKilled のまま
+        # 15分続けば、再起動して回復しなかったとみなして発火する。
+        - alert: ContainerOOMKilledNotRecovering
+          expr: |
+            kube_pod_container_status_terminated_reason{reason="OOMKilled"} == 1
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "OOMKilled のまま復帰しない ({{ $labels.namespace }}/{{ $labels.pod }} {{ $labels.container }})"
+            description: "{{ $labels.namespace }}/{{ $labels.pod }} の {{ $labels.container }} が OOMKilled で終了したまま 15 分以上復帰していない。restartPolicy: Never/OnFailure の Job・CronJob・使い捨て Pod は自動で復帰しないため、手動で調査・再実行が必要。"

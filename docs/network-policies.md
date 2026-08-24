@@ -76,6 +76,7 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 | Workflow pods (claude-code) | Horenso (horenso) | 3000 | Task dispatch |
 | notifications-controller (argocd) | Horenso (horenso) | 3000 | Alertmanager notifications |
 | task-fail-sync pods (argo) | Horenso (horenso) | 3000 | Task failure notification |
+| horenso-maintenance (argo) | Horenso (horenso) | 3000 | Daily maintenance report |
 | notifications-controller (argocd) | argocd-deployed eventsource (argo) | 12003 | ArgoCD deployment event relay |
 | Horenso (horenso) | task-dispatch-eventsource (argo) | 12002 | Task dispatch webhook |
 | Workflow pods (claude-code) | task-dispatch-eventsource (argo) | 12002 | Adjudication webhook |
@@ -111,7 +112,7 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 | **redis-secret-init** (Job) | (deny world) | kube-apiserver |
 | **cloudflared** | (deny world) | *.v2.argotunnel.com + cftunnel.com + h2.cftunnel.com + quic.cftunnel.com:443/7844 (7844 TCP+UDP), server:8080, eventsource (argo):12000, kanidm (kanidm):8443, nextcloud (nextcloud):80, harbor-nginx (harbor):8443, oauth2-proxy-rss (oauth2-proxy):4180 |
 
-## argo (22 policies)
+## argo (23 policies)
 
 | Component | Ingress | Egress |
 |---|---|---|
@@ -124,6 +125,7 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 | **task-status-sync-eventsource** | (none) | kube-apiserver, eventbus:4222 |
 | **task-status-sync-sensor** | (none) | kube-apiserver, eventbus:4222 |
 | **task-fail-sync** (task-fail-sync=true) | (none) | horenso (horenso):3000 |
+| **horenso-maintenance** (horenso-maintenance=true, CronWorkflow 4:30 JST) | (none) | horenso (horenso):3000 |
 | **sensor** (tofu-cloudflare, tofu-unifi, tofu-harbor, upgrade-k8s, pxe-sync, talos-build, images-build, single-repo-build, alert-investigate, task-dispatch, renovate-webhook, aqua-checksum) | (deny world) | kube-apiserver, eventbus:4222, workflows-server:2746 |
 | **talos-extension-bump-sensor** | (none) | kube-apiserver, eventbus:4222 |
 | **events-controller** | host → 8081 | kube-apiserver, eventbus:8222 |
@@ -308,7 +310,7 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 
 | Component | Ingress | Egress |
 |---|---|---|
-| **horenso** | ingress/host/remote-node → 3000; argocd-notifications-controller (argocd) → 3000; claude-code (claude-code) → 3000; task-fail-sync (argo) → 3000 | shared-pg (database):5432, discord.com + *.discord.com:443, task-dispatch-eventsource (argo):12002 |
+| **horenso** | ingress/host/remote-node → 3000; argocd-notifications-controller (argocd) → 3000; claude-code (claude-code) → 3000; task-fail-sync (argo) → 3000; horenso-maintenance (argo) → 3000 | shared-pg (database):5432, discord.com + *.discord.com:443, task-dispatch-eventsource (argo):12002 |
 
 ## spin-operator (1 policy)
 

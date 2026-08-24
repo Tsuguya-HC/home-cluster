@@ -12,7 +12,7 @@ metadata:
 # trigger could not read the repository and branch out of whichever event
 # actually arrived.
 #
-# All seven repositories that have an aqua.yaml.
+# All eight repositories that have an aqua.yaml.
 spec:
   template:
     serviceAccountName: workflow-executor
@@ -86,6 +86,11 @@ spec:
     - name: home-trading
       eventSourceName: github-webhook
       eventName: home-trading
+      filters:
+        script: *aquaFilter
+    - name: taskflow
+      eventSourceName: github-webhook
+      eventName: taskflow
       filters:
         script: *aquaFilter
   triggers:
@@ -281,6 +286,36 @@ spec:
               dest: spec.arguments.parameters.0.value
             - src:
                 dependencyName: home-trading
+                dataKey: body.pull_request.head.ref
+              dest: spec.arguments.parameters.1.value
+          source:
+            resource:
+              apiVersion: argoproj.io/v1alpha1
+              kind: Workflow
+              metadata:
+                generateName: aqua-checksum-
+                namespace: argo
+              spec:
+                workflowTemplateRef:
+                  name: aqua-checksum
+                arguments:
+                  parameters:
+                    - name: repository
+                      value: overwritten-by-parameters
+                    - name: branch
+                      value: overwritten-by-parameters
+    - template:
+        name: aqua-checksum-taskflow
+        conditions: "taskflow"
+        argoWorkflow:
+          operation: submit
+          parameters:
+            - src:
+                dependencyName: taskflow
+                dataKey: body.repository.full_name
+              dest: spec.arguments.parameters.0.value
+            - src:
+                dependencyName: taskflow
                 dataKey: body.pull_request.head.ref
               dest: spec.arguments.parameters.1.value
           source:

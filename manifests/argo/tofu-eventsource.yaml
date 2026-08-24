@@ -163,6 +163,20 @@ spec:
         key: credential
       active: false
       contentType: json
+    taskflow:
+      owner: Tsuguya
+      repository: taskflow
+      webhook:
+        endpoint: /taskflow
+        port: "12000"
+        method: POST
+      events:
+        - pull_request
+      webhookSecret:
+        name: taskflow-github-webhook
+        key: credential
+      active: false
+      contentType: json
     renovate-home-cluster:
       owner: Tsuguya
       repository: home-cluster

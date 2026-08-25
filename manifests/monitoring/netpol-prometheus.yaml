@@ -20,6 +20,14 @@ spec:
         - ports:
             - port: "9090"
               protocol: TCP
+    # kube-apiserver service proxy (Freelens/Lens cluster metrics).
+    # Reachability is gated by RBAC services/proxy in monitoring.
+    - fromEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "9090"
+              protocol: TCP
   egress:
     - toEntities:
         - kube-apiserver

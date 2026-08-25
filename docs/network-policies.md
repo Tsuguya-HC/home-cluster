@@ -62,6 +62,7 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 | scan-jobs (trivy-system) | Harbor nginx (harbor) | 8443 | Image scan from Harbor registry |
 | image-digest-audit pods (argo) | Harbor nginx (harbor) | 8443 | Image digest audit |
 | Renovate (argo) | Harbor nginx (harbor) | 8443 | Self-hosted Renovate digest lookup (tools/*) |
+| tofu-harbor (argo) | Harbor nginx (harbor) | 8443 | registry.infra.tgy.io resolves to Harbor ClusterIP |
 | SeaweedFS filer (seaweedfs) | shared-pg (database) | 5432 | Filer metadata (postgres2) |
 | Harbor core (harbor) | shared-pg (database) | 5432 | Harbor database |
 | Harbor jobservice (harbor) | shared-pg (database) | 5432 | Job metadata |
@@ -84,6 +85,7 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 | memory (memory) | qdrant (qdrant) | 6333 | Vector database |
 | memory (memory) | ollama (ollama) | 11434 | LLM inference |
 | Collector pods (trading) | SeaweedFS filer (seaweedfs) | 8333 | Market data ingestion |
+| aqua-checksum (argo) | SeaweedFS filer (seaweedfs) | 8333 | Workflow step log/artifact upload |
 | Collector pods (trading) | shared-pg (database) | 5432 | Market data ingestion |
 
 ## Excluded Pods (hostNetwork: true)

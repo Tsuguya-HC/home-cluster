@@ -1,0 +1,37 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# taskflow のコントローラ本体は Tsuguya/taskflow リポの config/default（CRD・RBAC・
+# Deployment）をそのまま remote base として取り込む。home-cluster 側が持つのは
+# イメージの差し替えとクラスタ固有の patch だけ（設計 §14: 「どう動くか」は taskflow、
+# 「何ができるか」は home-cluster）。ref は commit SHA で固定し Renovate が追う。
+resources:
+  - https://github.com/Tsuguya/taskflow//config/default?ref=f96dbf9be674dcfaf803900541f4bbb0c3eea8bf
+
+images:
+  - name: controller
+    newName: registry.infra.tgy.io/tools/taskflow
+    newTag: latest
+    digest: sha256:9a2db9aa91dbad69ae4090be6bd7e6126d8de73690c38c1bf7a7caac929168db
+
+patches:
+  # 全 namespace restricted 運用に合わせる（config/default の Namespace にはラベルが無い）
+  - target:
+      kind: Namespace
+      name: taskflow-system
+    patch: |-
+      - op: add
+        path: /metadata/labels
+        value:
+          pod-security.kubernetes.io/enforce: restricted
+  # CPU limit は付けない（CFS throttling 回避、このリポの規約）。memory は scaffold の
+  # 128Mi のままで、CRD 3 つを watch するだけのコントローラには足りる。
+  - target:
+      kind: Deployment
+      name: taskflow-controller-manager
+    patch: |-
+      - op: remove
+        path: /spec/template/spec/containers/0/resources/limits/cpu
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/cpu
+        value: 50m

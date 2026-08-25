@@ -76,7 +76,7 @@ spec:
                 topologyKey: kubernetes.io/hostname
       metadata:
         annotations:
-          io.katacontainers.config.hypervisor.virtio_fs_extra_args: '["--thread-pool-size=1", "--announce-submounts", "--xattr"]'
+          io.katacontainers.config.hypervisor.virtio_fs_extra_args: '["--thread-pool-size=16", "--announce-submounts", "--xattr", "--writeback"]'
       securityContext:
         runAsUser: 0
         runAsNonRoot: false

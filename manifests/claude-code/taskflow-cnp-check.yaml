@@ -1,0 +1,227 @@
+# taskflow に載せる最初の Task: CNP カバレッジ点検（Step 0 の cnp-check-cwf.yaml を
+# TaskFlow / TaskHandler に移したもの）。
+#
+# 初回は 調査 の 1 フェーズだけ。設計 §16 の 調査 → 報告 の 2 フェーズは、前フェーズの
+# report を次フェーズへ渡す store 封印（results/<runID>/）がまだ無いので載せられない。
+# 人間への報告は 調査 Pod 内の notify サイドカーが担う（設計 §7: publish は利用側の
+# サイドカーの仕事。framework は判定ディレクトリしか見ない）。
+#
+# 語彙は next の宣言 {完了: ok} から来る。エージェントが書けるのは /workspace/out/ok/ だけで、
+# 判定できないときは何も書かない → controller が Escalated にする（設計 §6 の逃げ道）。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: taskflow-verdict-protocol
+  namespace: claude-code
+data:
+  verdict-protocol.md: |
+    # 判定の出し方（taskflow 共通）
+
+    結論は文章ではなく **置き場所** で表す。回収側はディレクトリしか見ず、
+    あなたの発話は一切読まない。
+
+    | 結論 | すること |
+    |---|---|
+    | 点検を完了し、報告できる | `/workspace/out/ok/report.md` を書く |
+    | 判定できない・材料が足りない | **何も書かない**（`/workspace/out/` の下に一切ファイルを置かない） |
+
+    ## 規則
+
+    - `/workspace/out/ok/` 以外に書き込み先は無い。新しいディレクトリは作れないし、
+      作れなくても異常ではないので回避しようとしないこと
+    - ファイル名は `report.md` 固定。他のファイルを置いてもよいが、回収側は report.md だけを人間に見せる
+    - 「判定できない」は失敗ではない。無理に報告を書くより、何も書かない方が正しい。
+      その場合は人間に差し戻される
+    - 作業用の一時ファイルは `/tmp` に置く。`/workspace/out/ok/` に置いたものは全部「報告」として扱われる
+
+    ## 報告に必ず含めるもの
+
+    - **主張と、それを確かめた手順を対にして書く。** 確かめていないものは
+      「未確認の推測」と明記する。確かめられるのに確かめていない主張は書かない
+    - 対処案は、現状より権限や到達範囲を広げないものに限る
+---
+apiVersion: flow.tgy.io/v1alpha1
+kind: TaskHandler
+metadata:
+  name: cnp-planner
+  namespace: claude-code
+spec:
+  phase: 調査
+  runner:
+    type: Job
+  timeout: 25m
+  maxInfraRetries: 1
+  jobTemplate:
+    template:
+      metadata:
+        labels:
+          # 既存の CNP（manifests/claude-code/netpol.yaml）がこのラベルで選ぶ:
+          # apiserver / api.anthropic.com / Loki / Prometheus / discord.com
+          claude-code: "true"
+      spec:
+        restartPolicy: Never
+        runtimeClassName: kata
+        serviceAccountName: agent-cnp-reader
+        # prepare (65532) が out/ を作って 0555 に閉じ、エージェント (65533) は
+        # 同じ group で宣言ディレクトリにだけ書ける。uid が違うので out/ を開け直せない。
+        securityContext:
+          runAsUser: 65533
+          runAsGroup: 65532
+          fsGroup: 65532
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        volumes:
+          - name: workspace
+            emptyDir: {}
+          - name: tmp
+            emptyDir: {}
+          - name: prompt
+            projected:
+              sources:
+                - configMap:
+                    name: taskflow-verdict-protocol
+                - configMap:
+                    name: cnp-check-prompt
+        initContainers:
+          - name: prepare
+            image: registry.infra.tgy.io/tools/agent-sidecar:latest@sha256:8a06a951ea038188a7a10e4c770ef174cbdec4d21823dae7d136cb4d881a6fb4
+            args: ["prepare", "--out", "/workspace/out"]
+            securityContext:
+              runAsUser: 65532
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop: [ALL]
+            volumeMounts:
+              - name: workspace
+                mountPath: /workspace
+            resources:
+              requests:
+                cpu: 10m
+                memory: 16Mi
+              limits:
+                memory: 64Mi
+          # ネイティブサイドカー。main 終了後の SIGTERM で out/ を見て、非空の宣言
+          # ディレクトリがちょうど 1 つならその名前を termination log に書く。
+          - name: publish
+            image: registry.infra.tgy.io/tools/agent-sidecar:latest@sha256:8a06a951ea038188a7a10e4c770ef174cbdec4d21823dae7d136cb4d881a6fb4
+            args: ["publish", "--out", "/workspace/out"]
+            restartPolicy: Always
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop: [ALL]
+            volumeMounts:
+              - name: workspace
+                mountPath: /workspace
+            resources:
+              requests:
+                cpu: 10m
+                memory: 16Mi
+              limits:
+                memory: 64Mi
+          # 人間への報告。framework の関心事ではない（設計 §7 / §9）。SIGTERM で
+          # report.md があれば Discord に投げ、無ければ「判定なし」を投げる。
+          - name: notify
+            image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:5309221e4c5721f9b7c091195db1a592320b88390734bb745f8eb69041ddf3ed
+            restartPolicy: Always
+            command: [sh, -c]
+            args:
+              - |
+                notify() {
+                  REPORT_FILE=/workspace/out/ok/report.md
+                  if [ -s "$REPORT_FILE" ]; then
+                    TITLE="CNP check (taskflow): ok"; COLOR=65280
+                    REPORT=$(jq -Rsr --argjson max 3900 \
+                      'if length > $max then .[0:$max] + "\n\n_(以降を省略)_" else . end' < "$REPORT_FILE")
+                  else
+                    TITLE="CNP check (taskflow): no verdict"; COLOR=16711680
+                    REPORT="エージェントは report を書かなかった（判定不能 → Escalated）。kubectl -n claude-code get task で確認。"
+                  fi
+                  PAYLOAD=$(jq -n --arg title "$TITLE" --argjson color "$COLOR" --arg report "$REPORT" \
+                    --arg ts "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" \
+                    '{embeds: [{title: $title, color: $color, description: $report, timestamp: $ts}]}')
+                  wget -qO /dev/null --header="Content-Type: application/json" \
+                    --post-data="$PAYLOAD" "$DISCORD_WEBHOOK_URL" || echo "discord post failed"
+                }
+                trap 'notify; exit 0' TERM INT
+                while :; do sleep 1; done
+            env:
+              - name: DISCORD_WEBHOOK_URL
+                valueFrom:
+                  secretKeyRef:
+                    name: discord-webhook-argo
+                    key: url
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop: [ALL]
+            volumeMounts:
+              - name: workspace
+                mountPath: /workspace
+                readOnly: true
+            resources:
+              requests:
+                cpu: 10m
+                memory: 32Mi
+              limits:
+                memory: 128Mi
+        containers:
+          - name: agent
+            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:3e95cb84f1deb993199f220d9b4083ab7202d8c6e1278fbe4ae802dfc343df06
+            workingDir: /workspace
+            command: [sh, -c]
+            args:
+              - |
+                PROMPT="$(cat /prompt/cnp-check.md; echo; cat /prompt/verdict-protocol.md)"
+                claude -p \
+                  --verbose \
+                  --output-format stream-json \
+                  --dangerously-skip-permissions \
+                  --allowedTools "Bash,Read,Write,Grep,Glob" \
+                  --model sonnet \
+                  --max-turns 40 \
+                  "$PROMPT" || true
+                # 判定はディレクトリで出る。ここから先は何もしない（回収は publish サイドカー）。
+            env:
+              - name: HOME
+                value: /tmp
+              - name: CLAUDE_CODE_OAUTH_TOKEN
+                valueFrom:
+                  secretKeyRef:
+                    name: claude-code-token
+                    key: credential
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop: [ALL]
+            volumeMounts:
+              - name: workspace
+                mountPath: /workspace
+              - name: tmp
+                mountPath: /tmp
+              - name: prompt
+                mountPath: /prompt
+                readOnly: true
+            resources:
+              requests:
+                cpu: 500m
+                memory: 512Mi
+              limits:
+                # Kata では memory limit が VM のサイズ
+                memory: 4Gi
+---
+apiVersion: flow.tgy.io/v1alpha1
+kind: TaskFlow
+metadata:
+  name: cnp-check
+  namespace: claude-code
+spec:
+  profile: investigate
+  start: 調査
+  bindings:
+    調査:
+      handler: cnp-planner
+      next:
+        完了: ok
+  reworkBudget: 0

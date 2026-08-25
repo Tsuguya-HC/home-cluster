@@ -1,0 +1,202 @@
+{
+ "description": "Task is one execution of a flow.",
+ "properties": {
+  "apiVersion": {
+   "description": "APIVersion defines the versioned schema of this representation of an object.\nServers should convert recognized schemas to the latest internal value, and\nmay reject unrecognized values.\nMore info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+   "type": "string"
+  },
+  "kind": {
+   "description": "Kind is a string value representing the REST resource this object represents.\nServers may infer this from the endpoint the client submits requests to.\nCannot be updated.\nIn CamelCase.\nMore info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+   "type": "string"
+  },
+  "metadata": {
+   "type": "object"
+  },
+  "spec": {
+   "description": "TaskSpec is the whole instance. Four fields, three of them optional: whoever\ncreates a task — a cron, an event, an agent — does not have to know the\ngraph, and the graph can change without them changing.\n\nThe spec is immutable after creation. Editing what a running task was asked\nto do would leave its history describing a question nobody asked.",
+   "properties": {
+    "dedupKey": {
+     "description": "DedupKey suppresses creation while another task with the same key is\nstill running. Useful when the producer is an event source that may\ndeliver twice.",
+     "type": "string"
+    },
+    "flow": {
+     "description": "Flow is resolved in this namespace, always. There is no field naming\nanother namespace, so \"which flows may I start\" collapses into \"which\nnamespaces may I create a Task in\" — which plain RBAC can express, and\nfield values cannot.",
+     "minLength": 1,
+     "type": "string"
+    },
+    "input": {
+     "description": "Input is written to in/input.json and exposed to prompts as template\nvariables. Its shape is the flow author's business; the controller only\ncarries it."
+    }
+   },
+   "required": [
+    "flow"
+   ],
+   "type": "object",
+   "additionalProperties": false
+  },
+  "status": {
+   "description": "TaskStatus holds control state only. Logs, reports and results are\nreferences — etcd has been lost twice here, and a design that puts payloads\nin it turns that from an outage into data loss.",
+   "properties": {
+    "artifacts": {
+     "properties": {
+      "store": {
+       "type": "string"
+      }
+     },
+     "type": "object",
+     "additionalProperties": false
+    },
+    "conditions": {
+     "items": {
+      "description": "Condition contains details for one aspect of the current state of this API Resource.",
+      "properties": {
+       "lastTransitionTime": {
+        "description": "lastTransitionTime is the last time the condition transitioned from one status to another.\nThis should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.",
+        "format": "date-time",
+        "type": "string"
+       },
+       "message": {
+        "description": "message is a human readable message indicating details about the transition.\nThis may be an empty string.",
+        "maxLength": 32768,
+        "type": "string"
+       },
+       "observedGeneration": {
+        "description": "observedGeneration represents the .metadata.generation that the condition was set based upon.\nFor instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date\nwith respect to the current state of the instance.",
+        "format": "int64",
+        "minimum": 0,
+        "type": "integer"
+       },
+       "reason": {
+        "description": "reason contains a programmatic identifier indicating the reason for the condition's last transition.\nProducers of specific condition types may define expected values and meanings for this field,\nand whether the values are considered a guaranteed API.\nThe value should be a CamelCase string.\nThis field may not be empty.",
+        "maxLength": 1024,
+        "minLength": 1,
+        "pattern": "^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$",
+        "type": "string"
+       },
+       "status": {
+        "description": "status of the condition, one of True, False, Unknown.",
+        "enum": [
+         "True",
+         "False",
+         "Unknown"
+        ],
+        "type": "string"
+       },
+       "type": {
+        "description": "type of condition in CamelCase or in foo.example.com/CamelCase.",
+        "maxLength": 316,
+        "pattern": "^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$",
+        "type": "string"
+       }
+      },
+      "required": [
+       "lastTransitionTime",
+       "message",
+       "reason",
+       "status",
+       "type"
+      ],
+      "type": "object",
+      "additionalProperties": false
+     },
+     "type": "array"
+    },
+    "currentRun": {
+     "description": "RunRef identifies one execution of one phase. runID separates the second\nvisit to a phase from the first, so a rework does not read what the previous\nattempt left behind.",
+     "properties": {
+      "deadline": {
+       "format": "date-time",
+       "type": "string"
+      },
+      "infraRetries": {
+       "description": "InfraRetries counts attempts lost to something other than the handler's\njudgement. It is not in the design's status example, but maxInfraRetries\ncannot be enforced without somewhere to count.",
+       "format": "int32",
+       "type": "integer"
+      },
+      "jobName": {
+       "description": "JobName is derived deterministically from the task, phase and runID, so\na controller restart re-creates the same object instead of a second one.",
+       "type": "string"
+      },
+      "phase": {
+       "description": "Phase is a status name. It is a free string chosen by whoever writes the\nflow: this framework does not know what the work is, so it has no business\nnaming its stages. \"調査\" and \"Planning\" are equally valid.\n\nTwo names are reserved, because they are the framework's own answers rather\nthan anything in the author's domain — see ReservedPhases.",
+       "type": "string"
+      },
+      "runID": {
+       "format": "int32",
+       "type": "integer"
+      }
+     },
+     "required": [
+      "phase",
+      "runID"
+     ],
+     "type": "object",
+     "additionalProperties": false
+    },
+    "history": {
+     "items": {
+      "description": "HistoryEntry records a completed run. This is the audit trail; the artifacts\nit points at live in object storage, never in etcd.",
+      "properties": {
+       "directory": {
+        "description": "Directory the handler wrote into, empty when the run produced no single\nanswer.",
+        "type": "string"
+       },
+       "finishedAt": {
+        "format": "date-time",
+        "type": "string"
+       },
+       "outcome": {
+        "description": "Outcome is why the task moved: the framework's account of the run,\nrecorded even when the handler said nothing.",
+        "type": "string"
+       },
+       "phase": {
+        "description": "Phase is a status name. It is a free string chosen by whoever writes the\nflow: this framework does not know what the work is, so it has no business\nnaming its stages. \"調査\" and \"Planning\" are equally valid.\n\nTwo names are reserved, because they are the framework's own answers rather\nthan anything in the author's domain — see ReservedPhases.",
+        "type": "string"
+       },
+       "reason": {
+        "description": "Reason is the one line a human reads next to Outcome: which edge was\nfollowed, or why no answer counted, or what the handler said after\nnaming its directory. The transition never reads it.",
+        "maxLength": 2048,
+        "type": "string"
+       },
+       "ref": {
+        "description": "Ref points at the run's output in the store.",
+        "type": "string"
+       },
+       "runID": {
+        "format": "int32",
+        "type": "integer"
+       }
+      },
+      "required": [
+       "outcome",
+       "phase",
+       "runID"
+      ],
+      "type": "object",
+      "additionalProperties": false
+     },
+     "type": "array"
+    },
+    "phase": {
+     "description": "Phase is a status name. It is a free string chosen by whoever writes the\nflow: this framework does not know what the work is, so it has no business\nnaming its stages. \"調査\" and \"Planning\" are equally valid.\n\nTwo names are reserved, because they are the framework's own answers rather\nthan anything in the author's domain — see ReservedPhases.",
+     "type": "string"
+    },
+    "reworkBudget": {
+     "description": "ReworkBudget remaining. Counted down by the controller as reworks are\ntaken, never declared by the flow.",
+     "format": "int32",
+     "type": "integer"
+    },
+    "runID": {
+     "description": "RunID of the current or last run.",
+     "format": "int32",
+     "type": "integer"
+    }
+   },
+   "type": "object",
+   "additionalProperties": false
+  }
+ },
+ "type": "object",
+ "additionalProperties": false,
+ "$schema": "http://json-schema.org/schema#"
+}

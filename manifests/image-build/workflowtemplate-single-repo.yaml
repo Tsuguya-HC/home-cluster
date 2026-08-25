@@ -87,15 +87,14 @@ spec:
         # virtio-blk で VM に直接挿し、ファイルシステムは VM の中に居るので往復が消える。
         # generic ephemeral volume なので Pod と一緒に消える（reclaim は Delete）。
         # qnap-iscsi は worker にしか挿せないが、Kata Pod は元々 worker にしか載らない。
+        # medium: Memory の emptyDir は Kata が VM の中に tmpfs として作るので virtiofs を
+        # 通らない。ゲストカーネル 6.18 の tmpfs は user xattr を持つ（6.6 以降）ので
+        # BuildKit のレイヤ export も通る。VM のメモリはコンテナの memory limit で決まる
+        # ため、下の limits.memory にこの分を上乗せしてある。
         - name: workspace
-          ephemeral:
-            volumeClaimTemplate:
-              spec:
-                accessModes: [ReadWriteOnce]
-                storageClassName: qnap-iscsi
-                resources:
-                  requests:
-                    storage: 20Gi
+          emptyDir:
+            medium: Memory
+            sizeLimit: 6Gi
         - name: docker-config
           emptyDir: {}
         - name: github-token
@@ -264,7 +263,7 @@ spec:
           # ここでの limit は throttling ではなく VM の大きさの指定。
           limits:
             cpu: "6"
-            memory: 4Gi
+            memory: 10Gi
       outputs:
         parameters:
           - name: digest

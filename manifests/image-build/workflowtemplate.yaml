@@ -159,12 +159,10 @@ spec:
         parameters:
           - name: image-dir
       podSpecPatch: '{"runtimeClassName": "kata"}'
-      # BuildKit は Kata VM 内で virtiofs を thread-pool-size=1 で回すので、ホスト CPU が
-      # 飽和すると 1 レイヤのコミットに数分かかり 30 分の期限に届かない（2026-08-25、
-      # wn-03 で LLM バッチと同居して実測）。LLM バッチ Pod が名乗る
-      # workload-class=cpu-saturating から逃げる。preferred なので LLM が走っていなければ
-      # 一番速い wn-03 を使える。requests だけでは同居を避けられない（16 スレッドに
-      # 両方収まる）ので、スケジューラにはこの形で伝える。
+      # LLM バッチ Pod が名乗る workload-class=cpu-saturating から逃げる（同居回避の衛生策。
+      # 2026-08-25 のビルド遅延の主因ではなかった — 下の workspace volume のコメント参照）。
+      # preferred なので LLM が走っていなければ一番速い wn-03 を使える。requests だけでは
+      # 同居を避けられない（16 スレッドに両方収まる）ので、スケジューラにはこの形で伝える。
       affinity:
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
@@ -183,8 +181,16 @@ spec:
         runAsNonRoot: false
         fsGroup: 0
       volumes:
+        # ディスク上の emptyDir や CSI PVC は Kata VM から virtiofs 越しで、BuildKit の
+        # レイヤ展開（数万の小ファイル操作）が全部往復になる。medium: Memory の emptyDir は
+        # Kata が VM の中に tmpfs として作るので virtiofs を通らない（2026-08-25 実測:
+        # golang:1.27 の展開 1012 秒 → 6.5 秒、Workflow 全体 76 秒。single-repo と同じ形）。
+        # ゲストカーネル 6.18 の tmpfs は user xattr を持ち、レイヤ export も通る。
+        # VM のメモリはコンテナの memory limit で決まるので、下の limits.memory に上乗せ。
         - name: workspace
-          emptyDir: {}
+          emptyDir:
+            medium: Memory
+            sizeLimit: 6Gi
         - name: docker-config
           emptyDir: {}
         - name: github-token
@@ -314,6 +320,11 @@ spec:
         env:
           - name: DOCKER_CONFIG
             value: /docker-config
+          # buildctl-daemonless.sh は --root を渡さず、state は既定の /var/lib/buildkit =
+          # コンテナ rootfs（Kata では virtiofs 共有）に置かれる。workspace 側へ移して
+          # 初めて上の tmpfs が効く。
+          - name: BUILDKITD_FLAGS
+            value: --root /workspace/.buildkit/root
         securityContext:
           privileged: true
           allowPrivilegeEscalation: true
@@ -336,7 +347,7 @@ spec:
           # ここでの limit は throttling ではなく VM の大きさの指定。
           limits:
             cpu: "6"
-            memory: 4Gi
+            memory: 10Gi
       outputs:
         parameters:
           - name: digest

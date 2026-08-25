@@ -58,12 +58,10 @@ spec:
 
     - name: buildkit-build
       podSpecPatch: '{"runtimeClassName": "kata"}'
-      # BuildKit は Kata VM 内で virtiofs を thread-pool-size=1 で回すので、ホスト CPU が
-      # 飽和すると 1 レイヤのコミットに数分かかり 30 分の期限に届かない（2026-08-25、
-      # wn-03 で LLM バッチと同居して実測）。LLM バッチ Pod が名乗る
-      # workload-class=cpu-saturating から逃げる。preferred なので LLM が走っていなければ
-      # 一番速い wn-03 を使える。requests だけでは同居を避けられない（16 スレッドに
-      # 両方収まる）ので、スケジューラにはこの形で伝える。
+      # LLM バッチ Pod が名乗る workload-class=cpu-saturating から逃げる（同居回避の衛生策。
+      # 2026-08-25 のビルド遅延の主因ではなかった — 下の workspace volume のコメント参照）。
+      # preferred なので LLM が走っていなければ一番速い wn-03 を使える。requests だけでは
+      # 同居を避けられない（16 スレッドに両方収まる）ので、スケジューラにはこの形で伝える。
       affinity:
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
@@ -82,8 +80,22 @@ spec:
         runAsNonRoot: false
         fsGroup: 0
       volumes:
+        # emptyDir は Kata VM から virtiofs 越しに見える。BuildKit のレイヤ展開は数万の
+        # 小ファイル操作で、その全部が virtiofs の往復になり、golang:1.27 の展開だけで
+        # 700〜1000 秒かかって 30 分に収まらなかった（2026-08-25 実測。vCPU 増でも
+        # virtiofsd のスレッド数増でも桁は変わらず）。ブロック PVC なら Kata は
+        # virtio-blk で VM に直接挿し、ファイルシステムは VM の中に居るので往復が消える。
+        # generic ephemeral volume なので Pod と一緒に消える（reclaim は Delete）。
+        # qnap-iscsi は worker にしか挿せないが、Kata Pod は元々 worker にしか載らない。
         - name: workspace
-          emptyDir: {}
+          ephemeral:
+            volumeClaimTemplate:
+              spec:
+                accessModes: [ReadWriteOnce]
+                storageClassName: qnap-iscsi
+                resources:
+                  requests:
+                    storage: 20Gi
         - name: docker-config
           emptyDir: {}
         - name: github-token

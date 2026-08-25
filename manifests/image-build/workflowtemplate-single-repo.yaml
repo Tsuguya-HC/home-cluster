@@ -234,6 +234,14 @@ spec:
         env:
           - name: DOCKER_CONFIG
             value: /docker-config
+          # buildctl-daemonless.sh は --root を渡さないので、buildkitd の state
+          # （レイヤ展開の実体）は既定の /var/lib/buildkit = コンテナ rootfs に置かれる。
+          # Kata ではコンテナ rootfs 自体がホストから virtiofs で共有されているため、
+          # workspace volume を何にしても展開は virtiofs 越しのままだった（2026-08-25
+          # 実測: emptyDir でもブロック PVC でも golang:1.27 の展開に 700〜1000 秒）。
+          # state を workspace 側へ置いて初めて、上のブロック PVC が効く。
+          - name: BUILDKITD_FLAGS
+            value: --root /workspace/.buildkit/root
         securityContext:
           privileged: true
           allowPrivilegeEscalation: true

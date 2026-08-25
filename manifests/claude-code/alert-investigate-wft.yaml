@@ -61,6 +61,7 @@ spec:
             - kubectl（読み取り専用）
             - hubble observe（kubectl exec -n kube-system <cilium-pod> -- hubble observe）
             - logcli（Loki: http://loki-gateway.monitoring:80）
+            - Prometheus（curl http://kube-prometheus-stack-prometheus.monitoring:9090/api/v1/query）
             - helm
 
             クラスタ情報:

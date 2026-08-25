@@ -78,6 +78,7 @@ spec:
             - kubectl で関連リソースの状態を確認
             - 必要に応じて Hubble で通信状況を確認
             - 必要に応じて Loki でログを確認（logcli, endpoint: http://loki-gateway.monitoring:80）
+            - 必要に応じて Prometheus でメトリクスを確認（curl http://kube-prometheus-stack-prometheus.monitoring:9090/api/v1/query）
 
             ## クラスタ情報
             - CNI: Cilium（全 Pod にデフォルト deny の CiliumNetworkPolicy 適用）

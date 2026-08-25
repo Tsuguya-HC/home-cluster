@@ -21,9 +21,12 @@ spec:
             - port: "9090"
               protocol: TCP
     # kube-apiserver service proxy (Freelens/Lens cluster metrics).
+    # In tunnel mode the apiserver's traffic is SNATed to cilium_host and
+    # arrives as remote-node (same as prometheus-operator webhook).
     # Reachability is gated by RBAC services/proxy in monitoring.
     - fromEntities:
         - kube-apiserver
+        - remote-node
       toPorts:
         - ports:
             - port: "9090"

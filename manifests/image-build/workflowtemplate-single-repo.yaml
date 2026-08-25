@@ -21,6 +21,11 @@ spec:
         value: ""
       - name: commit-sha
         value: main
+      # リポジトリルートからの Dockerfile 名。1 リポジトリから複数イメージを出す
+      # とき（taskflow の controller と sidecar）に、context は共通のまま
+      # ファイルだけ切り替える。既定はこれまでどおりルートの Dockerfile。
+      - name: dockerfile
+        value: Dockerfile
   podMetadata:
     labels:
       image-build: "true"
@@ -189,6 +194,7 @@ spec:
               --frontend dockerfile.v0 \
               --local context=/workspace \
               --local dockerfile=/workspace \
+              --opt filename={{workflow.parameters.dockerfile}} \
               --output 'type=image,"name=registry.infra.tgy.io/{{workflow.parameters.project}}/{{workflow.parameters.image-name}}:{{workflow.parameters.commit-sha}},registry.infra.tgy.io/{{workflow.parameters.project}}/{{workflow.parameters.image-name}}:latest",push=true' \
               --metadata-file /workspace/metadata.json
             jq -r '."containerimage.digest"' /workspace/metadata.json > /workspace/digest

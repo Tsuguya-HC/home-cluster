@@ -4,14 +4,15 @@ config:
   configFile: ""
 
 # List form, not the map form the other two proxies use: two `--upstream` flags
-# are needed and a map can only hold one. oauth2-proxy routes by longest path
-# prefix, so /api reaches the REST API and everything else falls through to the
-# static UI.
+# are needed and a map can only hold one. oauth2-proxy routes by longest path,
+# but a path without a trailing slash is an exact match: `/api` matched only
+# `/api` itself and every `/api/feeds` fell through to the static UI as a 404.
+# The trailing slash makes it a prefix; the request path is forwarded as-is.
 extraArgs:
   - --provider=oidc
   - --oidc-issuer-url=https://idm.tgy.io/oauth2/openid/oauth2-proxy-rss
   - --redirect-url=https://reader.tgy.io/oauth2/callback
-  - --upstream=http://rss-server.rss.svc.cluster.local:80/api
+  - --upstream=http://rss-server.rss.svc.cluster.local:80/api/
   - --upstream=http://rss-ui.rss.svc.cluster.local:80
   - --email-domain=*
   - --skip-provider-button=true

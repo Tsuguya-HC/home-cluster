@@ -58,6 +58,22 @@ spec:
 
     - name: buildkit-build
       podSpecPatch: '{"runtimeClassName": "kata"}'
+      # BuildKit は Kata VM 内で virtiofs を thread-pool-size=1 で回すので、ホスト CPU が
+      # 飽和すると 1 レイヤのコミットに数分かかり 30 分の期限に届かない（2026-08-25、
+      # wn-03 で LLM バッチと同居して実測）。LLM バッチ Pod が名乗る
+      # workload-class=cpu-saturating から逃げる。preferred なので LLM が走っていなければ
+      # 一番速い wn-03 を使える。requests だけでは同居を避けられない（16 スレッドに
+      # 両方収まる）ので、スケジューラにはこの形で伝える。
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    workload-class: cpu-saturating
+                namespaceSelector: {}
+                topologyKey: kubernetes.io/hostname
       metadata:
         annotations:
           io.katacontainers.config.hypervisor.virtio_fs_extra_args: '["--thread-pool-size=1", "--announce-submounts", "--xattr"]'

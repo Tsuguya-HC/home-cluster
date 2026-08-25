@@ -1,0 +1,25 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: taskflow
+  namespace: argocd
+spec:
+  project: ai
+  sources:
+    - repoURL: https://github.com/Tsuguya/home-cluster.git
+      targetRevision: main
+      path: kustomize/taskflow
+    - repoURL: https://github.com/Tsuguya/home-cluster.git
+      targetRevision: main
+      path: manifests/taskflow-system
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: taskflow-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      # taskhandlers CRD は 642KB で client-side apply の 256KB 上限を超える（設計 §15）
+      - ServerSideApply=true

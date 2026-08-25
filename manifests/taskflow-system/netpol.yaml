@@ -1,0 +1,28 @@
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: taskflow-controller
+  namespace: taskflow-system
+spec:
+  endpointSelector:
+    matchLabels:
+      control-plane: controller-manager
+      app.kubernetes.io/name: taskflow
+  ingress:
+    # kubelet の liveness / readiness probe（:8081）
+    - fromEntities:
+        - host
+        - remote-node
+      toPorts:
+        - ports:
+            - port: "8081"
+              protocol: TCP
+  egress:
+    # コントローラが話す相手は apiserver だけ。Job を作り、Pod の status を読むのみで、
+    # ワークスペースにも store にも触らない（設計 §6「2 ホップ」）。DNS は CCNP で共通適用済み。
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "6443"
+              protocol: TCP

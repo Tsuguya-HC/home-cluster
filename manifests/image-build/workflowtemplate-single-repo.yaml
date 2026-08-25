@@ -235,9 +235,15 @@ spec:
             readOnly: true
         resources:
           requests:
-            cpu: 100m
+            cpu: "2"
             memory: 512Mi
+          # CPU limit はこのリポジトリでは付けない規約だが、Kata は VM の vCPU 数を
+          # コンテナの CPU limit（cgroup quota）から決める。limit が無いと VM は
+          # default_vcpus=1 のまま — golang:1.27 の展開に 750 秒、COPY 1 回に 250 秒、
+          # go build -a は 30 分に収まらない（2026-08-25 実測。ホストの CPU は半分空いていた）。
+          # ここでの limit は throttling ではなく VM の大きさの指定。
           limits:
+            cpu: "6"
             memory: 4Gi
       outputs:
         parameters:

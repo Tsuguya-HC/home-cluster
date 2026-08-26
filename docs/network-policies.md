@@ -87,6 +87,8 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 | Collector pods (trading) | SeaweedFS filer (seaweedfs) | 8333 | Market data ingestion |
 | aqua-checksum (argo) | SeaweedFS filer (seaweedfs) | 8333 | Workflow step log/artifact upload |
 | Collector pods (trading) | shared-pg (database) | 5432 | Market data ingestion |
+| Prometheus (monitoring) | Argo Workflows controller (argo) | 9090 | Metrics scrape |
+| Cloudflared (argocd) | oauth2-proxy-rss (oauth2-proxy) | 4180 | Cloudflare Tunnel → RSS |
 
 ## Excluded Pods (hostNetwork: true)
 
@@ -94,7 +96,7 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 |---|---|---|
 | monitoring | node-exporter | Host metrics collection |
 | monitoring | blackbox-exporter | IPv6 egress probe（ノードの VLAN 10 GUA を送信元にする必要がある。詳細は [IPv6](ipv6.md)） |
-| kube-system | Cilium agent, kube-proxy | CNI / networking |
+| kube-system | Cilium agent | CNI / networking（`kubeProxyReplacement: true` のため kube-proxy Pod は存在しない） |
 | kube-system | Tetragon agent | eBPF runtime security (hostNetwork DaemonSet) |
 | kube-system | kube-apiserver, etcd, scheduler, controller-manager | Control plane static pods |
 | trident | trident-node-linux | CSI node plugin |
@@ -344,3 +346,9 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 | Component | Ingress | Egress |
 |---|---|---|
 | **ollama** | memory (memory) → 11434 | registry.ollama.ai + *.ollama.com + *.r2.cloudflarestorage.com:443 |
+
+## taskflow-system (1 policy)
+
+| Component | Ingress | Egress |
+|---|---|---|
+| **taskflow-controller** | host/remote-node → 8081 (probes) | kube-apiserver |

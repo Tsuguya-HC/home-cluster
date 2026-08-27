@@ -18,9 +18,23 @@ tetragon:
   # 0 行を吐き続けるため、導入以来イベントが 1 件も Loki に届いていなかった。
   # ファイルは node ローカルの /var/run 配下で Talos にはユーザーシェルもない。
   exportFilePerm: "644"
+  # health_check は Tetragon 自身の内部ヘルスチェック用で、Kubernetes の probe とは
+  # 無関係。probe は素通りするので binary_regex で個別に落とす。実測 1,028 MiB/日
+  # (raw, 6ノード計) のうち smartctl 50.5% / pg_isready 13.5% / runc init 1.6%。
+  # いずれも定期的に機械的に起きるものだけで、人間や侵入者の行為は含まれない。
+  # postgres 本体や argocd の git は実活動なので残す。
   exportDenyList: |-
     {"health_check":true}
     {"namespace":["","cilium","kube-system"]}
+    {"binary_regex":["^/usr/sbin/smartctl$"]}
+    {"binary_regex":["/pg_isready$"]}
+    {"parent_binary_regex":["/runc$"],"binary_regex":["^/proc/self/fd/"]}
+  # 1イベント 3,733 バイトのうち process.pod 823B + parent.pod 約800B が pod
+  # メタデータの重複。parent.pod は process.pod とほぼ常に同一なので落とす。
+  # イベント自体は捨てないので検知能力は変わらない。
+  # node_labels (390B) も冗長だが chart に knob がないため残る。
+  fieldFilters: |-
+    {"fields":"parent.pod","action":"EXCLUDE"}
   prometheus:
     serviceMonitor:
       enabled: true

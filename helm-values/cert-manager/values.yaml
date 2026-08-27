@@ -2,6 +2,17 @@ crds:
   enabled: true
   keep: true
 
+# chart 既定は prometheus.enabled: true だが servicemonitor/podmonitor はどちらも
+# false なので、9402 が Service に出ているだけで誰もスクレイプしていなかった。
+# 結果 certmanager_* が Prometheus に 1 つも存在せず、cluster-observe の証明書
+# 期限チェックが書かれて以来ずっと空ベクタを受け取って発火し得なかった。
+# キーは servicemonitor（小文字）で labels。tetragon の extraLabels とは別名。
+prometheus:
+  servicemonitor:
+    enabled: true
+    labels:
+      release: kube-prometheus-stack
+
 resources:
   requests:
     cpu: 10m

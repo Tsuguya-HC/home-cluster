@@ -215,9 +215,9 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 
 | Component | Ingress | Egress |
 |---|---|---|
-| **controller** | host → 9403 | kube-apiserver, acme-v02.api.letsencrypt.org:443, api.cloudflare.com:443, external DNS 53 (propagation check) |
-| **cainjector** | (deny world) | kube-apiserver |
-| **webhook** | kube-apiserver/remote-node → 10250; host → 6080 | kube-apiserver |
+| **controller** | host → 9403; prometheus (monitoring) → 9402 (metrics) | kube-apiserver, acme-v02.api.letsencrypt.org:443, api.cloudflare.com:443, external DNS 53 (propagation check) |
+| **cainjector** | (deny world); prometheus (monitoring) → 9402 (metrics) | kube-apiserver |
+| **webhook** | kube-apiserver/remote-node → 10250; host → 6080; prometheus (monitoring) → 9402 (metrics) | kube-apiserver |
 | **startupapicheck** (Job) | (deny world) | kube-apiserver |
 
 ## external-dns (1 policy)

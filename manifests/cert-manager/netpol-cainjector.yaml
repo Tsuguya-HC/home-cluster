@@ -10,6 +10,18 @@ spec:
   ingressDeny:
     - fromEntities:
         - world
+  # chart の ServiceMonitor は cainjector も対象にする。ingress は既に Enabled
+  # （デフォルト deny）なので、これは posture の切り替えではなく純粋な追加。
+  # cainjector に probe は無いので kubelet 向けの host ルールは要らない。
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: prometheus
+            io.kubernetes.pod.namespace: monitoring
+      toPorts:
+        - ports:
+            - port: "9402"
+              protocol: TCP
   egress:
     - toEntities:
         - kube-apiserver

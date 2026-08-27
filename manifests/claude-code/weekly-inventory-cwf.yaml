@@ -1,0 +1,126 @@
+---
+apiVersion: argoproj.io/v1alpha1
+kind: CronWorkflow
+metadata:
+  name: weekly-inventory
+  namespace: claude-code
+spec:
+  schedules:
+    - "0 9 * * 0"
+  timezone: Asia/Tokyo
+  concurrencyPolicy: Forbid
+  workflowSpec:
+    entrypoint: main
+    serviceAccountName: claude-code-sre
+    activeDeadlineSeconds: 300
+    podMetadata:
+      labels:
+        claude-code: "true"
+    securityContext:
+      seccompProfile:
+        type: RuntimeDefault
+    templates:
+      - name: main
+        securityContext:
+          runAsUser: 65532
+          runAsNonRoot: true
+          runAsGroup: 65532
+          fsGroup: 65532
+        container:
+          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:5309221e4c5721f9b7c091195db1a592320b88390734bb745f8eb69041ddf3ed
+          command: [sh, -c]
+          args:
+            - |
+              set -u
+              LOKI="http://loki-gateway.monitoring.svc:80"
+              PROM="http://kube-prometheus-stack-prometheus.monitoring.svc:9090"
+
+              # 判定はしない。数字をそのまま並べる。異常時だけ喋る仕組みだと
+              # 「異常なし」と「そもそも動いていない」と「検査対象が 0 件だった」が
+              # 区別できないため、無条件に毎回送る。
+              # クエリに = { } " ~ が入るので --data-urlencode 必須。wget --post-data だと
+              # エンコードされず毎回 0 か ? を報告する動かないレポートになる。
+              # 取得失敗は 0 ではなく ? を返す。「本当に 0 件」と「取れなかった」は別物。
+              lq() {
+                curl -sS --max-time 20 --data-urlencode "query=$1" "$LOKI/loki/api/v1/query" 2>/dev/null \
+                  | jq -er '[.data.result[]?.value[1]? | tonumber] | add // 0 | floor' 2>/dev/null || echo "?"
+              }
+              pq() {
+                curl -sS --max-time 20 --data-urlencode "query=$1" "$PROM/api/v1/query" 2>/dev/null \
+                  | jq -er '[.data.result[]?.value[1]? | tonumber] | add // 0 | floor' 2>/dev/null || echo "?"
+              }
+
+              # 観測系の出口。ここが 0 なら「壊れた」ではなく「一度も動いていない」
+              # 可能性がある。2026-08-27 の tetragon はこの形で 185 日見逃された。
+              T_EXPORT=$(lq 'sum(count_over_time({namespace="kube-system",pod=~"tetragon-.*",container="export-stdout"}[7d]))')
+              HUBBLE=$(lq 'sum(count_over_time({job="hubble"}[7d]))')
+              ALLOY=$(lq 'sum(count_over_time({namespace="monitoring",pod=~"alloy-.*"}[7d]))')
+              ARGO_LOG=$(lq 'sum(count_over_time({namespace="argo"}[7d]))')
+
+              T_POLICY=$(pq 'sum(increase(tetragon_policy_events_total[7d]))')
+              TGT_UP=$(pq 'sum(up)')
+              TGT_DOWN=$(pq 'sum(up == 0) or vector(0)')
+
+              NODES=$(kubectl get nodes --no-headers 2>/dev/null \
+                | awk '$2=="Ready"{r++} END{printf "%d/%d", r, NR}')
+              PODS=$(kubectl get pods -A -o json 2>/dev/null \
+                | jq -r '[.items[].status.phase] | "Running \([.[]|select(.=="Running")]|length) / Succeeded \([.[]|select(.=="Succeeded")]|length) / Failed \([.[]|select(.=="Failed")]|length) / Pending \([.[]|select(.=="Pending")]|length)"')
+              NOTREADY=$(kubectl get pods -A --no-headers 2>/dev/null \
+                | awk '$4=="Running"{split($3,a,"/"); if(a[1]!=a[2]) n++} END{printf "%d", n}')
+              APPS=$(kubectl get app -n argocd --no-headers 2>/dev/null \
+                | awk '$2=="Synced"{r++} END{printf "%d/%d", r, NR}')
+              CNP_NS=$(kubectl get cnp -A --no-headers 2>/dev/null | awk '{print $1}' | sort -u | wc -l)
+              ALL_NS=$(kubectl get ns --no-headers 2>/dev/null | wc -l)
+
+              REPORT=$(printf '**観測系の出口（直近7日・Loki）**\n'
+                printf 'tetragon export: `%s` 行\n' "$T_EXPORT"
+                printf 'hubble: `%s` 行\n' "$HUBBLE"
+                printf 'alloy: `%s` 行\n' "$ALLOY"
+                printf 'argo: `%s` 行\n' "$ARGO_LOG"
+                printf '\n**Tetragon（直近7日）**\n'
+                printf 'policy 発火: `%s` 件\n' "$T_POLICY"
+                printf '\n**クラスタ**\n'
+                printf 'Node Ready: `%s`\n' "$NODES"
+                printf 'Pod: `%s`\n' "$PODS"
+                printf 'Running だが Ready でない Pod: `%s`\n' "$NOTREADY"
+                printf 'ArgoCD Synced: `%s`\n' "$APPS"
+                printf 'Prometheus targets: up `%s` / down `%s`\n' "$TGT_UP" "$TGT_DOWN"
+                printf 'CNP を持つ namespace: `%s/%s`\n' "$CNP_NS" "$ALL_NS")
+
+              echo "$REPORT"
+
+              # Discord の上限は 4096 "文字"。jq の文字列スライスは文字単位。
+              BODY=$(printf '%s' "$REPORT" \
+                | jq -Rsr --argjson max 3900 \
+                    'if length > $max then .[0:$max] + "\n\n_(以降を省略)_" else . end')
+              WF_NAME="{{workflow.name}}"
+              NS="{{workflow.namespace}}"
+              URL="https://argo.infra.tgy.io/workflows/${NS}/${WF_NAME}"
+              TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)
+
+              PAYLOAD=$(jq -n \
+                --arg title "週次クラスタ棚卸し" \
+                --arg url "$URL" \
+                --argjson color 3447003 \
+                --arg report "$BODY" \
+                --arg ts "$TIMESTAMP" \
+                '{embeds: [{title: $title, url: $url, color: $color, description: $report, timestamp: $ts}]}')
+
+              wget -qO /dev/null --header="Content-Type: application/json" \
+                --post-data="$PAYLOAD" "$DISCORD_WEBHOOK_URL"
+          env:
+            - name: DISCORD_WEBHOOK_URL
+              valueFrom:
+                secretKeyRef:
+                  name: discord-webhook-argo
+                  key: url
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 256Mi

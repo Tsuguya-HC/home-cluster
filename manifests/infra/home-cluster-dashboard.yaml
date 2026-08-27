@@ -46,7 +46,7 @@ data:
           "title": "CPU Usage by Node",
           "type": "timeseries",
           "targets": [
-            { "expr": "1 - avg by (instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[$__rate_interval]))", "legendFormat": "{{ instance }}", "refId": "A" }
+            { "expr": "(1 - avg by (instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[$__rate_interval]))) * on(instance) group_left(nodename) node_uname_info", "legendFormat": "{{ nodename }}", "refId": "A" }
           ]
         },
         {
@@ -63,7 +63,7 @@ data:
           "title": "Memory Usage by Node",
           "type": "timeseries",
           "targets": [
-            { "expr": "1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes", "legendFormat": "{{ instance }}", "refId": "A" }
+            { "expr": "(1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * on(instance) group_left(nodename) node_uname_info", "legendFormat": "{{ nodename }}", "refId": "A" }
           ]
         },
         {
@@ -80,7 +80,7 @@ data:
           "title": "Disk Usage by Node",
           "type": "bargauge",
           "targets": [
-            { "expr": "1 - node_filesystem_avail_bytes{mountpoint=\"/var\",fstype=\"xfs\"} / node_filesystem_size_bytes{mountpoint=\"/var\",fstype=\"xfs\"}", "legendFormat": "{{ instance }}", "refId": "A" }
+            { "expr": "(1 - node_filesystem_avail_bytes{mountpoint=\"/var\",fstype=\"xfs\"} / node_filesystem_size_bytes{mountpoint=\"/var\",fstype=\"xfs\"}) * on(instance) group_left(nodename) node_uname_info", "legendFormat": "{{ nodename }}", "refId": "A" }
           ]
         },
         {
@@ -96,8 +96,8 @@ data:
           "title": "SeaweedFS Volume",
           "type": "stat",
           "targets": [
-            { "expr": "sum(SeaweedFS_volumeServer_total_disk_size)", "legendFormat": "Used", "refId": "A" },
-            { "expr": "sum(SeaweedFS_volumeServer_max_volume_count) * 30 * 1024 * 1024 * 1024", "legendFormat": "Max Volumes (est.)", "refId": "B" }
+            { "expr": "sum(SeaweedFS_volumeServer_resource{type=\"used\"})", "legendFormat": "Used", "refId": "A" },
+            { "expr": "sum(SeaweedFS_volumeServer_resource{type=\"all\"})", "legendFormat": "Total", "refId": "B" }
           ]
         },
         {
@@ -131,7 +131,7 @@ data:
           "title": "Network Receive by Node",
           "type": "timeseries",
           "targets": [
-            { "expr": "rate(node_network_receive_bytes_total{device=~\"enp.*\"}[$__rate_interval])", "legendFormat": "{{ instance }}", "refId": "A" }
+            { "expr": "rate(node_network_receive_bytes_total{device=~\"enp.*\"}[$__rate_interval]) * on(instance) group_left(nodename) node_uname_info", "legendFormat": "{{ nodename }} {{ device }}", "refId": "A" }
           ]
         },
         {
@@ -148,11 +148,11 @@ data:
           "title": "Network Transmit by Node",
           "type": "timeseries",
           "targets": [
-            { "expr": "rate(node_network_transmit_bytes_total{device=~\"enp.*\"}[$__rate_interval])", "legendFormat": "{{ instance }}", "refId": "A" }
+            { "expr": "rate(node_network_transmit_bytes_total{device=~\"enp.*\"}[$__rate_interval]) * on(instance) group_left(nodename) node_uname_info", "legendFormat": "{{ nodename }} {{ device }}", "refId": "A" }
           ]
         },
         {
-          "datasource": { "type": "loki" },
+          "datasource": { "type": "loki", "uid": "loki" },
           "gridPos": { "h": 8, "w": 24, "x": 0, "y": 28 },
           "options": { "showTime": true, "sortOrder": "Descending", "enableLogDetails": true, "dedupStrategy": "none", "wrapLogMessage": true },
           "title": "SeaweedFS Logs",

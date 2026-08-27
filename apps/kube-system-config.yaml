@@ -19,6 +19,7 @@ spec:
         - .spec.kprobes[].args[] | (.maxData, .resolve, .returnCopy)
         - .spec.kprobes[] | .return
         - .spec.kprobes[].selectors[].matchCapabilities[]? | .isNamespaceCapability
+        - .spec.kprobes[].selectors[].matchBinaries[]? | .followChildren
   syncPolicy:
     automated:
       prune: true

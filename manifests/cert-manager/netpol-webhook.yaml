@@ -21,6 +21,16 @@ spec:
         - ports:
             - port: "6080"
               protocol: TCP
+    # chart の ServiceMonitor は controller / webhook / cainjector の 3 つを対象に
+    # するので、ここを開けないと webhook が常時 down のターゲットとして残る。
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: prometheus
+            io.kubernetes.pod.namespace: monitoring
+      toPorts:
+        - ports:
+            - port: "9402"
+              protocol: TCP
   egress:
     - toEntities:
         - kube-apiserver

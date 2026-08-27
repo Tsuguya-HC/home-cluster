@@ -83,6 +83,22 @@ spec:
         - ports:
             - port: "9090"
               protocol: TCP
+    # chart の ServiceMonitor は 3 コンポーネントとも対象にするので 3 つ書く。
+    # matchLabels はラベルを跨いだパターンマッチができないため列挙が必要。
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: cert-manager
+            io.kubernetes.pod.namespace: cert-manager
+        - matchLabels:
+            app.kubernetes.io/name: webhook
+            io.kubernetes.pod.namespace: cert-manager
+        - matchLabels:
+            app.kubernetes.io/name: cainjector
+            io.kubernetes.pod.namespace: cert-manager
+      toPorts:
+        - ports:
+            - port: "9402"
+              protocol: TCP
     - toEndpoints:
         - matchLabels:
             app.kubernetes.io/name: tempo

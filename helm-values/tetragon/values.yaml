@@ -13,6 +13,11 @@ tetragon:
       memory: 256Mi
     limits:
       memory: 1Gi
+  # export-stdout サイドカーは非 root (65532) で動くので、chart 既定の 600
+  # (root:root) だと tetragon.log を開けない。エラーも再起動も出さずに黙って
+  # 0 行を吐き続けるため、導入以来イベントが 1 件も Loki に届いていなかった。
+  # ファイルは node ローカルの /var/run 配下で Talos にはユーザーシェルもない。
+  exportFilePerm: "644"
   exportDenyList: |-
     {"health_check":true}
     {"namespace":["","cilium","kube-system"]}

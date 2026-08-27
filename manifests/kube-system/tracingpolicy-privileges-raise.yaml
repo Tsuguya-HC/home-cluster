@@ -2,6 +2,11 @@ apiVersion: cilium.io/v1alpha1
 kind: TracingPolicy
 metadata:
   name: privileges-raise
+# matchNamespaces (Pid NotIn host_ns) だけではコンテナ起動そのものを拾ってしまう。
+# runc / shim / virtiofsd は新しい PID namespace の中で root へ setuid するため
+# この条件を通過し、実測で 44,921 件/日 = policy イベント全体の 98.4% を占めていた。
+# 除外はカーネル側で行い、ring buffer と CPU も含めて削る。
+# 代償: workload が自前の /usr/bin/runc を実行した場合は検知できない。
 spec:
   kprobes:
     - call: "security_capset"
@@ -24,6 +29,12 @@ spec:
               operator: NotIn
               values:
                 - "host_ns"
+          matchBinaries:
+            - operator: "NotIn"
+              values:
+                - "/usr/bin/runc"
+                - "/usr/local/bin/containerd-shim-spin-v2"
+                - "/usr/local/libexec/virtiofsd"
           matchArgs:
             - index: 2
               operator: "NotEqual"
@@ -37,6 +48,12 @@ spec:
               operator: NotIn
               values:
                 - "host_ns"
+          matchBinaries:
+            - operator: "NotIn"
+              values:
+                - "/usr/bin/runc"
+                - "/usr/local/bin/containerd-shim-spin-v2"
+                - "/usr/local/libexec/virtiofsd"
           matchArgs:
             - index: 3
               operator: "NotEqual"
@@ -50,6 +67,12 @@ spec:
               operator: NotIn
               values:
                 - "host_ns"
+          matchBinaries:
+            - operator: "NotIn"
+              values:
+                - "/usr/bin/runc"
+                - "/usr/local/bin/containerd-shim-spin-v2"
+                - "/usr/local/libexec/virtiofsd"
           matchArgs:
             - index: 4
               operator: "NotEqual"
@@ -71,6 +94,12 @@ spec:
               operator: NotIn
               values:
                 - "host_ns"
+          matchBinaries:
+            - operator: "NotIn"
+              values:
+                - "/usr/bin/runc"
+                - "/usr/local/bin/containerd-shim-spin-v2"
+                - "/usr/local/libexec/virtiofsd"
           matchCapabilities:
             - type: Effective
               operator: NotIn
@@ -92,6 +121,12 @@ spec:
               operator: NotIn
               values:
                 - "host_ns"
+          matchBinaries:
+            - operator: "NotIn"
+              values:
+                - "/usr/bin/runc"
+                - "/usr/local/bin/containerd-shim-spin-v2"
+                - "/usr/local/libexec/virtiofsd"
           matchArgs:
             - index: 0
               operator: "Equal"
@@ -113,6 +148,12 @@ spec:
               operator: NotIn
               values:
                 - "host_ns"
+          matchBinaries:
+            - operator: "NotIn"
+              values:
+                - "/usr/bin/runc"
+                - "/usr/local/bin/containerd-shim-spin-v2"
+                - "/usr/local/libexec/virtiofsd"
           matchArgs:
             - index: 0
               operator: "Equal"
@@ -136,6 +177,12 @@ spec:
               operator: NotIn
               values:
                 - "host_ns"
+          matchBinaries:
+            - operator: "NotIn"
+              values:
+                - "/usr/bin/runc"
+                - "/usr/local/bin/containerd-shim-spin-v2"
+                - "/usr/local/libexec/virtiofsd"
           matchArgs:
             - index: 0
               operator: "Equal"
@@ -149,6 +196,12 @@ spec:
               operator: NotIn
               values:
                 - "host_ns"
+          matchBinaries:
+            - operator: "NotIn"
+              values:
+                - "/usr/bin/runc"
+                - "/usr/local/bin/containerd-shim-spin-v2"
+                - "/usr/local/libexec/virtiofsd"
           matchArgs:
             - index: 1
               operator: "Equal"
@@ -172,6 +225,12 @@ spec:
               operator: NotIn
               values:
                 - "host_ns"
+          matchBinaries:
+            - operator: "NotIn"
+              values:
+                - "/usr/bin/runc"
+                - "/usr/local/bin/containerd-shim-spin-v2"
+                - "/usr/local/libexec/virtiofsd"
           matchArgs:
             - index: 0
               operator: "Equal"
@@ -185,6 +244,12 @@ spec:
               operator: NotIn
               values:
                 - "host_ns"
+          matchBinaries:
+            - operator: "NotIn"
+              values:
+                - "/usr/bin/runc"
+                - "/usr/local/bin/containerd-shim-spin-v2"
+                - "/usr/local/libexec/virtiofsd"
           matchArgs:
             - index: 1
               operator: "Equal"
@@ -210,6 +275,12 @@ spec:
               operator: NotIn
               values:
                 - "host_ns"
+          matchBinaries:
+            - operator: "NotIn"
+              values:
+                - "/usr/bin/runc"
+                - "/usr/local/bin/containerd-shim-spin-v2"
+                - "/usr/local/libexec/virtiofsd"
           matchArgs:
             - index: 1
               operator: "Equal"
@@ -223,6 +294,12 @@ spec:
               operator: NotIn
               values:
                 - "host_ns"
+          matchBinaries:
+            - operator: "NotIn"
+              values:
+                - "/usr/bin/runc"
+                - "/usr/local/bin/containerd-shim-spin-v2"
+                - "/usr/local/libexec/virtiofsd"
           matchArgs:
             - index: 2
               operator: "Equal"
@@ -248,6 +325,12 @@ spec:
               operator: NotIn
               values:
                 - "host_ns"
+          matchBinaries:
+            - operator: "NotIn"
+              values:
+                - "/usr/bin/runc"
+                - "/usr/local/bin/containerd-shim-spin-v2"
+                - "/usr/local/libexec/virtiofsd"
           matchArgs:
             - index: 1
               operator: "Equal"
@@ -261,6 +344,12 @@ spec:
               operator: NotIn
               values:
                 - "host_ns"
+          matchBinaries:
+            - operator: "NotIn"
+              values:
+                - "/usr/bin/runc"
+                - "/usr/local/bin/containerd-shim-spin-v2"
+                - "/usr/local/libexec/virtiofsd"
           matchArgs:
             - index: 2
               operator: "Equal"
@@ -282,6 +371,12 @@ spec:
               operator: NotIn
               values:
                 - "host_ns"
+          matchBinaries:
+            - operator: "NotIn"
+              values:
+                - "/usr/bin/runc"
+                - "/usr/local/bin/containerd-shim-spin-v2"
+                - "/usr/local/libexec/virtiofsd"
           matchArgs:
             - index: 0
               operator: "Equal"
@@ -303,6 +398,12 @@ spec:
               operator: NotIn
               values:
                 - "host_ns"
+          matchBinaries:
+            - operator: "NotIn"
+              values:
+                - "/usr/bin/runc"
+                - "/usr/local/bin/containerd-shim-spin-v2"
+                - "/usr/local/libexec/virtiofsd"
           matchArgs:
             - index: 0
               operator: "Equal"

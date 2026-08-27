@@ -154,11 +154,11 @@ data:
         {
           "datasource": { "type": "loki", "uid": "loki" },
           "gridPos": { "h": 8, "w": 24, "x": 0, "y": 28 },
-          "options": { "showTime": true, "sortOrder": "Descending", "enableLogDetails": true, "dedupStrategy": "none", "wrapLogMessage": true },
+          "options": { "showTime": true, "sortOrder": "Descending", "enableLogDetails": true, "dedupStrategy": "none", "wrapLogMessage": true, "prettifyLogMessage": false, "showCommonLabels": false, "showLabels": false, "showLogContextToggle": false },
           "title": "SeaweedFS Logs",
           "type": "logs",
           "targets": [
-            { "expr": "{namespace=\"seaweedfs\"} |~ \"(?i)(error|warn|fail|panic)\"", "refId": "A" }
+            { "datasource": { "type": "loki", "uid": "loki" }, "expr": "{namespace=\"seaweedfs\"} |~ \"(?i)(error|warn|fail|panic)\"", "refId": "A" }
           ]
         }
       ],

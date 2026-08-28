@@ -118,7 +118,7 @@ grafana:
     auth:
       disable_login_form: true
     auth.basic:
-      enabled: true
+      enabled: false # SSO only; the sidecar reload API that needed this is no longer used
     auth.generic_oauth:
       enabled: true
       name: Kanidm

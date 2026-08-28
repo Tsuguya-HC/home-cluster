@@ -1,8 +1,8 @@
 {
   "checksums": [
     {
-      "id": "github_release/github.com/google/go-containerregistry/v0.21.9/go-containerregistry_Linux_x86_64.tar.gz",
-      "checksum": "5C16D8DDB971CB1D5E6ED8B1E743DA8224414EEBA2C2762D8F1A61B2F095699E",
+      "id": "github_release/github.com/google/go-containerregistry/v0.22.0/go-containerregistry_Linux_x86_64.tar.gz",
+      "checksum": "EDB74D53FAD9A596860F59D1C5D04A43DFB5F441DC71F57060DD0BF39483C833",
       "algorithm": "sha256"
     },
     {

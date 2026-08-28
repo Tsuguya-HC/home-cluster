@@ -78,9 +78,8 @@ grafana:
       limits:
         memory: 256Mi
     dashboards:
-      skipReload: true
-      initDashboards: true # no running sidecar — restart pod after dashboard ConfigMap changes
-      watchMethod: LIST
+      skipReload: true # no reload API call — Grafana's file provisioner polls the directory itself
+      watchMethod: WATCH
     datasources:
       skipReload: true
       initDatasources: true

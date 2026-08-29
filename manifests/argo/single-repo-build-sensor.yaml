@@ -182,7 +182,7 @@ spec:
                 arguments:
                   parameters:
                     - name: repo-url
-                      value: github.com/Tsuguya/home-trading
+                      value: github.com/Tsuguya-HC/home-trading
                     - name: image-name
                       value: home-trading
                     - name: commit-sha

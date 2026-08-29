@@ -27,7 +27,7 @@ spec:
   arguments:
     parameters:
       - name: repositories
-        value: '["Tsuguya-HC/home-cluster","Tsuguya-HC/home-infra"]'
+        value: '["Tsuguya-HC/home-cluster","Tsuguya-HC/home-infra","Tsuguya-HC/home-cloudflare","Tsuguya-HC/home-trading"]'
   synchronization:
     mutexes:
       - name: renovate
@@ -156,25 +156,3 @@ spec:
   workflowSpec:
     workflowTemplateRef:
       name: renovate
----
-# One installation token covers one account, so repositories under the
-# personal account run separately from the organization's. The mutex on the
-# template serialises the two runs.
-apiVersion: argoproj.io/v1alpha1
-kind: CronWorkflow
-metadata:
-  name: renovate-periodic-personal
-  namespace: argo
-spec:
-  schedules:
-    - "30 */4 * * *"
-  timezone: Asia/Tokyo
-  concurrencyPolicy: Forbid
-  startingDeadlineSeconds: 600
-  workflowSpec:
-    workflowTemplateRef:
-      name: renovate
-    arguments:
-      parameters:
-        - name: repositories
-          value: '["Tsuguya/home-cloudflare","Tsuguya/home-trading"]'

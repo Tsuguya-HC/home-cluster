@@ -1,4 +1,4 @@
-# Applies Tsuguya/home-harbor (Harbor projects, robots, retention, GC and scan
+# Applies Tsuguya-HC/home-harbor (Harbor projects, robots, retention, GC and scan
 # schedules). The registry is only reachable from inside the cluster on the
 # ClusterIP path, and the state backend is a Secret in this namespace, so both
 # plan and apply have to run here rather than on a GitHub runner.
@@ -39,7 +39,7 @@ spec:
             - name: GITHUB_APP_ID
               value: "2998228"
             - name: GITHUB_REPO
-              value: "Tsuguya/home-harbor"
+              value: "Tsuguya-HC/home-harbor"
           securityContext:
             runAsUser: 65532
             runAsNonRoot: true
@@ -64,7 +64,7 @@ spec:
           args:
             - |
               GITHUB_TOKEN=$(cat /github-token/token)
-              git clone --depth 1 "https://x-access-token:${GITHUB_TOKEN}@github.com/Tsuguya/home-harbor.git" /workspace
+              git clone --depth 1 "https://x-access-token:${GITHUB_TOKEN}@github.com/Tsuguya-HC/home-harbor.git" /workspace
           volumeMounts:
             - name: workspace
               mountPath: /workspace
@@ -156,7 +156,7 @@ spec:
             - name: GITHUB_APP_ID
               value: "2998228"
             - name: GITHUB_REPO
-              value: "Tsuguya/home-harbor"
+              value: "Tsuguya-HC/home-harbor"
           securityContext:
             runAsUser: 65532
             runAsNonRoot: true
@@ -201,7 +201,7 @@ spec:
           args:
             - |
               GITHUB_TOKEN=$(cat /github-token/token)
-              git clone --depth 1 -b "${BRANCH}" "https://x-access-token:${GITHUB_TOKEN}@github.com/Tsuguya/home-harbor.git" /workspace
+              git clone --depth 1 -b "${BRANCH}" "https://x-access-token:${GITHUB_TOKEN}@github.com/Tsuguya-HC/home-harbor.git" /workspace
           env:
             - name: BRANCH
               value: "{{workflow.parameters.branch}}"
@@ -234,7 +234,7 @@ spec:
             tofu init -input=false
             PLAN_OUTPUT=$(tofu plan -detailed-exitcode -no-color 2>&1) && EXIT_CODE=0 || EXIT_CODE=$?
             PR="{{workflow.parameters.pr-number}}"
-            REPO="Tsuguya/home-harbor"
+            REPO="Tsuguya-HC/home-harbor"
             if [ "$EXIT_CODE" = "0" ]; then
               TITLE="Tofu Plan: No Changes"
               MSG="Harbor is up-to-date."

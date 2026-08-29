@@ -60,15 +60,20 @@ data:
 
     ## Cilium の強制セマンティクス（読み違えやすいので必ず踏まえる）
 
-    - エンドポイントは **`ingress` または `ingressDeny` を持つポリシーに選択されて初めて
-      ingress が強制**される。`ingressDeny` しか持たないポリシー（`fromEntities: [world]` だけ、など）
-      でも強制は有効になる。**`ingress` の有無だけで判定しないこと**
-    - egress も同様に、`egress` または `egressDeny` を持つポリシーに選択されて初めて強制される
-    - したがって **egress 系のルールしか持たないポリシー（CCNP `allow-dns` など）にのみ
-      選択されているエンドポイントは、egress は絞られるが ingress は無防備**（全許可）になる
-    - これを「ingress が全 DENY」と読むと**危険度の評価が反転する**。
-      遮断されているのではなく、誰からでも到達できる状態である
-    - `ingress: []`（空リスト）は no-op で何も強制しない
+    - このクラスタは **`policyEnforcementMode: always`**。全エンドポイントが、どのポリシーに
+      選択されていなくても **両方向 default deny**。「どのポリシーにも一致しない Pod」は
+      無防備ではなく、全通信が遮断されている（＝そのまま動いているなら通信不要か壊れている）
+    - `ingress` / `ingressDeny` を持つポリシーに選択されていない Pod の ingress は **全 DENY**。
+      到達を受ける必要がある Pod（Service を持つ、probe 以外の受信がある）なら壊れている。
+      受ける必要が無い Job や sensor なら正常。**「ingress 無防備」という判定はこのクラスタでは
+      起きない**（default モード時代の指摘であり、もう当てはまらない）
+    - egress も同様で、`egress` / `egressDeny` を持つポリシーに選択されなければ全 DENY
+      （DNS だけは CCNP `allow-dns` が全 Pod に許可している）
+    - 旧来 sensor 系 CNP にある `ingressDeny: [{fromEntities: [world]}]` は default モード時代に
+      ingress 強制を有効化するためのダミー。always では意味を持たないが害も無い
+    - `ingress: []`（空リスト）は no-op で何も許可しない
+    - kubelet からの probe（`host` エンティティ）は `allow-localhost=auto` により常に許可される。
+      probe 失敗をポリシーのせいにしない
 
     ## 手順
 
@@ -113,7 +118,7 @@ data:
     | 主張 | 併記する根拠 |
     |---|---|
     | Pod X は未カバー | X のラベルと、照合したポリシー名（一致が無いなら「一致なし」と明記） |
-    | X は ingress が強制されていない | X を選択している全ポリシー名と、**そのいずれもが `ingress` と `ingressDeny` の両方を持たない**こと |
+    | X は ingress を受ける必要があるのに許可が無い | X の Service / 受信ポートと、X を選択している全ポリシー名、**そのいずれにも該当する `ingress` 許可が無い**こと |
     | Y が原因で DENIED になっている | Y を実際に確認したコマンドと結果。ラベル不一致を疑うなら**その Pod のラベルを見る** |
 
     裏が取れなかった主張は、書かないか「未確認の推測」と明記する。

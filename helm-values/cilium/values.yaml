@@ -52,6 +52,13 @@ envoy:
     limits:
       memory: 256Mi
 
+# 全エンドポイントを両方向 default deny にする。default モードでは「その方向の
+# ルールを持つポリシーに選択されるまで全許可」なので、egress だけ書いた CNP の
+# Pod は ingress が静かに開いたままだった（2026-08-29 cnp-check が argo/rss で検出）。
+# always なら書き忘れは「開く」でなく「閉じる」側に倒れる。
+# cilium-health の疎通は manifests/infra/ccnp-health.yaml で許可している。
+policyEnforcementMode: always
+
 extraConfig:
   tofqdns-min-ttl: "30"
 

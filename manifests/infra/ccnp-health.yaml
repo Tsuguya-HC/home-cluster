@@ -1,0 +1,17 @@
+# policyEnforcementMode: always では cilium-health エンドポイント（reserved:health）も
+# default deny になり、ノード間の疎通チェックが失敗して見える。公式例そのまま:
+# https://github.com/cilium/cilium/blob/main/examples/policies/kubernetes/clusterwide/health.yaml
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: cilium-health-checks
+spec:
+  endpointSelector:
+    matchLabels:
+      reserved:health: ""
+  ingress:
+    - fromEntities:
+        - remote-node
+  egress:
+    - toEntities:
+        - remote-node

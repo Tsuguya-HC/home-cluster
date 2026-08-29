@@ -2,15 +2,24 @@
 
 All policies are CiliumNetworkPolicy (CNP) and CiliumClusterwideNetworkPolicy (CCNP). Pods with `hostNetwork: true` are not subject to network policies and are excluded.
 
+**Enforcement mode: `always`** (`helm-values/cilium/values.yaml`, since 2026-08-29). Every endpoint is default-deny in both directions even if no policy selects it. Consequences:
+- A CNP that only writes `egress` leaves the pod's ingress fully denied (not open, as it was in `default` mode). Pods that must receive traffic need an explicit `ingress` allow.
+- The `ingressDeny: [{fromEntities: [world]}]` marker on older sensor/job policies was only needed to enable ingress enforcement in `default` mode; it is now redundant but harmless.
+- Cilium-internal identities need their own CCNPs (`cilium-health-checks`, `allow-gateway-ingress` below). Without `allow-gateway-ingress` every HTTPRoute is dropped.
+- kubelet probes from the local host stay allowed (`allow-localhost=auto`).
+- The chart does not restart agents on ConfigMap changes; `rollOutCiliumPods` / `operator.rollOutPods` / `envoy.rollOutPods` are enabled so Helm value changes actually reach the running pods. Verify with `cilium-dbg config | grep PolicyEnforcement`, not with the ConfigMap.
+
 **Caveats:**
 - Do NOT add L7 HTTP rules (`rules.http`) to ingress of services using TLS passthrough (TLSRoute). Cilium attempts to parse encrypted traffic as HTTP, breaking the connection.
 - The `cluster` entity in `ingressDeny` includes `host` and `remote-node`. Since deny rules take precedence over allow rules, this blocks kubelet probes. Never use `cluster` in `ingressDeny` — use `world` only. For pods with probes, prefer ingress allow-only policies (implicit default deny) over `ingressDeny`.
 
 ## Cluster-Wide Policies (CCNP)
 
-| Policy | Selector | Egress |
-|---|---|---|
-| **allow-dns** | all pods (`io.cilium.k8s.policy.cluster: default`) | kube-dns:53 (UDP/TCP) with L7 DNS proxy (`matchPattern: "*"`) |
+| Policy | Selector | Ingress | Egress |
+|---|---|---|---|
+| **allow-dns** | all pods (`io.cilium.k8s.policy.cluster: default`) | — | kube-dns:53 (UDP/TCP) with L7 DNS proxy (`matchPattern: "*"`) |
+| **cilium-health-checks** | `reserved:health` (cilium-health endpoint) | remote-node | remote-node |
+| **allow-gateway-ingress** | `reserved:ingress` (Gateway API Envoy) | world, cluster | cluster (per-backend restriction is each backend CNP's job) |
 
 All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do not repeat this rule. The selector excludes Cilium internal endpoints (e.g. Gateway) to avoid breaking `enforce_policy_on_l7lb`. L7 DNS rules enable Cilium DNS proxy for Hubble DNS metrics visibility.
 

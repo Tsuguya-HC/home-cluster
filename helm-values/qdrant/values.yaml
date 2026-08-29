@@ -6,6 +6,8 @@ image:
 config:
   cluster:
     enabled: false
+  # telemetry.qdrant.io への送信。CNP で落ちて 1 日 400〜800 件の drop になっていたので送信側で止める
+  telemetry_disabled: true
 
 service:
   type: ClusterIP

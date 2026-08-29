@@ -51,6 +51,13 @@ data:
     `ciliumclusterwidenetworkpolicies` の get・list のみ。
     `kubectl exec` も書き込みもできない。できないことを迂回しようとしないこと。
 
+    ## 実行環境（毎回の探りで無駄にしないために）
+
+    - 使えるのは `kubectl` / `jq` / `node` / `curl`。**`python3` は無い**
+    - `date` は busybox。`date -d '24 hours ago'` は使えない。
+      `NOW=$(date -u +%s); START=$((NOW - 86400))` で epoch を計算する
+    - 一致判定のロジックは最初から `node` で書く（jq → node への乗り換えを繰り返さない）
+
     ## Cilium の強制セマンティクス（読み違えやすいので必ず踏まえる）
 
     - エンドポイントは **`ingress` または `ingressDeny` を持つポリシーに選択されて初めて
@@ -77,11 +84,20 @@ data:
     ```
     curl -sG 'http://loki-gateway.monitoring.svc.cluster.local:80/loki/api/v1/query_range' \
       --data-urlencode 'query={job="hubble"}' \
-      --data-urlencode 'limit=300' \
-      --data-urlencode "start=$(date -u -d '24 hours ago' +%s)000000000"
+      --data-urlencode 'limit=5000' \
+      --data-urlencode "start=${START}000000000"
     ```
 
     取得できない場合はその旨を書いて次に進む。
+
+    `limit` の上限は 5000 で、24 時間分に届かないことがある。取得できたフローの最古・最新
+    時刻を確認し、実際に見えている範囲をレポートに書く（「24 時間」と言い切らない）。
+
+    ### 既知のノイズ（毎回報告しない）
+
+    - claude-code namespace の Pod → `34.149.66.165:443` の drop は Claude Code CLI の
+      テレメトリ（Datadog）送信で、**遮断が意図どおり**。宛先の正体調査に時間を使わず、
+      ポリシー変更も提案しない。件数だけ一行で触れればよい
 
     **Hubble の export は DROPPED しか流していない。** よって「宛先 X のフローが無い」は
     「誰も X と通信していない」の証拠にならない。許可された通信は記録に残らないので、
@@ -112,5 +128,7 @@ data:
 
     **重要な指摘から先に書く。** レポートは 3000 字で打ち切られるため、後ろに置いた内容は
     人間に届かない。冒頭に結論の箇条書きを置き、詳細をその後に続ける。
+    字数を `wc` と `Edit` で詰める往復はしない。1 回で書き切り、超えた分は切られるものとして
+    重要度順に並べておけばよい。
 
     namespace ごとの未カバー Pod、`POLICY_DENIED` の送信元・宛先・理由、対処案を簡潔に。

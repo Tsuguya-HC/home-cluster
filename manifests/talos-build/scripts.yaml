@@ -49,7 +49,7 @@ data:
       "${SB_ISO}" \
       /tmp/vmlinuz-amd64 \
       /tmp/initramfs-amd64.xz \
-      --repo Tsuguya/talos-custom-build \
+      --repo Tsuguya-HC/talos-custom-build \
       --clobber
     echo "=== Done ==="
 
@@ -64,7 +64,7 @@ data:
     export PATH="/tmp:$PATH"
 
     gh release edit "${VERSION}" \
-      --repo Tsuguya/talos-custom-build \
+      --repo Tsuguya-HC/talos-custom-build \
       --prerelease=false \
       --notes "Custom Talos build with UFS + SecureBoot.
 

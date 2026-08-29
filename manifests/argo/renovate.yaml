@@ -27,7 +27,7 @@ spec:
   arguments:
     parameters:
       - name: repositories
-        value: '["Tsuguya-HC/home-cluster"]'
+        value: '["Tsuguya-HC/home-cluster","Tsuguya-HC/home-infra"]'
   synchronization:
     mutexes:
       - name: renovate
@@ -177,4 +177,4 @@ spec:
     arguments:
       parameters:
         - name: repositories
-          value: '["Tsuguya/home-infra","Tsuguya/home-cloudflare","Tsuguya/home-trading"]'
+          value: '["Tsuguya/home-cloudflare","Tsuguya/home-trading"]'

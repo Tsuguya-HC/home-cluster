@@ -71,7 +71,7 @@ spec:
             - name: GITHUB_APP_ID
               value: "2998228"
             - name: GITHUB_REPO
-              value: "Tsuguya/images"
+              value: "Tsuguya-HC/images"
           securityContext:
             runAsUser: 65532
             runAsNonRoot: true
@@ -97,7 +97,7 @@ spec:
           - |
             GITHUB_TOKEN=$(cat /github-token/token)
             cd /tmp
-            git clone "https://x-access-token:${GITHUB_TOKEN}@github.com/Tsuguya/images.git" repo
+            git clone "https://x-access-token:${GITHUB_TOKEN}@github.com/Tsuguya-HC/images.git" repo
             cd repo
             # Every directory that holds a Dockerfile is an image.
             find . -name Dockerfile -not -path './.git/*' \
@@ -206,7 +206,7 @@ spec:
             - name: GITHUB_APP_ID
               value: "2998228"
             - name: GITHUB_REPO
-              value: "Tsuguya/images"
+              value: "Tsuguya-HC/images"
           securityContext:
             runAsUser: 65532
             runAsNonRoot: true
@@ -232,7 +232,7 @@ spec:
             - |
               GITHUB_TOKEN=$(cat /github-token/token)
               git config --global --add safe.directory /workspace
-              git clone "https://x-access-token:${GITHUB_TOKEN}@github.com/Tsuguya/images.git" /workspace
+              git clone "https://x-access-token:${GITHUB_TOKEN}@github.com/Tsuguya-HC/images.git" /workspace
               cd /workspace && git checkout "$COMMIT_SHA"
           env:
             - name: HOME

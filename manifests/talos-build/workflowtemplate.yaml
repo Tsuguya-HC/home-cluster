@@ -123,7 +123,7 @@ spec:
             set -u
             VERSION="{{inputs.parameters.version}}"
             if [ -z "$VERSION" ]; then
-              RESPONSE=$(curl -sf -m 10 https://api.github.com/repos/Tsuguya/talos-custom-build/releases/latest) || {
+              RESPONSE=$(curl -sf -m 10 https://api.github.com/repos/Tsuguya-HC/talos-custom-build/releases/latest) || {
                 echo "ERROR: GitHub API request failed" >&2
                 exit 1
               }
@@ -179,7 +179,7 @@ spec:
             - name: GITHUB_APP_ID
               value: "2998228"
             - name: GITHUB_REPO
-              value: "Tsuguya/talos-custom-build"
+              value: "Tsuguya-HC/talos-custom-build"
           securityContext:
             runAsUser: 65532
             runAsNonRoot: true
@@ -317,7 +317,7 @@ spec:
             - name: GITHUB_APP_ID
               value: "2998228"
             - name: GITHUB_REPO
-              value: "Tsuguya/talos-custom-build"
+              value: "Tsuguya-HC/talos-custom-build"
           securityContext:
             runAsUser: 65532
             runAsNonRoot: true
@@ -491,7 +491,7 @@ spec:
             - name: GITHUB_APP_ID
               value: "2998228"
             - name: GITHUB_REPO
-              value: "Tsuguya/talos-custom-build"
+              value: "Tsuguya-HC/talos-custom-build"
           securityContext:
             runAsUser: 65532
             runAsNonRoot: true

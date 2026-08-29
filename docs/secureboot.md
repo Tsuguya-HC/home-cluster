@@ -163,7 +163,7 @@ Setup Mode でありさえすれば systemd-boot が登録してくれる。2026
 逆（Setup Mode だけにして Secure Boot は Enabled のまま）だと、**USB 自体が Secure Boot Violation で弾かれて
 enroll 画面に到達できない**。仕様上 Setup Mode では署名検証しないはずだが、この AMI 実装は弾く。
 
-0. **ISO を焼く前に中身を検証**（[GitHub Release](https://github.com/Tsuguya/talos-custom-build/releases) の `metal-amd64-secureboot.iso`）:
+0. **ISO を焼く前に中身を検証**（[GitHub Release](https://github.com/Tsuguya-HC/talos-custom-build/releases) の `metal-amd64-secureboot.iso`）:
    ```bash
    # ESP をマウントして確認（ISO 内のパーティション2）
    sbverify --list EFI/Linux/Talos-*.efi   # → issuer: /O=Test UKI Signing Key なら署名済み

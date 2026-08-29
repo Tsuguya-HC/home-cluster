@@ -45,7 +45,7 @@ spec:
       active: false
       contentType: json
     talos-build:
-      owner: Tsuguya
+      owner: Tsuguya-HC
       repository: talos-custom-build
       webhook:
         endpoint: /talos-build
@@ -59,7 +59,7 @@ spec:
       active: false
       contentType: json
     home-infra:
-      owner: Tsuguya
+      owner: Tsuguya-HC
       repository: home-infra
       webhook:
         endpoint: /home-infra
@@ -73,7 +73,7 @@ spec:
       active: false
       contentType: json
     images:
-      owner: Tsuguya
+      owner: Tsuguya-HC
       repository: images
       webhook:
         endpoint: /images
@@ -87,7 +87,7 @@ spec:
       active: false
       contentType: json
     memory:
-      owner: Tsuguya
+      owner: Tsuguya-HC
       repository: memory
       webhook:
         endpoint: /memory
@@ -101,7 +101,7 @@ spec:
       active: false
       contentType: json
     horenso:
-      owner: Tsuguya
+      owner: Tsuguya-HC
       repository: horenso
       webhook:
         endpoint: /horenso
@@ -136,7 +136,7 @@ spec:
       active: false
       contentType: json
     home-rss:
-      owner: Tsuguya
+      owner: Tsuguya-HC
       repository: home-rss
       webhook:
         endpoint: /home-rss
@@ -150,7 +150,7 @@ spec:
       active: false
       contentType: json
     home-actions:
-      owner: Tsuguya
+      owner: Tsuguya-HC
       repository: home-actions
       webhook:
         endpoint: /home-actions
@@ -164,7 +164,7 @@ spec:
       active: false
       contentType: json
     taskflow:
-      owner: Tsuguya
+      owner: Tsuguya-HC
       repository: taskflow
       webhook:
         endpoint: /taskflow
@@ -195,7 +195,7 @@ spec:
       active: false
       contentType: json
     renovate-home-infra:
-      owner: Tsuguya
+      owner: Tsuguya-HC
       repository: home-infra
       webhook:
         endpoint: /renovate-home-infra

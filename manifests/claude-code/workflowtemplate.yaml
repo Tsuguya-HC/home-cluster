@@ -122,7 +122,7 @@ spec:
             - name: GITHUB_APP_ID
               value: "2998228"
             - name: GITHUB_REPO
-              value: "Tsuguya/home-rss"
+              value: "Tsuguya-HC/home-rss"
           securityContext:
             runAsUser: 65532
             runAsNonRoot: true
@@ -148,14 +148,14 @@ spec:
             - |
               export GITHUB_TOKEN=$(cat /github-token/token)
               git config --global --add safe.directory /workspace
-              git clone "https://x-access-token:${GITHUB_TOKEN}@github.com/Tsuguya/home-rss.git" /workspace
+              git clone "https://x-access-token:${GITHUB_TOKEN}@github.com/Tsuguya-HC/home-rss.git" /workspace
               cd /workspace
               git checkout -b "issue-${ISSUE_NUMBER}"
               git config user.name "tgy-cluster-bot[bot]"
               git config user.email "tgy-cluster-bot[bot]@users.noreply.github.com"
               mkdir -p /workspace/.bin
               cp /usr/local/bin/github-signed-commit.sh /workspace/.bin/
-              curl -sf -H "Authorization: token ${GITHUB_TOKEN}" "https://api.github.com/repos/Tsuguya/home-rss/issues/${ISSUE_NUMBER}" | jq -r '"# Issue #\(.number): \(.title)\n\n\(.body)"' > /workspace/ISSUE.md
+              curl -sf -H "Authorization: token ${GITHUB_TOKEN}" "https://api.github.com/repos/Tsuguya-HC/home-rss/issues/${ISSUE_NUMBER}" | jq -r '"# Issue #\(.number): \(.title)\n\n\(.body)"' > /workspace/ISSUE.md
               cp -R /workspace/k8s/.claude /claude-home/
           env:
             - name: HOME
@@ -196,7 +196,7 @@ spec:
             ## Git コミット（署名付き）
             git commit + git push の代わりに、github-signed-commit.sh を使うこと。
             1. git add でファイルをステージ
-            2. /workspace/.bin/github-signed-commit.sh -r Tsuguya/home-rss -m 'コミットメッセージ' を実行
+            2. /workspace/.bin/github-signed-commit.sh -r Tsuguya-HC/home-rss -m 'コミットメッセージ' を実行
             これにより GitHub API 経由で署名付きコミットが作成され、ローカルも同期される。
             PR 作成は署名コミット後に gh pr create で行う。"
             fi

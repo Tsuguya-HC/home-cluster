@@ -120,7 +120,7 @@ spec:
                 arguments:
                   parameters:
                     - name: repo-url
-                      value: github.com/Tsuguya/memory
+                      value: github.com/Tsuguya-HC/memory
                     - name: image-name
                       value: memory
                     - name: commit-sha
@@ -151,7 +151,7 @@ spec:
                 arguments:
                   parameters:
                     - name: repo-url
-                      value: github.com/Tsuguya/horenso
+                      value: github.com/Tsuguya-HC/horenso
                     - name: image-name
                       value: horenso
                     - name: commit-sha
@@ -219,7 +219,7 @@ spec:
                 arguments:
                   parameters:
                     - name: repo-url
-                      value: github.com/Tsuguya/taskflow
+                      value: github.com/Tsuguya-HC/taskflow
                     - name: image-name
                       value: taskflow
                     - name: commit-sha
@@ -250,7 +250,7 @@ spec:
                 arguments:
                   parameters:
                     - name: repo-url
-                      value: github.com/Tsuguya/taskflow
+                      value: github.com/Tsuguya-HC/taskflow
                     - name: image-name
                       value: agent-sidecar
                     - name: commit-sha

@@ -124,7 +124,7 @@ spec:
                 arguments:
                   parameters:
                     - name: repositories
-                      value: '["Tsuguya/home-infra"]'
+                      value: '["Tsuguya-HC/home-infra"]'
     - template:
         name: renovate-home-cloudflare
         conditions: "home-cloudflare"

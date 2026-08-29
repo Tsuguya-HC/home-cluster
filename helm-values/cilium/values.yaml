@@ -37,6 +37,7 @@ resources:
     memory: 768Mi
 
 operator:
+  rollOutPods: true
   resources:
     requests:
       cpu: 10m
@@ -45,6 +46,7 @@ operator:
       memory: 256Mi
 
 envoy:
+  rollOutPods: true
   resources:
     requests:
       cpu: 10m
@@ -58,6 +60,11 @@ envoy:
 # always なら書き忘れは「開く」でなく「閉じる」側に倒れる。
 # cilium-health の疎通は manifests/infra/ccnp-health.yaml で許可している。
 policyEnforcementMode: always
+
+# ConfigMap を変えても chart は既定で Pod を巻き直さない。policyEnforcementMode を
+# always にした直後、rollout status は「成功」なのに agent は default のまま動いていた
+# （cilium-dbg config で確認）。config の checksum を Pod annotation に載せて自動で巻く。
+rollOutCiliumPods: true
 
 extraConfig:
   tofqdns-min-ttl: "30"

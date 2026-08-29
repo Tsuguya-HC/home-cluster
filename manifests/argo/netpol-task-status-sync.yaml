@@ -7,6 +7,9 @@ spec:
   endpointSelector:
     matchLabels:
       eventsource-name: task-status-sync
+  ingressDeny:
+    - fromEntities:
+        - world
   egress:
     - toEndpoints:
         - matchLabels:
@@ -31,6 +34,9 @@ spec:
   endpointSelector:
     matchLabels:
       sensor-name: task-status-sync
+  ingressDeny:
+    - fromEntities:
+        - world
   egress:
     - toEndpoints:
         - matchLabels:
@@ -55,6 +61,9 @@ spec:
   endpointSelector:
     matchLabels:
       task-fail-sync: "true"
+  ingressDeny:
+    - fromEntities:
+        - world
   egress:
     - toEndpoints:
         - matchLabels:

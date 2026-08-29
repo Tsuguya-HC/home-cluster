@@ -121,7 +121,7 @@ spec:
           fsGroup: 65532
         initContainers:
           - name: prepare
-            image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:5309221e4c5721f9b7c091195db1a592320b88390734bb745f8eb69041ddf3ed
+            image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:5e9b27dfa5042f7d9a3518c305283c1e665ebca44645d740fb592b48fedca627
             command: [sh, -c]
             args:
               - |
@@ -237,7 +237,7 @@ spec:
           runAsUser: 65532
           runAsNonRoot: true
         container:
-          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:5309221e4c5721f9b7c091195db1a592320b88390734bb745f8eb69041ddf3ed
+          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:5e9b27dfa5042f7d9a3518c305283c1e665ebca44645d740fb592b48fedca627
           command: [sh, -c]
           args:
             - |

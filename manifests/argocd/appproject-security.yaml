@@ -11,7 +11,7 @@ spec:
     - https://oauth2-proxy.github.io/manifests
     - https://aquasecurity.github.io/helm-charts
     - https://kyverno.github.io/kyverno/
-    - https://github.com/Tsuguya/home-cluster.git
+    - https://github.com/Tsuguya-HC/home-cluster.git
   destinations:
     - server: https://kubernetes.default.svc
       namespace: '*'

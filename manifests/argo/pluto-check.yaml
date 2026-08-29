@@ -175,7 +175,7 @@ spec:
           rm -f /tmp/app-key.pem
 
           echo "=== Cloning home-cluster ==="
-          git clone "https://x-access-token:${GITHUB_TOKEN}@github.com/Tsuguya/home-cluster.git" /tmp/workspace
+          git clone "https://x-access-token:${GITHUB_TOKEN}@github.com/Tsuguya-HC/home-cluster.git" /tmp/workspace
           cd /tmp/workspace
 
           echo "[detect-all-in-cluster]"
@@ -211,7 +211,7 @@ spec:
           fi
 
           echo "=== Creating signed commit via GitHub GraphQL API ==="
-          REPO="Tsuguya/home-cluster"
+          REPO="Tsuguya-HC/home-cluster"
           BRANCH="fix/deprecated-api-$(date +%Y%m%d-%H%M%S)"
           BASE_SHA=$(gh api "repos/${REPO}/git/ref/heads/main" --jq '.object.sha')
           gh api "repos/${REPO}/git/refs" --method POST --input - <<JEOF

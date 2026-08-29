@@ -179,7 +179,7 @@ spec:
       active: false
       contentType: json
     renovate-home-cluster:
-      owner: Tsuguya
+      owner: Tsuguya-HC
       repository: home-cluster
       webhook:
         endpoint: /renovate-home-cluster

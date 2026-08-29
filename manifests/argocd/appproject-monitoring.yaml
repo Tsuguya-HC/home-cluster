@@ -9,7 +9,7 @@ spec:
     - https://grafana.github.io/helm-charts
     - https://grafana-community.github.io/helm-charts
     - https://prometheus-community.github.io/helm-charts
-    - https://github.com/Tsuguya/home-cluster.git
+    - https://github.com/Tsuguya-HC/home-cluster.git
   destinations:
     - server: https://kubernetes.default.svc
       namespace: monitoring

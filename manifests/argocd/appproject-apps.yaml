@@ -9,7 +9,7 @@ spec:
     - https://nextcloud.github.io/helm/
     - https://valkey.io/valkey-helm/
     - https://helm.goharbor.io
-    - https://github.com/Tsuguya/home-cluster.git
+    - https://github.com/Tsuguya-HC/home-cluster.git
     # trading のマニフェストは private リポに置く
     # （CNP の egress ルールが取引先とデータソースを列挙するため）
     - https://github.com/Tsuguya/home-trading.git

@@ -8,7 +8,7 @@ spec:
   sourceRepos:
     - https://qdrant.github.io/qdrant-helm
     - https://helm.otwld.com/
-    - https://github.com/Tsuguya/home-cluster.git
+    - https://github.com/Tsuguya-HC/home-cluster.git
   destinations:
     - server: https://kubernetes.default.svc
       namespace: qdrant

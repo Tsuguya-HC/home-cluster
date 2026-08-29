@@ -6,13 +6,13 @@ metadata:
 spec:
   project: storage
   sources:
-    - repoURL: https://github.com/Tsuguya/home-cluster.git
+    - repoURL: https://github.com/Tsuguya-HC/home-cluster.git
       targetRevision: main
       path: kustomize/qnap-csi
-    - repoURL: https://github.com/Tsuguya/home-cluster.git
+    - repoURL: https://github.com/Tsuguya-HC/home-cluster.git
       targetRevision: main
       path: manifests/trident
-    - repoURL: https://github.com/Tsuguya/home-cluster.git
+    - repoURL: https://github.com/Tsuguya-HC/home-cluster.git
       targetRevision: main
       path: manifests/storage
   destination:

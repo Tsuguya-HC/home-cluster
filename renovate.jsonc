@@ -191,7 +191,7 @@
         "our own reusable workflow only delays fixes to the thing that gates every",
         "other check."
       ],
-      "matchPackageNames": ["Tsuguya/**"],
+      "matchPackageNames": ["Tsuguya/**", "Tsuguya-HC/**"],
       "minimumReleaseAge": "0"
     },
     {
@@ -302,7 +302,7 @@
         "helpers:pinGitHubActionDigests would otherwise do just that."
       ],
       "matchManagers": ["github-actions"],
-      "matchDepNames": ["Tsuguya/home-cluster"],
+      "matchDepNames": ["Tsuguya-HC/home-cluster"],
       "enabled": false
     },
     {

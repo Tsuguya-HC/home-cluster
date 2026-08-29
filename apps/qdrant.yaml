@@ -13,10 +13,10 @@ spec:
         releaseName: qdrant
         valueFiles:
           - $values/helm-values/qdrant/values.yaml
-    - repoURL: https://github.com/Tsuguya/home-cluster.git
+    - repoURL: https://github.com/Tsuguya-HC/home-cluster.git
       targetRevision: main
       ref: values
-    - repoURL: https://github.com/Tsuguya/home-cluster.git
+    - repoURL: https://github.com/Tsuguya-HC/home-cluster.git
       targetRevision: main
       path: manifests/qdrant
   destination:

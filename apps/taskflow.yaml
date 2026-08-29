@@ -6,10 +6,10 @@ metadata:
 spec:
   project: ai
   sources:
-    - repoURL: https://github.com/Tsuguya/home-cluster.git
+    - repoURL: https://github.com/Tsuguya-HC/home-cluster.git
       targetRevision: main
       path: kustomize/taskflow
-    - repoURL: https://github.com/Tsuguya/home-cluster.git
+    - repoURL: https://github.com/Tsuguya-HC/home-cluster.git
       targetRevision: main
       path: manifests/taskflow-system
   destination:

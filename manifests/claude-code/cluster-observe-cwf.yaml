@@ -26,7 +26,7 @@ spec:
           runAsGroup: 65532
           fsGroup: 65532
         container:
-          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:5e9b27dfa5042f7d9a3518c305283c1e665ebca44645d740fb592b48fedca627
+          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:d5db59cac14b23a4ef85a456754522463267324e8ed3a84e795a2eba829c8f05
           command: [sh, -c]
           args:
             - |

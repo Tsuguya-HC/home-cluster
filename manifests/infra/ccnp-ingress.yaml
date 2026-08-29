@@ -1,0 +1,22 @@
+# policyEnforcementMode: always では Gateway API の Envoy（reserved:ingress identity）も
+# 両方向 default deny になり、全 HTTPRoute が http-request DROPPED になる（2026-08-29 実測）。
+# upstream 例（examples/kubernetes/servicemesh/policy/allow-ingress-cluster.yaml）は
+# egress → cluster のみだが、always では ingress 側も強制されるので world / cluster
+# からの受信も許可する。Cilium 自身が「Ingress はネットワーク基盤の一部なので
+# cluster 全体へ許可するのが無難」と述べている。宛先の絞り込みは各 backend の CNP が担う。
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: allow-gateway-ingress
+spec:
+  endpointSelector:
+    matchExpressions:
+      - key: reserved:ingress
+        operator: Exists
+  ingress:
+    - fromEntities:
+        - world
+        - cluster
+  egress:
+    - toEntities:
+        - cluster

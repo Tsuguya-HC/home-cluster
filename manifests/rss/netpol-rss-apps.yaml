@@ -119,6 +119,9 @@ spec:
   endpointSelector:
     matchLabels:
       rss-cron: "true"
+  ingressDeny:
+    - fromEntities:
+        - world
   egress:
     - toEndpoints:
         - matchLabels:
@@ -168,6 +171,9 @@ spec:
   endpointSelector:
     matchLabels:
       workflows.argoproj.io/on-exit: "true"
+  ingressDeny:
+    - fromEntities:
+        - world
   egress:
     - toEntities:
         - kube-apiserver
@@ -200,6 +206,9 @@ spec:
   endpointSelector:
     matchLabels:
       app: rss-migration
+  ingressDeny:
+    - fromEntities:
+        - world
   egress:
     - toEndpoints:
         - matchLabels:

@@ -136,12 +136,12 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 | **alertmanager-eventsource** | alertmanager (monitoring) → 12001 | kube-apiserver, eventbus:4222 |
 | **argocd-deployed-eventsource** | notifications-controller (argocd) → 12003 | kube-apiserver, eventbus:4222 |
 | **task-dispatch-eventsource** | horenso (horenso), claude-code (claude-code) → 12002 | kube-apiserver, eventbus:4222 |
-| **task-status-sync-eventsource** | (none) | kube-apiserver, eventbus:4222 |
-| **task-status-sync-sensor** | (none) | kube-apiserver, eventbus:4222 |
-| **task-fail-sync** (task-fail-sync=true) | (none) | horenso (horenso):3000 |
+| **task-status-sync-eventsource** | (deny world) | kube-apiserver, eventbus:4222 |
+| **task-status-sync-sensor** | (deny world) | kube-apiserver, eventbus:4222 |
+| **task-fail-sync** (task-fail-sync=true) | (deny world) | horenso (horenso):3000 |
 | **horenso-maintenance** (horenso-maintenance=true, CronWorkflow 4:30 JST) | (none) | horenso (horenso):3000 |
 | **sensor** (tofu-cloudflare, tofu-unifi, tofu-harbor, upgrade-k8s, pxe-sync, talos-build, images-build, single-repo-build, alert-investigate, task-dispatch, renovate-webhook, aqua-checksum) | (deny world) | kube-apiserver, eventbus:4222, workflows-server:2746 |
-| **talos-extension-bump-sensor** | (none) | kube-apiserver, eventbus:4222 |
+| **talos-extension-bump-sensor** | (deny world) | kube-apiserver, eventbus:4222 |
 | **events-controller** | host → 8081 | kube-apiserver, eventbus:8222 |
 | **eventbus** | eventsource (github-webhook), alertmanager-eventsource (alertmanager-webhook), task-dispatch-eventsource (task-dispatch), task-status-sync-eventsource (task-status-sync), argocd-deployed-eventsource (argocd-deployed), sensors (tofu-cloudflare, tofu-unifi, tofu-harbor, upgrade-k8s, pxe-sync, talos-build, images-build, single-repo-build, alert-investigate, task-dispatch, task-status-sync, talos-extension-bump, renovate-webhook, aqua-checksum) → 4222; self → 6222/7777; events-controller → 8222 | self:6222/7777 |
 | **workflow-pods** (backup-workflow, pxe-sync, talos-build, kanidm-repl-exchange, kanidm-backup, aqua-checksum除外) | (deny world) | kube-apiserver, HTTPS 443, kube-apiserver/remote-node/host:50000 (Talos apid — node IP は node identity を持つので toCIDR では一致しない), seaweedfs-filer (seaweedfs):8333 |
@@ -200,7 +200,7 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 |---|---|---|
 | **master** | master/volume/filer/bucket-hook → 9333/19333; prometheus (monitoring) → 9327 | master (self):9333/19333, volume:8080/18080, filer:8888/18888 |
 | **volume** | master/filer/volume (self) → 8080/18080; prometheus (monitoring) → 9327 | master:9333/19333, volume (self):8080/18080 |
-| **filer** | loki (monitoring), tempo (monitoring), workflow-pods (argo), workflow-pods (talos-build), workflow-pods (image-build), workflow-pods (claude-code), workflow-pods (rss), workflows-server (argo), etcd-backup (argo), pxe-sync (argo), kanidm-backup (argo), kanidm-repl-exchange (argo), aqua-checksum (argo), nextcloud (nextcloud), harbor-registry (harbor), trading (collector) → 8333; filer/master/bucket-hook/oauth2-proxy-seaweedfs (oauth2-proxy) → 8888/18888; prometheus (monitoring) → 9327 | master:9333/19333, volume:8080/18080, filer (self):8888/18888, shared-pg (database):5432 |
+| **filer** | loki (monitoring), tempo (monitoring), workflow-pods (argo), workflow-pods (talos-build), workflow-pods (image-build), workflow-pods (claude-code), workflow-pods (rss), workflows-server (argo), etcd-backup (argo), pxe-sync (argo), kanidm-backup (argo), kanidm-repl-exchange (argo), aqua-checksum (argo), nextcloud (nextcloud), harbor-registry (harbor), collector (trading) → 8333; filer/master/bucket-hook/oauth2-proxy-seaweedfs (oauth2-proxy) → 8888/18888; prometheus (monitoring) → 9327 | master:9333/19333, volume:8080/18080, filer (self):8888/18888, shared-pg (database):5432 |
 | **bucket-hook** (Job) | (deny world) | master:9333/19333, filer:8888/18888 |
 
 ## kube-system (6 policies)
@@ -316,9 +316,9 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 | **rss-ui** | oauth2-proxy-rss (oauth2-proxy) → 80 | rss-pg:5432 |
 | **rss-fetcher** | rss-cron → 80 | rss-pg:5432, world:443 |
 | **rss-cleaner** | rss-cron → 80 | rss-pg:5432 |
-| **rss-cron** | (none) | rss-fetcher:80, rss-cleaner:80, kube-apiserver:6443, seaweedfs-filer (seaweedfs):8333 |
-| **rss-workflow-exit** (workflows.argoproj.io/on-exit=true) | (none) | kube-apiserver:6443, seaweedfs-filer (seaweedfs):8333, discord.com:443 |
-| **rss-migration** (Job) | (none) | rss-pg:5432 |
+| **rss-cron** | (deny world) | rss-fetcher:80, rss-cleaner:80, kube-apiserver:6443, seaweedfs-filer (seaweedfs):8333 |
+| **rss-workflow-exit** (workflows.argoproj.io/on-exit=true) | (deny world) | kube-apiserver:6443, seaweedfs-filer (seaweedfs):8333, discord.com:443 |
+| **rss-migration** (Job) | (deny world) | rss-pg:5432 |
 
 ## horenso (1 policy)
 

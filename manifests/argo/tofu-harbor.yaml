@@ -38,8 +38,8 @@ spec:
           env:
             - name: GITHUB_APP_ID
               value: "2998228"
-            - name: GITHUB_APP_INSTALLATION_ID
-              value: "113765957"
+            - name: GITHUB_REPO
+              value: "Tsuguya/home-harbor"
           securityContext:
             runAsUser: 65532
             runAsNonRoot: true
@@ -155,8 +155,8 @@ spec:
           env:
             - name: GITHUB_APP_ID
               value: "2998228"
-            - name: GITHUB_APP_INSTALLATION_ID
-              value: "113765957"
+            - name: GITHUB_REPO
+              value: "Tsuguya/home-harbor"
           securityContext:
             runAsUser: 65532
             runAsNonRoot: true

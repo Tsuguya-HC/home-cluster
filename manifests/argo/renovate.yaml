@@ -27,7 +27,7 @@ spec:
   arguments:
     parameters:
       - name: repositories
-        value: '["Tsuguya-HC/home-cluster","Tsuguya/home-infra","Tsuguya/home-cloudflare","Tsuguya/home-trading"]'
+        value: '["Tsuguya-HC/home-cluster"]'
   synchronization:
     mutexes:
       - name: renovate
@@ -68,8 +68,8 @@ spec:
           env:
             - name: GITHUB_APP_ID
               value: "2998228"
-            - name: GITHUB_APP_INSTALLATION_ID
-              value: "113765957"
+            - name: GITHUB_REPO
+              value: "{{=jsonpath(workflow.parameters.repositories, '$[0]')}}"
           securityContext:
             runAsUser: 65532
             runAsNonRoot: true
@@ -156,3 +156,25 @@ spec:
   workflowSpec:
     workflowTemplateRef:
       name: renovate
+---
+# One installation token covers one account, so repositories under the
+# personal account run separately from the organization's. The mutex on the
+# template serialises the two runs.
+apiVersion: argoproj.io/v1alpha1
+kind: CronWorkflow
+metadata:
+  name: renovate-periodic-personal
+  namespace: argo
+spec:
+  schedules:
+    - "30 */4 * * *"
+  timezone: Asia/Tokyo
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 600
+  workflowSpec:
+    workflowTemplateRef:
+      name: renovate
+    arguments:
+      parameters:
+        - name: repositories
+          value: '["Tsuguya/home-infra","Tsuguya/home-cloudflare","Tsuguya/home-trading"]'

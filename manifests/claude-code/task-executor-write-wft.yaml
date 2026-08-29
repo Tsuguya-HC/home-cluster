@@ -9,6 +9,8 @@ spec:
   entrypoint: main
   arguments:
     parameters:
+      - name: repo
+        value: Tsuguya-HC/home-cluster
       - name: task-id
       - name: task-title
       - name: task-description
@@ -61,8 +63,8 @@ spec:
           env:
             - name: GITHUB_APP_ID
               value: "2998228"
-            - name: GITHUB_APP_INSTALLATION_ID
-              value: "113765957"
+            - name: GITHUB_REPO
+              value: "{{workflow.parameters.repo}}"
           securityContext:
             runAsUser: 65532
             runAsNonRoot: true

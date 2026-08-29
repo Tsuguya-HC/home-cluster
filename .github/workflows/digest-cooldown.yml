@@ -17,11 +17,15 @@ on: # zizmor: ignore[dangerous-triggers]
   schedule:
     - cron: "23 * * * *"
   workflow_dispatch:
+  # マージキューの一時 commit にも digest-cooldown を報告する。action は
+  # merge_group では diff を再評価せず、PR head で確定済みの status を転記する
+  # （キューに入れた時点で head は success 済み、group の digest はその head のもの）。
+  merge_group:
 
 permissions: {}
 
 concurrency:
-  group: digest-cooldown-${{ github.event.pull_request.number || 'scan' }}
+  group: digest-cooldown-${{ github.event.pull_request.number || (github.event_name == 'merge_group' && github.ref) || 'scan' }}
   cancel-in-progress: false
 
 jobs:

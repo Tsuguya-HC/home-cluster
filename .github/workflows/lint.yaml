@@ -34,6 +34,12 @@ on:
     # 必須チェックに流用できてしまう。leaf の実行要否を base 差分で決める以上、
     # これは fail-open になる。
     types: [opened, synchronize, reopened, edited]
+  # マージキューは main に対する一時 commit（gh-readonly-queue/main/pr-N-<sha>）
+  # の上で必須チェックを取り直す。ここで報告しないとキューの entry は永久に
+  # 待つ。detect の dorny/paths-filter は merge_group を解釈して
+  # base_sha..head_sha の git diff で判定するので、leaf の実行要否は PR と同じ
+  # 基準で決まる。
+  merge_group:
 
 # Nothing here needs the token by default. Each job names its own scope, so a
 # new job added below starts with no permissions rather than inheriting write
@@ -46,7 +52,8 @@ on:
 permissions: {}
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.number }}
+  # merge_group には event.number が無いので ref（キューの一時ブランチ）で分ける。
+  group: ${{ github.workflow }}-${{ github.event.number || github.ref }}
   cancel-in-progress: true
 
 jobs:

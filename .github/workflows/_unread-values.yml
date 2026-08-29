@@ -50,11 +50,11 @@ jobs:
 
       - name: Check for values keys no chart reads
         env:
-          # オーケストレーターは pull_request でしか起動しないので、実際には
-          # 常に base SHA が入る。空になる経路（= 全チャート検査）は、将来
+          # オーケストレーターは pull_request と merge_group でしか起動しないので、
+          # 実際には常に base SHA が入る。空になる経路（= 全チャート検査）は、将来
           # workflow_dispatch や push を足したときのためにそのまま残してある。
           # 式を run の中に展開しないのは、ref をスクリプトに補間させないため。
-          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
+          BASE_SHA: ${{ (github.event_name == 'pull_request' && github.event.pull_request.base.sha) || (github.event_name == 'merge_group' && github.event.merge_group.base_sha) || '' }}
         run: |
           set -euo pipefail
           if [ -n "${BASE_SHA}" ]; then

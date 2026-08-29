@@ -77,4 +77,5 @@ egress:
 ## 注意事項
 
 - push は即座に本番反映される。変更内容をよく確認してから push
+- main はマージキュー経由でしか更新されない。PR のマージは `gh pr merge --squash` でキューに入り、main に対する一時 commit の上で `CI Gate` と `digest-cooldown` を取り直してから入る（main より遅れた緑 PR がそのまま載ることはない）
 - Cilium Gateway bug (#41970): HTTPRoute が付いた Service は `world` identity になり L7 proxy で 403 になる。クロスネームスペース HTTP は避ける

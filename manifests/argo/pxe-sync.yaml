@@ -186,7 +186,7 @@ spec:
             set -euo pipefail
 
             # renovate: datasource=github-releases depName=budimanjojo/talhelper
-            TALHELPER_VERSION="v3.1.16"
+            TALHELPER_VERSION="v3.1.17"
             # renovate: datasource=github-releases depName=getsops/sops
             SOPS_VERSION="v3.13.3"
 

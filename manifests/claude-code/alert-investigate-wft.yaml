@@ -84,7 +84,10 @@ spec:
             ## アラート概要
             ## 調査結果
             ## 根本原因
-            ## 修正手順" | tee /report/result.txt
+            ## 修正手順" > /report/result.txt 2>&1
+            RC=$?
+            cat /report/result.txt
+            exit $RC
         env:
           - name: HOME
             value: /tmp

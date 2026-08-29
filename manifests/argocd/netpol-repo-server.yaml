@@ -20,6 +20,7 @@ spec:
   egress:
     - toFQDNs:
         - matchName: "github.com"
+        - matchName: "api.github.com"
         - matchName: "argoproj.github.io"
         - matchName: "grafana.github.io"
         - matchName: "grafana-community.github.io"

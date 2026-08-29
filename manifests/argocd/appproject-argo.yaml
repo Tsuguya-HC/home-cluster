@@ -9,6 +9,7 @@ spec:
     - https://argoproj.github.io/argo-helm
     - https://github.com/Tsuguya-HC/home-cluster.git
     - https://github.com/Tsuguya/home-rss.git
+    - https://github.com/Tsuguya-HC/home-rss.git
   destinations:
     - server: https://kubernetes.default.svc
       namespace: argo

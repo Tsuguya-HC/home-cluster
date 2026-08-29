@@ -16,7 +16,7 @@ spec:
     arguments:
       parameters:
         - name: repo
-          value: Tsuguya/home-cluster
+          value: Tsuguya-HC/home-cluster
         - name: branch
           value: doc-audit/cnp
         - name: skip-if-pr-exists

@@ -20,10 +20,10 @@ spec:
         releaseName: valkey
         valueFiles:
           - $values/helm-values/valkey/values.yaml
-    - repoURL: https://github.com/Tsuguya/home-cluster.git
+    - repoURL: https://github.com/Tsuguya-HC/home-cluster.git
       targetRevision: main
       ref: values
-    - repoURL: https://github.com/Tsuguya/home-cluster.git
+    - repoURL: https://github.com/Tsuguya-HC/home-cluster.git
       targetRevision: main
       path: manifests/nextcloud
   destination:

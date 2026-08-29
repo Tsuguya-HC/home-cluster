@@ -13,7 +13,7 @@ spec:
         releaseName: tetragon
         valueFiles:
           - $values/helm-values/tetragon/values.yaml
-    - repoURL: https://github.com/Tsuguya/home-cluster.git
+    - repoURL: https://github.com/Tsuguya-HC/home-cluster.git
       targetRevision: main
       ref: values
   destination:

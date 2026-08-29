@@ -13,10 +13,10 @@ spec:
         releaseName: cnpg
         valueFiles:
           - $values/helm-values/cnpg/values.yaml
-    - repoURL: https://github.com/Tsuguya/home-cluster.git
+    - repoURL: https://github.com/Tsuguya-HC/home-cluster.git
       targetRevision: main
       ref: values
-    - repoURL: https://github.com/Tsuguya/home-cluster.git
+    - repoURL: https://github.com/Tsuguya-HC/home-cluster.git
       targetRevision: main
       path: manifests/cnpg-system
   destination:

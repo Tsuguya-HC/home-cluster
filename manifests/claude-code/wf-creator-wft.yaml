@@ -83,7 +83,7 @@ spec:
             - |
               export GITHUB_TOKEN=$(cat /github-token/token)
               git config --global --add safe.directory /workspace
-              git clone "https://x-access-token:${GITHUB_TOKEN}@github.com/Tsuguya/home-cluster.git" /workspace
+              git clone "https://x-access-token:${GITHUB_TOKEN}@github.com/Tsuguya-HC/home-cluster.git" /workspace
               cd /workspace
               git config user.name "tgy-cluster-bot[bot]"
               git config user.email "tgy-cluster-bot[bot]@users.noreply.github.com"
@@ -189,7 +189,7 @@ spec:
             ## Git コミット（署名付き）
             git commit + git push の代わりに、github-signed-commit.sh を使うこと。
             1. git add でファイルをステージ
-            2. /workspace/.bin/github-signed-commit.sh -r Tsuguya/home-cluster -m 'コミットメッセージ' を実行
+            2. /workspace/.bin/github-signed-commit.sh -r Tsuguya-HC/home-cluster -m 'コミットメッセージ' を実行
             これにより GitHub API 経由で署名付きコミットが作成され、ローカルも同期される。
             PR 作成は署名コミット後に gh pr create で行う。"
 

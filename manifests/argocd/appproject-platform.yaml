@@ -11,7 +11,7 @@ spec:
     - https://kubernetes-sigs.github.io/metrics-server
     - https://stakater.github.io/stakater-charts
     - ghcr.io/spinframework/charts
-    - https://github.com/Tsuguya/home-cluster.git
+    - https://github.com/Tsuguya-HC/home-cluster.git
   destinations:
     - server: https://kubernetes.default.svc
       namespace: argocd

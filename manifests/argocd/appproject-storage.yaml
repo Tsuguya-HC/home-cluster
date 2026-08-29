@@ -10,7 +10,7 @@ spec:
     - https://github.com/qnap-dev/QNAP-CSI-PlugIn.git
     - https://kubernetes-sigs.github.io/nfs-subdir-external-provisioner
     - https://seaweedfs.github.io/seaweedfs/helm
-    - https://github.com/Tsuguya/home-cluster.git
+    - https://github.com/Tsuguya-HC/home-cluster.git
   destinations:
     - server: https://kubernetes.default.svc
       namespace: cnpg-system

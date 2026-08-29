@@ -7,7 +7,7 @@ spec:
   description: Argo ecosystem (argo-events, argo-workflows)
   sourceRepos:
     - https://argoproj.github.io/argo-helm
-    - https://github.com/Tsuguya/home-cluster.git
+    - https://github.com/Tsuguya-HC/home-cluster.git
     - https://github.com/Tsuguya/home-rss.git
   destinations:
     - server: https://kubernetes.default.svc

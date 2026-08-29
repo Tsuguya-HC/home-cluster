@@ -153,13 +153,13 @@ spec:
         fsGroup: 65532
       initContainers:
         - name: github-auth
-          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:5309221e4c5721f9b7c091195db1a592320b88390734bb745f8eb69041ddf3ed
+          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:5e9b27dfa5042f7d9a3518c305283c1e665ebca44645d740fb592b48fedca627
           command: [github-auth.sh]
           env:
             - name: GITHUB_APP_ID
               value: "2998228"
-            - name: GITHUB_APP_INSTALLATION_ID
-              value: "113765957"
+            - name: GITHUB_REPO
+              value: "{{workflow.parameters.repo}}"
           securityContext:
             runAsUser: 65532
             runAsNonRoot: true
@@ -172,7 +172,7 @@ spec:
             requests: {cpu: 10m, memory: 32Mi}
             limits: {memory: 64Mi}
         - name: setup
-          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:5309221e4c5721f9b7c091195db1a592320b88390734bb745f8eb69041ddf3ed
+          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:5e9b27dfa5042f7d9a3518c305283c1e665ebca44645d740fb592b48fedca627
           command: [sh, -c]
           args:
             - |
@@ -327,11 +327,11 @@ spec:
           agent.tgy.io/phase: checks
       initContainers:
         - name: github-auth
-          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:5309221e4c5721f9b7c091195db1a592320b88390734bb745f8eb69041ddf3ed
+          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:5e9b27dfa5042f7d9a3518c305283c1e665ebca44645d740fb592b48fedca627
           command: [github-auth.sh]
           env:
             - {name: GITHUB_APP_ID, value: "2998228"}
-            - {name: GITHUB_APP_INSTALLATION_ID, value: "113765957"}
+            - {name: GITHUB_REPO, value: "{{workflow.parameters.repo}}"}
           securityContext:
             runAsUser: 65532
             runAsNonRoot: true
@@ -344,7 +344,7 @@ spec:
             requests: {cpu: 10m, memory: 32Mi}
             limits: {memory: 64Mi}
       script:
-        image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:5309221e4c5721f9b7c091195db1a592320b88390734bb745f8eb69041ddf3ed
+        image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:5e9b27dfa5042f7d9a3518c305283c1e665ebca44645d740fb592b48fedca627
         command: [sh]
         source: |
           set -u
@@ -473,11 +473,11 @@ spec:
         fsGroup: 65532
       initContainers:
         - name: github-auth
-          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:5309221e4c5721f9b7c091195db1a592320b88390734bb745f8eb69041ddf3ed
+          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:5e9b27dfa5042f7d9a3518c305283c1e665ebca44645d740fb592b48fedca627
           command: [github-auth.sh]
           env:
             - {name: GITHUB_APP_ID, value: "2998228"}
-            - {name: GITHUB_APP_INSTALLATION_ID, value: "113765957"}
+            - {name: GITHUB_REPO, value: "{{workflow.parameters.repo}}"}
           securityContext:
             runAsUser: 65532
             runAsGroup: 65532
@@ -491,7 +491,7 @@ spec:
             requests: {cpu: 10m, memory: 32Mi}
             limits: {memory: 64Mi}
         - name: prepare
-          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:5309221e4c5721f9b7c091195db1a592320b88390734bb745f8eb69041ddf3ed
+          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:5e9b27dfa5042f7d9a3518c305283c1e665ebca44645d740fb592b48fedca627
           command: [sh, -c]
           args:
             - |
@@ -598,7 +598,7 @@ spec:
           - {name: check}
           - {name: review}
       script:
-        image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:5309221e4c5721f9b7c091195db1a592320b88390734bb745f8eb69041ddf3ed
+        image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:5e9b27dfa5042f7d9a3518c305283c1e665ebca44645d740fb592b48fedca627
         command: [sh]
         source: |
           set -u
@@ -640,11 +640,11 @@ spec:
     - name: ready-for-review
       initContainers:
         - name: github-auth
-          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:5309221e4c5721f9b7c091195db1a592320b88390734bb745f8eb69041ddf3ed
+          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:5e9b27dfa5042f7d9a3518c305283c1e665ebca44645d740fb592b48fedca627
           command: [github-auth.sh]
           env:
             - {name: GITHUB_APP_ID, value: "2998228"}
-            - {name: GITHUB_APP_INSTALLATION_ID, value: "113765957"}
+            - {name: GITHUB_REPO, value: "{{workflow.parameters.repo}}"}
           securityContext:
             runAsUser: 65532
             runAsNonRoot: true
@@ -657,7 +657,7 @@ spec:
             requests: {cpu: 10m, memory: 32Mi}
             limits: {memory: 64Mi}
       script:
-        image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:5309221e4c5721f9b7c091195db1a592320b88390734bb745f8eb69041ddf3ed
+        image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:5e9b27dfa5042f7d9a3518c305283c1e665ebca44645d740fb592b48fedca627
         command: [sh]
         source: |
           set -eu
@@ -687,11 +687,11 @@ spec:
         parameters: [{name: verdict}]
       initContainers:
         - name: github-auth
-          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:5309221e4c5721f9b7c091195db1a592320b88390734bb745f8eb69041ddf3ed
+          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:5e9b27dfa5042f7d9a3518c305283c1e665ebca44645d740fb592b48fedca627
           command: [github-auth.sh]
           env:
             - {name: GITHUB_APP_ID, value: "2998228"}
-            - {name: GITHUB_APP_INSTALLATION_ID, value: "113765957"}
+            - {name: GITHUB_REPO, value: "{{workflow.parameters.repo}}"}
           securityContext:
             runAsUser: 65532
             runAsNonRoot: true
@@ -704,7 +704,7 @@ spec:
             requests: {cpu: 10m, memory: 32Mi}
             limits: {memory: 64Mi}
       script:
-        image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:5309221e4c5721f9b7c091195db1a592320b88390734bb745f8eb69041ddf3ed
+        image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:5e9b27dfa5042f7d9a3518c305283c1e665ebca44645d740fb592b48fedca627
         command: [sh]
         source: |
           set -u

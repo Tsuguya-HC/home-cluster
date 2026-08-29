@@ -155,8 +155,8 @@ spec:
                 key: private-key
           - name: GITHUB_APP_ID
             value: "2998228"
-          - name: GITHUB_APP_INSTALLATION_ID
-            value: "113765957"
+          - name: GITHUB_REPO
+            value: "Tsuguya-HC/home-cluster"
         source: |
           set -euo pipefail
 
@@ -166,10 +166,16 @@ spec:
           HEADER=$(printf '{"alg":"RS256","typ":"JWT"}' | base64 -w 0 | tr '+/' '-_' | tr -d '=')
           PAYLOAD=$(printf '{"iat":%d,"exp":%d,"iss":"%s"}' "$((NOW - 60))" "$((NOW + 600))" "$GITHUB_APP_ID" | base64 -w 0 | tr '+/' '-_' | tr -d '=')
           SIGNATURE=$(printf '%s.%s' "$HEADER" "$PAYLOAD" | openssl dgst -sha256 -sign /tmp/app-key.pem -binary | base64 -w 0 | tr '+/' '-_' | tr -d '=')
-          GITHUB_TOKEN=$(curl -s -X POST \
-            -H "Authorization: Bearer ${HEADER}.${PAYLOAD}.${SIGNATURE}" \
+          JWT="${HEADER}.${PAYLOAD}.${SIGNATURE}"
+          INSTALLATION_ID=$(curl -sf \
+            -H "Authorization: Bearer ${JWT}" \
             -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/app/installations/${GITHUB_APP_INSTALLATION_ID}/access_tokens" \
+            "https://api.github.com/repos/${GITHUB_REPO}/installation" \
+            | jq -r '.id')
+          GITHUB_TOKEN=$(curl -sf -X POST \
+            -H "Authorization: Bearer ${JWT}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/app/installations/${INSTALLATION_ID}/access_tokens" \
             | jq -r '.token')
           export GITHUB_TOKEN
           rm -f /tmp/app-key.pem

@@ -30,7 +30,7 @@ spec:
         targetPort: 12000
   github:
     push:
-      owner: Tsuguya
+      owner: Tsuguya-HC
       repository: home-cloudflare
       webhook:
         endpoint: /push
@@ -115,7 +115,7 @@ spec:
       active: false
       contentType: json
     home-trading:
-      owner: Tsuguya
+      owner: Tsuguya-HC
       repository: home-trading
       webhook:
         endpoint: /home-trading
@@ -211,7 +211,7 @@ spec:
       active: false
       contentType: json
     renovate-home-cloudflare:
-      owner: Tsuguya
+      owner: Tsuguya-HC
       repository: home-cloudflare
       webhook:
         endpoint: /renovate-home-cloudflare
@@ -227,7 +227,7 @@ spec:
       active: false
       contentType: json
     harbor:
-      owner: Tsuguya
+      owner: Tsuguya-HC
       repository: home-harbor
       webhook:
         endpoint: /harbor
@@ -242,7 +242,7 @@ spec:
       active: false
       contentType: json
     unifi:
-      owner: Tsuguya
+      owner: Tsuguya-HC
       repository: home-unifi
       webhook:
         endpoint: /unifi

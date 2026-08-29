@@ -12,7 +12,7 @@ spec:
     - https://github.com/Tsuguya-HC/home-cluster.git
     # trading のマニフェストは private リポに置く
     # （CNP の egress ルールが取引先とデータソースを列挙するため）
-    - https://github.com/Tsuguya/home-trading.git
+    - https://github.com/Tsuguya-HC/home-trading.git
     - https://github.com/Tsuguya-HC/home-trading.git
   destinations:
     - server: https://kubernetes.default.svc

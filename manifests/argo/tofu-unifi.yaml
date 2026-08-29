@@ -35,7 +35,7 @@ spec:
             - name: GITHUB_APP_ID
               value: "2998228"
             - name: GITHUB_REPO
-              value: "Tsuguya/home-unifi"
+              value: "Tsuguya-HC/home-unifi"
           securityContext:
             runAsUser: 65532
             runAsNonRoot: true
@@ -80,7 +80,7 @@ spec:
           args:
             - |
               GITHUB_TOKEN=$(cat /github-token/token)
-              git clone --depth 1 -b "${BRANCH}" "https://x-access-token:${GITHUB_TOKEN}@github.com/Tsuguya/home-unifi.git" /workspace
+              git clone --depth 1 -b "${BRANCH}" "https://x-access-token:${GITHUB_TOKEN}@github.com/Tsuguya-HC/home-unifi.git" /workspace
           env:
             - name: BRANCH
               value: "{{workflow.parameters.branch}}"
@@ -109,7 +109,7 @@ spec:
             export GITHUB_TOKEN=$(cat /github-token/token)
             export PATH="/tools:$PATH"
 
-            REPO="Tsuguya/home-unifi"
+            REPO="Tsuguya-HC/home-unifi"
             PR="{{workflow.parameters.pr-number}}"
             SHA="{{workflow.parameters.sha}}"
             AUTHOR="{{workflow.parameters.author}}"

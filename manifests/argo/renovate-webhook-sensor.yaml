@@ -143,7 +143,7 @@ spec:
                 arguments:
                   parameters:
                     - name: repositories
-                      value: '["Tsuguya/home-cloudflare"]'
+                      value: '["Tsuguya-HC/home-cloudflare"]'
     - template:
         name: renovate-home-trading
         conditions: "home-trading"
@@ -162,4 +162,4 @@ spec:
                 arguments:
                   parameters:
                     - name: repositories
-                      value: '["Tsuguya/home-trading"]'
+                      value: '["Tsuguya-HC/home-trading"]'

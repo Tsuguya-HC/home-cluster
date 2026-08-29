@@ -79,7 +79,7 @@ spec:
             - name: GITHUB_APP_ID
               value: "2998228"
             - name: GITHUB_REPO
-              value: "Tsuguya/home-cloudflare"
+              value: "Tsuguya-HC/home-cloudflare"
           securityContext:
             runAsUser: 65532
             runAsNonRoot: true
@@ -104,7 +104,7 @@ spec:
           args:
             - |
               GITHUB_TOKEN=$(cat /github-token/token)
-              git clone --depth 1 "https://x-access-token:${GITHUB_TOKEN}@github.com/Tsuguya/home-cloudflare.git" /workspace
+              git clone --depth 1 "https://x-access-token:${GITHUB_TOKEN}@github.com/Tsuguya-HC/home-cloudflare.git" /workspace
           volumeMounts:
             - name: workspace
               mountPath: /workspace
@@ -193,7 +193,7 @@ spec:
             - name: GITHUB_APP_ID
               value: "2998228"
             - name: GITHUB_REPO
-              value: "Tsuguya/home-cloudflare"
+              value: "Tsuguya-HC/home-cloudflare"
           securityContext:
             runAsUser: 65532
             runAsNonRoot: true
@@ -238,7 +238,7 @@ spec:
           args:
             - |
               GITHUB_TOKEN=$(cat /github-token/token)
-              git clone --depth 1 -b "${BRANCH}" "https://x-access-token:${GITHUB_TOKEN}@github.com/Tsuguya/home-cloudflare.git" /workspace
+              git clone --depth 1 -b "${BRANCH}" "https://x-access-token:${GITHUB_TOKEN}@github.com/Tsuguya-HC/home-cloudflare.git" /workspace
           env:
             - name: BRANCH
               value: "{{workflow.parameters.branch}}"
@@ -271,7 +271,7 @@ spec:
             tofu init -input=false
             PLAN_OUTPUT=$(tofu plan -detailed-exitcode -no-color 2>&1) && EXIT_CODE=0 || EXIT_CODE=$?
             PR="{{workflow.parameters.pr-number}}"
-            REPO="Tsuguya/home-cloudflare"
+            REPO="Tsuguya-HC/home-cloudflare"
             if [ "$EXIT_CODE" = "0" ]; then
               TITLE="Tofu Plan: No Changes"
               MSG="Infrastructure is up-to-date."

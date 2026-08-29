@@ -8,7 +8,7 @@ spec:
   source:
     # マニフェストは private リポに置く。CNP の egress ルールが取引先と
     # データソースを列挙するため、ここには出さない。
-    repoURL: https://github.com/Tsuguya/home-trading.git
+    repoURL: https://github.com/Tsuguya-HC/home-trading.git
     targetRevision: main
     path: manifests
   destination:

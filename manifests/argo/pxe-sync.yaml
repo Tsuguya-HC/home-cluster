@@ -131,16 +131,16 @@ spec:
           - |
             set -euo pipefail
 
-            echo "=== Fetching latest release from Tsuguya/talos-custom-build ==="
-            TAG=$(wget -qO- https://api.github.com/repos/Tsuguya/talos-custom-build/releases/latest | grep -o '"tag_name":[^,]*' | grep -o '"[^"]*"$' | tr -d '"')
+            echo "=== Fetching latest release from Tsuguya-HC/talos-custom-build ==="
+            TAG=$(wget -qO- https://api.github.com/repos/Tsuguya-HC/talos-custom-build/releases/latest | grep -o '"tag_name":[^,]*' | grep -o '"[^"]*"$' | tr -d '"')
             echo "Latest release: ${TAG}"
 
             ASSETS_DIR=/pxe/assets
             echo "=== Downloading vmlinuz-amd64 ==="
-            wget -qO "${ASSETS_DIR}/vmlinuz.tmp" "https://github.com/Tsuguya/talos-custom-build/releases/download/${TAG}/vmlinuz-amd64"
+            wget -qO "${ASSETS_DIR}/vmlinuz.tmp" "https://github.com/Tsuguya-HC/talos-custom-build/releases/download/${TAG}/vmlinuz-amd64"
 
             echo "=== Downloading initramfs-amd64.xz ==="
-            wget -qO "${ASSETS_DIR}/initramfs.xz.tmp" "https://github.com/Tsuguya/talos-custom-build/releases/download/${TAG}/initramfs-amd64.xz"
+            wget -qO "${ASSETS_DIR}/initramfs.xz.tmp" "https://github.com/Tsuguya-HC/talos-custom-build/releases/download/${TAG}/initramfs-amd64.xz"
 
             echo "=== Atomic replace ==="
             mv "${ASSETS_DIR}/vmlinuz.tmp" "${ASSETS_DIR}/vmlinuz"
@@ -164,7 +164,7 @@ spec:
         - name: git-clone
           image: alpine/git:v2.54.0@sha256:6f8eae2205a85c51106a9650e574a37fb1d5e4f645e5f6ea57cb57b9462cd4cf
           command: [git, clone, --depth, "1"]
-          args: ["https://github.com/Tsuguya/home-infra.git", /workspace]
+          args: ["https://github.com/Tsuguya-HC/home-infra.git", /workspace]
           volumeMounts:
             - name: workspace
               mountPath: /workspace

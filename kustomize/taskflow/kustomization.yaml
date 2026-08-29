@@ -1,12 +1,12 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-# taskflow のコントローラ本体は Tsuguya/taskflow リポの config/default（CRD・RBAC・
+# taskflow のコントローラ本体は Tsuguya-HC/taskflow リポの config/default（CRD・RBAC・
 # Deployment）をそのまま remote base として取り込む。home-cluster 側が持つのは
 # イメージの差し替えとクラスタ固有の patch だけ（設計 §14: 「どう動くか」は taskflow、
 # 「何ができるか」は home-cluster）。ref は commit SHA で固定し Renovate が追う。
 resources:
-  - https://github.com/Tsuguya/taskflow//config/default?ref=f96dbf9be674dcfaf803900541f4bbb0c3eea8bf
+  - https://github.com/Tsuguya-HC/taskflow//config/default?ref=f96dbf9be674dcfaf803900541f4bbb0c3eea8bf
 
 images:
   - name: controller

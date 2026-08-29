@@ -142,7 +142,7 @@ spec:
 
             echo "=== Fetching diff ${BEFORE}...${AFTER} ==="
             DIFF=$(curl -fsSL -H "Accept: application/vnd.github.v3.diff" \
-              "https://api.github.com/repos/Tsuguya/home-infra/compare/${BEFORE}...${AFTER}")
+              "https://api.github.com/repos/Tsuguya-HC/home-infra/compare/${BEFORE}...${AFTER}")
 
             OLD_VER=$(echo "$DIFF" | grep '^-kubernetesVersion:' | sed 's/^-kubernetesVersion: *//' | tr -d '"v' | head -1 || true)
             NEW_VER=$(echo "$DIFF" | grep '^+kubernetesVersion:' | sed 's/^+kubernetesVersion: *//' | tr -d '"v' | head -1 || true)
@@ -174,7 +174,7 @@ spec:
             fi
 
             echo "=== Fetching talconfig.yaml at ${AFTER} ==="
-            TALCONFIG=$(curl -fsSL "https://api.github.com/repos/Tsuguya/home-infra/contents/talconfig.yaml?ref=${AFTER}" \
+            TALCONFIG=$(curl -fsSL "https://api.github.com/repos/Tsuguya-HC/home-infra/contents/talconfig.yaml?ref=${AFTER}" \
               | jq -r '.content' | base64 -d)
 
             TALOS_VER=$(echo "$TALCONFIG" | yq '.talosVersion')

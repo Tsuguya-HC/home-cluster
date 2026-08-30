@@ -1,8 +1,10 @@
-# CNP カバレッジ点検。判定を散文ではなくディレクトリで受け取る実験を兼ねる。
+# CNP カバレッジ点検の定期投入。
 #
-# エージェントは out/{pass,attention,escalate} のいずれかにレポートを置く。out/ 自体は
-# 別 uid の所有で 0555 なので、語彙の外にディレクトリを作ることが mkdir の時点でできない。
-# 判定は Argo の output parameter で持ち出す（workflow の emptyDir はステップ間で共有されない）。
+# 点検の本体は taskflow-cnp-check.yaml の TaskHandler / TaskFlow で、ここは毎日 Task を
+# 1 つ作るだけ（設計 §14「生成元はグラフを知らない」）。Step 0 で Argo Workflow として
+# 動かしていた本体は Task に移り、この cron は起票に縮んだ。
+#
+# 前半の SA / RBAC は TaskHandler の Pod（agent-cnp-reader）のもの。
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -63,6 +65,74 @@ subjects:
     name: agent-cnp-reader
     namespace: claude-code
 ---
+# 起票用。tasks の create しか持たない（handler の SA とは別に切る: 起票する側が
+# 点検する権限を持つ必要はない）。
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: task-submitter
+  namespace: claude-code
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: task-submitter
+  namespace: claude-code
+rules:
+  - apiGroups: [flow.tgy.io]
+    resources: [tasks]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: task-submitter
+  namespace: claude-code
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: task-submitter
+subjects:
+  - kind: ServiceAccount
+    name: task-submitter
+    namespace: claude-code
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: task-submitter-executor
+  namespace: claude-code
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: agent-executor
+subjects:
+  - kind: ServiceAccount
+    name: task-submitter
+    namespace: claude-code
+---
+# 起票 Pod は argoexec が apiserver に Task を POST するだけ。claude-code=true の CNP は
+# api.anthropic.com や Loki まで開くので使わず、apiserver だけの専用 CNP にする。
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: task-submitter
+  namespace: claude-code
+spec:
+  endpointSelector:
+    matchLabels:
+      task-submitter: "true"
+  ingressDeny:
+    - fromEntities:
+        - world
+  egress:
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "6443"
+              protocol: TCP
+---
 apiVersion: argoproj.io/v1alpha1
 kind: CronWorkflow
 metadata:
@@ -72,214 +142,34 @@ spec:
   schedules:
     - "0 3 * * *"
   timezone: Asia/Tokyo
+  # 前日の Task が残っていても起票は止めない。同時実行の上限は flow 側
+  # （TaskFlow.spec.maxInFlight / dedupKey、taskflow #17）の仕事で、cron 1 本の
+  # concurrencyPolicy では守れない（設計 §18）。ここでは起票 Workflow 同士の重複だけ防ぐ。
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
   workflowSpec:
-    entrypoint: main
-    onExit: notify
-    serviceAccountName: agent-cnp-reader
-    activeDeadlineSeconds: 1500
+    entrypoint: create
+    serviceAccountName: task-submitter
+    activeDeadlineSeconds: 300
     podMetadata:
       labels:
-        claude-code: "true"
+        task-submitter: "true"
+    # 走るのは argoexec だけ（イメージの USER 8737）。
     securityContext:
+      runAsNonRoot: true
+      runAsUser: 8737
       seccompProfile:
         type: RuntimeDefault
-    volumes:
-      - name: work
-        emptyDir: {}
-      - name: prompt
-        projected:
-          sources:
-            - configMap:
-                name: agent-verdict-protocol
-            - configMap:
-                name: cnp-check-prompt
-    affinity:
-      nodeAffinity:
-        preferredDuringSchedulingIgnoredDuringExecution:
-          - weight: 100
-            preference:
-              matchExpressions:
-                - key: kubernetes.io/hostname
-                  operator: In
-                  values: [wn-03]
     templates:
-      - name: main
-        steps:
-          - - name: analyze
-              template: analyze
-
-      - name: analyze
-        securityContext:
-          # エージェントは 65533。ディレクトリを作る init は 65532。所有者が違うので
-          # エージェントは out/ を chmod し直すことも、新しい分類を生やすこともできない。
-          runAsUser: 65533
-          runAsNonRoot: true
-          runAsGroup: 65532
-          fsGroup: 65532
-        initContainers:
-          - name: prepare
-            image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:d5db59cac14b23a4ef85a456754522463267324e8ed3a84e795a2eba829c8f05
-            command: [sh, -c]
-            args:
-              - |
-                set -eu
-                mkdir -p /work/out/pass /work/out/attention /work/out/escalate
-                chmod 0775 /work/out/pass /work/out/attention /work/out/escalate
-                chmod 0555 /work/out
-                ls -la /work/out
-            securityContext:
-              runAsUser: 65532
-              runAsGroup: 65532
-              runAsNonRoot: true
-              allowPrivilegeEscalation: false
-              capabilities:
-                drop: [ALL]
-            volumeMounts:
-              - name: work
-                mountPath: /work
-            resources:
-              requests:
-                cpu: 10m
-                memory: 32Mi
-              limits:
-                memory: 64Mi
-        container:
-          image: registry.infra.tgy.io/tools/claude-code:latest@sha256:3e95cb84f1deb993199f220d9b4083ab7202d8c6e1278fbe4ae802dfc343df06
-          command: [sh, -c]
-          workingDir: /work
-          args:
-            - |
-              # 指示は ConfigMap から読む。ここでは組み立てない。
-              PROMPT="$(cat /prompt/cnp-check.md; echo; cat /prompt/verdict-protocol.md)"
-
-              claude -p \
-                --verbose \
-                --output-format stream-json \
-                --dangerously-skip-permissions \
-                --allowedTools "Bash,Read,Write,Grep,Glob" \
-                --model sonnet \
-                --max-turns 40 \
-                "$PROMPT" || true
-
-              # ---- 判定の回収。ここから先はエージェントの発話を一切読まない ----
-              FOUND=""
-              COUNT=0
-              for v in pass attention escalate; do
-                if [ -n "$(ls -A "/work/out/$v" 2>/dev/null)" ]; then
-                  FOUND="$v"
-                  COUNT=$((COUNT + 1))
-                fi
-              done
-
-              if [ "$COUNT" = "1" ]; then
-                VERDICT="$FOUND"
-                # 文字単位で切る（jq のスライスは UTF-8 のコードポイントを割らない）。
-                # 切り詰めたことも同時に伝える。黙って落とすと欠けたことに気づけない
-                jq -Rsr --argjson max 3500 \
-                  'if length > $max
-                   then .[0:$max] + "\n\n_（レポートが長いため以降を省略。全文は Argo UI のログ参照）_"
-                   else . end' \
-                  < "/work/out/$FOUND/report.md" > /work/report.md 2>/dev/null || true
-              else
-                VERDICT=indeterminate
-                echo "非空のディレクトリが $COUNT 個ありました（ちょうど 1 個であるべき）。" > /work/report.md
-                ls -laR /work/out >> /work/report.md 2>&1 || true
-              fi
-
-              if [ ! -s /work/report.md ]; then
-                echo "レポートが空でした。" > /work/report.md
-              fi
-
-              printf '%s' "$VERDICT" > /work/verdict.txt
-              echo "verdict: $VERDICT"
-          env:
-            - name: HOME
-              value: /tmp
-            - name: CLAUDE_CODE_OAUTH_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: claude-code-token
-                  key: credential
-          securityContext:
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop: [ALL]
-          volumeMounts:
-            - name: work
-              mountPath: /work
-            - name: prompt
-              mountPath: /prompt
-              readOnly: true
-          resources:
-            requests:
-              cpu: 100m
-              memory: 512Mi
-            limits:
-              memory: 4Gi
-        outputs:
-          parameters:
-            - name: verdict
-              valueFrom:
-                path: /work/verdict.txt
-                default: indeterminate
-              globalName: cnp-check-verdict
-            - name: report
-              valueFrom:
-                path: /work/report.md
-                default: "レポートを取得できませんでした。Argo UI でログを確認してください。"
-              globalName: cnp-check-report
-
-      - name: notify
-        securityContext:
-          runAsUser: 65532
-          runAsNonRoot: true
-        container:
-          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:d5db59cac14b23a4ef85a456754522463267324e8ed3a84e795a2eba829c8f05
-          command: [sh, -c]
-          args:
-            - |
-              VERDICT='{{workflow.outputs.parameters.cnp-check-verdict}}'
-              # Discord の上限は 4096 "文字"。バイトで切ると UTF-8 を割る
-              REPORT=$(printf '%s' '{{workflow.outputs.parameters.cnp-check-report}}' \
-                | jq -Rsr --argjson max 3900 \
-                    'if length > $max then .[0:$max] + "\n\n_(以降を省略)_" else . end')
-              WF_NAME="{{workflow.name}}"
-              NS="{{workflow.namespace}}"
-              URL="https://argo.infra.tgy.io/workflows/${NS}/${WF_NAME}"
-              TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)
-
-              case "$VERDICT" in
-                pass)      COLOR=65280 ;;
-                attention) COLOR=16776960 ;;
-                *)         COLOR=16711680 ;;
-              esac
-
-              PAYLOAD=$(jq -n \
-                --arg title "CNP check: ${VERDICT}" \
-                --arg url "$URL" \
-                --argjson color "$COLOR" \
-                --arg report "$REPORT" \
-                --arg ts "$TIMESTAMP" \
-                '{embeds: [{title: $title, url: $url, color: $color, description: $report, timestamp: $ts}]}')
-
-              wget -qO /dev/null --header="Content-Type: application/json" \
-                --post-data="$PAYLOAD" "$DISCORD_WEBHOOK_URL"
-          env:
-            - name: DISCORD_WEBHOOK_URL
-              valueFrom:
-                secretKeyRef:
-                  name: discord-webhook-argo
-                  key: url
-          securityContext:
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop: [ALL]
-          resources:
-            requests:
-              cpu: 10m
-              memory: 32Mi
-            limits:
-              memory: 128Mi
+      - name: create
+        resource:
+          action: create
+          manifest: |
+            apiVersion: flow.tgy.io/v1alpha1
+            kind: Task
+            metadata:
+              generateName: cnp-check-
+              namespace: claude-code
+            spec:
+              flow: cnp-check

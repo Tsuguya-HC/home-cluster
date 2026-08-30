@@ -68,13 +68,25 @@
      "minLength": 1,
      "type": "string"
     },
+    "terminals": {
+     "additionalProperties": {
+      "description": "TerminalSeverity is what reaching one of a flow's endings means.\n\nThe framework cannot work this out. A status with no binding is where the\nflow stops, and that is all it knows: 失敗 and おわり are equally just names\nits author chose, and neither is spelled in a vocabulary the framework\nowns. So the flow says which of its endings are bad news, and only then can\nthe framework raise its voice about one.",
+      "enum": [
+       "Success",
+       "Failure"
+      ],
+      "type": "string"
+     },
+     "description": "Terminals says what this flow's endings mean. It is keyed by a phase\nnothing binds — one of the places a task stops — and says whether\nstopping there is good news. A Failure ending is the one thing that\nmakes the framework speak up about a task that finished: a warning\nevent, Ready=False, and the longer ttl, so the record is still there\nwhen somebody comes to look.\n\nOptional, and leaving it out is not the same as saying Success. A flow\nthat has not declared keeps exactly the silence it had before this\nfield existed, and its endings are reported as Undeclared rather than\nguessed at (P8). Declaring one ending does not oblige the flow to\ndeclare the rest.",
+     "type": "object"
+    },
     "ttl": {
      "default": {},
      "description": "TTLSpec is how long a finished task sticks around. Cleanup is anchored on\nthe Task and propagates through ownerReferences; Jobs are never given a TTL\nof their own, because a Job that deletes itself takes the verdict with it.\n\nBoth fields default rather than stay optional: a task that never goes away\nis a row in etcd that never goes away, and etcd has been lost here twice\n(§10 \"etcd 保護のため必須\"). The defaults are the design's own example.",
      "properties": {
       "failed": {
        "default": "168h",
-       "description": "Failed applies to a task the framework stopped: Escalated or Failed.\nA human has to look at those, so they wait longer.",
+       "description": "Failed applies to a task that stopped at Escalated or Failed, however\nit got there — the framework forcing a stop or the flow itself\ndeclaring the edge with next. A human has to look at those, so they\nwait longer.",
        "type": "string"
       },
       "succeeded": {

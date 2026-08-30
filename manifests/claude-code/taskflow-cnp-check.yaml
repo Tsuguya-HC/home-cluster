@@ -6,8 +6,11 @@
 # 人間への報告は 調査 Pod 内の notify サイドカーが担う（設計 §7: publish は利用側の
 # サイドカーの仕事。framework は判定ディレクトリしか見ない）。
 #
-# 語彙は next の宣言 {完了: ok} から来る。エージェントが書けるのは /workspace/out/ok/ だけで、
-# 判定できないときは何も書かない → controller が Escalated にする（設計 §6 の逃げ道）。
+# 語彙は next の宣言から来る。{完了: ok, Escalated: escalate} なので、エージェントが書けるのは
+# /workspace/out/ 下の ok/ と escalate/ の 2 つだけ。「判定できない」は escalate/ に理由を書いて
+# 明示する（taskflow #63）。何も書かなければ従来どおり Escalated だが、そちらは沈黙 — 途中で
+# 死んだのか意図して降りたのかが history から区別できない。
+# terminals で終端の意味も宣言する（taskflow #64）。宣言しないと metric 上は Undeclared のまま。
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -23,16 +26,21 @@ data:
     | 結論 | すること |
     |---|---|
     | 点検を完了し、報告できる | `/workspace/out/ok/report.md` を書く |
-    | 判定できない・材料が足りない | **何も書かない**（`/workspace/out/` の下に一切ファイルを置かない） |
+    | 判定できない・材料が足りない | `/workspace/out/escalate/report.md` に**理由**を書く |
 
     ## 規則
 
-    - `/workspace/out/ok/` 以外に書き込み先は無い。新しいディレクトリは作れないし、
+    - **書き込み先は `/workspace/out/` の下に実際に存在するディレクトリだけ。**
+      `ls /workspace/out` で確かめられる。新しいディレクトリは作れないし、
       作れなくても異常ではないので回避しようとしないこと
+    - **書くのはどちらか一方だけ。** 両方に書くと「答えが 2 つ」として判定不能になる
     - ファイル名は `report.md` 固定。他のファイルを置いてもよいが、回収側は report.md だけを人間に見せる
-    - 「判定できない」は失敗ではない。無理に報告を書くより、何も書かない方が正しい。
-      その場合は人間に差し戻される
-    - 作業用の一時ファイルは `/tmp` に置く。`/workspace/out/ok/` に置いたものは全部「報告」として扱われる
+    - 「判定できない」は失敗ではない。無理に報告を書くより escalate に降りる方が正しい。
+      **降りるなら黙って終わらず `escalate/report.md` に理由を書くこと** —
+      何が足りなかったのか、どこまでは確かめられたのかが人間の次の一手になる。
+      何も書かずに終わると「途中で死んだ」と区別が付かない
+    - 作業用の一時ファイルは `/tmp` に置く。`/workspace/out/` の下に置いたものは
+      置いた場所がそのまま結論になる（空でないディレクトリが判定そのもの）
     - **ターン数は有限。** 手順の材料が揃った時点で、追加の探索より先に report.md を書く。
       書いた後に余裕があれば追記すればよい。最初の 1 回（run 1）は 40 ターンで打ち切られ、
       report を書く直前で終わって判定不能になった
@@ -124,22 +132,46 @@ spec:
               limits:
                 memory: 64Mi
           # 人間への報告。framework の関心事ではない（設計 §7 / §9）。SIGTERM で
-          # report.md があれば Discord に投げ、無ければ「判定なし」を投げる。
+          # どのディレクトリに report.md があるかを見て、ok / escalate / 沈黙 の
+          # 3 通りを撃ち分ける。escalate と沈黙はどちらも Escalated だが、人間から見ると
+          # 「理由がある差し戻し」と「途中で落ちた疑い」で次の一手が違う。
           - name: notify
             image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:d5db59cac14b23a4ef85a456754522463267324e8ed3a84e795a2eba829c8f05
             restartPolicy: Always
             command: [sh, -c]
             args:
               - |
+                # 判定そのものは framework が出す。ここは同じ規則で読み直すだけで、
+                # 別の規則を持たない — 持つと Discord と Task の status が食い違う。
+                # 規則は「非空の宣言ディレクトリがちょうど 1 つ」。report.md の有無では
+                # なくディレクトリが空かどうかで見るのは、回収側がそう見ているから。
+                nonempty() { [ -d "$1" ] && [ -n "$(ls -A "$1" 2>/dev/null)" ]; }
                 notify() {
-                  REPORT_FILE=/workspace/out/ok/report.md
-                  if [ -s "$REPORT_FILE" ]; then
+                  OK=/workspace/out/ok
+                  ESC=/workspace/out/escalate
+                  REPORT_FILE=""
+                  if nonempty "$OK" && nonempty "$ESC"; then
+                    TITLE="CNP check (taskflow): ambiguous"; COLOR=16711680
+                    REPORT="ok/ と escalate/ の両方に書かれた。非空がちょうど 1 つでないので判定不能（→ Escalated）。kubectl -n claude-code get task で確認。"
+                  elif nonempty "$OK"; then
                     TITLE="CNP check (taskflow): ok"; COLOR=65280
-                    REPORT=$(jq -Rsr --argjson max 3900 \
-                      'if length > $max then .[0:$max] + "\n\n_(以降を省略)_" else . end' < "$REPORT_FILE")
+                    REPORT_FILE="$OK/report.md"
+                  elif nonempty "$ESC"; then
+                    TITLE="CNP check (taskflow): escalated"; COLOR=16753920
+                    REPORT_FILE="$ESC/report.md"
                   else
                     TITLE="CNP check (taskflow): no verdict"; COLOR=16711680
-                    REPORT="エージェントは report を書かなかった（判定不能 → Escalated）。kubectl -n claude-code get task で確認。"
+                    REPORT="エージェントは何も書かずに終わった（沈黙 → Escalated）。意図的な差し戻しなら escalate/ に理由が残るので、これは途中で落ちたか時間切れの疑いが濃い。kubectl -n claude-code get task で確認。"
+                  fi
+                  # ディレクトリは非空でも report.md が無いことはある（framework は
+                  # エントリの存在しか見ない）。その場合も判定は変えず、本文だけ断る。
+                  if [ -n "$REPORT_FILE" ]; then
+                    if [ -s "$REPORT_FILE" ]; then
+                      REPORT=$(jq -Rsr --argjson max 3900 \
+                        'if length > $max then .[0:$max] + "\n\n_(以降を省略)_" else . end' < "$REPORT_FILE")
+                    else
+                      REPORT="判定は出ているが report.md が無い（他のファイルだけが置かれた）。kubectl -n claude-code get task で確認。"
+                    fi
                   fi
                   PAYLOAD=$(jq -n --arg title "$TITLE" --argjson color "$COLOR" --arg report "$REPORT" \
                     --arg ts "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" \
@@ -227,4 +259,12 @@ spec:
       handler: cnp-planner
       next:
         完了: ok
+        # 「判定できない」を書いて表明する出口（taskflow #63）。宣言すると escalate/ が
+        # 敷かれ、そこに書いた run は outcome Declined として記録される。宣言しなければ
+        # 「何も書かない」= NoAnswer しか無く、途中で死んだのと区別が付かない。
+        Escalated: escalate
+  # 終端の意味は flow が言う（taskflow #64）。framework は 完了 が良い知らせだと知らない。
+  # 宣言しない終端は metric 上 Undeclared のままになる。
+  terminals:
+    完了: Success
   reworkBudget: 0

@@ -6,13 +6,13 @@ kind: Kustomization
 # イメージの差し替えとクラスタ固有の patch だけ（設計 §14: 「どう動くか」は taskflow、
 # 「何ができるか」は home-cluster）。ref は commit SHA で固定し Renovate が追う。
 resources:
-  - https://github.com/Tsuguya-HC/taskflow//config/default?ref=037a2b2ef89b05b7adf968706973e1c9ce697919
+  - https://github.com/Tsuguya-HC/taskflow//config/default?ref=a7375405933963bb869219027ab0423f86b22d22
 
 images:
   - name: controller
     newName: registry.infra.tgy.io/tools/taskflow
     newTag: latest
-    digest: sha256:4dd3ffebf242d704dcfb06db1f2109813582f656445ed1dfd31d9f30a9c0d86d
+    digest: sha256:f892f5d971191f26f277436d9d1d206bb171e5c5fa82789ab8b6d50ac0e1d5a8
 
 patches:
   # 全 namespace restricted 運用に合わせる（config/default の Namespace にはラベルが無い）

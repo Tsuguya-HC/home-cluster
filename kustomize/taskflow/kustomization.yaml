@@ -6,13 +6,13 @@ kind: Kustomization
 # イメージの差し替えとクラスタ固有の patch だけ（設計 §14: 「どう動くか」は taskflow、
 # 「何ができるか」は home-cluster）。ref は commit SHA で固定し Renovate が追う。
 resources:
-  - https://github.com/Tsuguya-HC/taskflow//config/default?ref=a7375405933963bb869219027ab0423f86b22d22
+  - https://github.com/Tsuguya-HC/taskflow//config/default?ref=187f5adbd2bcf9e0adfe2f1cb0ffb27b745011ec
 
 images:
   - name: controller
     newName: registry.infra.tgy.io/tools/taskflow
     newTag: latest
-    digest: sha256:f892f5d971191f26f277436d9d1d206bb171e5c5fa82789ab8b6d50ac0e1d5a8
+    digest: sha256:25b531d9e9dcef30a08fde9e52c34df0cf4b3ef6284ac2fb452f8a91c3105d83
 
 patches:
   # 全 namespace restricted 運用に合わせる（config/default の Namespace にはラベルが無い）
@@ -35,3 +35,20 @@ patches:
       - op: replace
         path: /spec/template/spec/containers/0/resources/requests/cpu
         value: 50m
+  # コントローラが全 Job に注入する prepare / publish のイメージ（taskflow #73）。
+  # config/default は env SIDECAR_IMAGE を --sidecar-image に渡す形なので、名前で差し替える。
+  # digest は renovate.jsonc の regex manager が追う（args 内なので kubernetes manager は見ない）。
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: taskflow-controller-manager
+        namespace: taskflow-system
+      spec:
+        template:
+          spec:
+            containers:
+              - name: manager
+                env:
+                  - name: SIDECAR_IMAGE
+                    value: registry.infra.tgy.io/tools/agent-sidecar:latest@sha256:aab6c9f82e8b55b741381a60ed35d07a78c665de1e4e22a695bebd9235f1a9a4

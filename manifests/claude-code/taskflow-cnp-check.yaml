@@ -11,46 +11,9 @@
 # 明示する（taskflow #63）。何も書かなければ従来どおり Escalated だが、そちらは沈黙 — 途中で
 # 死んだのか意図して降りたのかが history から区別できない。
 # terminals で終端の意味も宣言する（taskflow #64）。宣言しないと metric 上は Undeclared のまま。
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: taskflow-verdict-protocol
-  namespace: claude-code
-data:
-  verdict-protocol.md: |
-    # 判定の出し方（taskflow 共通）
-
-    結論は文章ではなく **置き場所** で表す。回収側はディレクトリしか見ず、
-    あなたの発話は一切読まない。
-
-    | 結論 | すること |
-    |---|---|
-    | 点検を完了し、報告できる | `/workspace/out/ok/report.md` を書く |
-    | 判定できない・材料が足りない | `/workspace/out/escalate/report.md` に**理由**を書く |
-
-    ## 規則
-
-    - **書き込み先は `/workspace/out/` の下に実際に存在するディレクトリだけ。**
-      `ls /workspace/out` で確かめられる。新しいディレクトリは作れないし、
-      作れなくても異常ではないので回避しようとしないこと
-    - **書くのはどちらか一方だけ。** 両方に書くと「答えが 2 つ」として判定不能になる
-    - ファイル名は `report.md` 固定。他のファイルを置いてもよいが、回収側は report.md だけを人間に見せる
-    - 「判定できない」は失敗ではない。無理に報告を書くより escalate に降りる方が正しい。
-      **降りるなら黙って終わらず `escalate/report.md` に理由を書くこと** —
-      何が足りなかったのか、どこまでは確かめられたのかが人間の次の一手になる。
-      何も書かずに終わると「途中で死んだ」と区別が付かない
-    - 作業用の一時ファイルは `/tmp` に置く。`/workspace/out/` の下に置いたものは
-      置いた場所がそのまま結論になる（空でないディレクトリが判定そのもの）
-    - **ターン数は有限。** 手順の材料が揃った時点で、追加の探索より先に report.md を書く。
-      書いた後に余裕があれば追記すればよい。最初の 1 回（run 1）は 40 ターンで打ち切られ、
-      report を書く直前で終わって判定不能になった
-
-    ## 報告に必ず含めるもの
-
-    - **主張と、それを確かめた手順を対にして書く。** 確かめていないものは
-      「未確認の推測」と明記する。確かめられるのに確かめていない主張は書かない
-    - 対処案は、現状より権限や到達範囲を広げないものに限る
----
+#
+# taskflow-verdict-protocol ConfigMap（プロンプトの一部）は複数 flow で共有するため
+# manifests/claude-code/taskflow-common.yaml に置いてある。ここの projected volume はそこを参照する。
 apiVersion: flow.tgy.io/v1alpha1
 kind: TaskHandler
 metadata:
@@ -62,6 +25,10 @@ spec:
     type: Job
   timeout: 25m
   maxInfraRetries: 1
+  # prepare / publish はコントローラが Job 生成時に注入する（taskflow #73）。
+  workspace:
+    volume: workspace
+    mountPath: /workspace
   jobTemplate:
     template:
       metadata:
@@ -73,12 +40,10 @@ spec:
         restartPolicy: Never
         runtimeClassName: kata
         serviceAccountName: agent-cnp-reader
-        # prepare (65532) が out/ を作って 0555 に閉じ、エージェント (65533) は
-        # 同じ group で宣言ディレクトリにだけ書ける。uid が違うので out/ を開け直せない。
+        # runAsUser は必須。コントローラはこれと違う uid で out/ を 0555 に閉じるので、
+        # エージェントは宣言ディレクトリにだけ書ける。
         securityContext:
           runAsUser: 65533
-          runAsGroup: 65532
-          fsGroup: 65532
           runAsNonRoot: true
           seccompProfile:
             type: RuntimeDefault
@@ -90,47 +55,12 @@ spec:
           - name: prompt
             projected:
               sources:
+                # taskflow-common.yaml にある共有 ConfigMap。
                 - configMap:
                     name: taskflow-verdict-protocol
                 - configMap:
                     name: cnp-check-prompt
         initContainers:
-          - name: prepare
-            image: registry.infra.tgy.io/tools/agent-sidecar:latest@sha256:462d79d9a1354d3a1208a773a3adce390bab751b5e28d19b7e666aeb955ac561
-            args: ["prepare", "--out", "/workspace/out"]
-            securityContext:
-              runAsUser: 65532
-              allowPrivilegeEscalation: false
-              capabilities:
-                drop: [ALL]
-            volumeMounts:
-              - name: workspace
-                mountPath: /workspace
-            resources:
-              requests:
-                cpu: 10m
-                memory: 16Mi
-              limits:
-                memory: 64Mi
-          # ネイティブサイドカー。main 終了後の SIGTERM で out/ を見て、非空の宣言
-          # ディレクトリがちょうど 1 つならその名前を termination log に書く。
-          - name: publish
-            image: registry.infra.tgy.io/tools/agent-sidecar:latest@sha256:462d79d9a1354d3a1208a773a3adce390bab751b5e28d19b7e666aeb955ac561
-            args: ["publish", "--out", "/workspace/out"]
-            restartPolicy: Always
-            securityContext:
-              allowPrivilegeEscalation: false
-              capabilities:
-                drop: [ALL]
-            volumeMounts:
-              - name: workspace
-                mountPath: /workspace
-            resources:
-              requests:
-                cpu: 10m
-                memory: 16Mi
-              limits:
-                memory: 64Mi
           # 人間への報告。framework の関心事ではない（設計 §7 / §9）。SIGTERM で
           # どのディレクトリに report.md があるかを見て、ok / escalate / 沈黙 の
           # 3 通りを撃ち分ける。escalate と沈黙はどちらも Escalated だが、人間から見ると

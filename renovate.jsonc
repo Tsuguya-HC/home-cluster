@@ -136,6 +136,18 @@
       "autoReplaceStringTemplate": "tridentImage: {{{depName}}}:{{{newValue}}}{{#if newDigest}}@{{{newDigest}}}{{/if}}"
     },
     {
+      // The sidecar image taskflow's controller injects into every Job lives in an
+      // env var on the manager Deployment, not in an image: field, so the kubernetes
+      // manager cannot see it. Same shape as --qts-cgi-image above.
+      "customType": "regex",
+      "managerFilePatterns": ["/kustomize/taskflow/kustomization\\.yaml$/"],
+      "matchStrings": [
+        "name: SIDECAR_IMAGE\\s*\\n\\s*value: (?<depName>[^:\\s]+):(?<currentValue>[^@\\s]+)(?:@(?<currentDigest>sha256:[a-f0-9]{64}))?"
+      ],
+      "datasourceTemplate": "docker",
+      "autoReplaceStringTemplate": "name: SIDECAR_IMAGE\n                    value: {{{depName}}}:{{{newValue}}}{{#if newDigest}}@{{{newDigest}}}{{/if}}"
+    },
+    {
       // Generic `# renovate:` annotation over a shell-style assignment, for versions
       // that live in env vars and args rather than image tags.
       "customType": "regex",

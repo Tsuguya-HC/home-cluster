@@ -8,9 +8,23 @@
 # 自己ループ（レビュー → レビュー: more）はまだ載せない。循環はコントローラを書いた最大の
 # 理由だが、まず 1 周が役に立つことを確かめてから足す。
 #
-# レビュアーが読む diff は**攻撃者が書ける入力**（設計 §8）。だから claude-code=true の共有 CNP
-# には相乗りせず、専用ラベル + 専用 CNP を立てて apiserver も Loki も store も閉じてある。
-# この Pod が到達できるのは GitHub と Anthropic API だけで、クラスタには一切触れない。
+# レビュアーが読む diff と PR 本文は**攻撃者が書ける入力**（設計 §8「信頼できない入力を読む
+# handler の制約」）。この flow はまさにそのケース — 束縛の無い終端（完了・Escalated）へ
+# 直行する辺しか持たない。
+#
+# §8 が求める 2 つのうち、**ネットワーク隔離は満たしている**: claude-code=true の共有 CNP には
+# 相乗りせず、専用ラベル + 専用 CNP を立てて apiserver も Loki も store も閉じてある。この Pod
+# が到達できるのは GitHub・Anthropic API・Discord だけで、クラスタには一切触れない。
+# **終端へ直行しない制約は満たしていない** — `untrusted` プロファイル属性も人間承認ゲートも
+# taskflow にまだ実装されていないため（design.md §13 の未決事項として書かれているだけで、
+# これを追跡する専用の issue はまだ無い）。
+#
+# 残存リスク: 十分に細工された diff や PR 本文でエージェントを誘導できれば、悪意ある PR に
+# 対しても ok/report.md を書かせ、「完了」（Success）として緑の Discord 通知を出せる。
+#
+# ここで許容する理由: この flow の判定が動かすのは Discord への 1 通だけで、マージゲートでも
+# クラスタへの書き込みでも PR への書き込みでもない。人間は従来どおり自分で PR を読む。
+# 判定は助言であって承認ではない。
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -37,9 +51,12 @@ data:
 
     ## できないこと（迂回しようとしない）
 
-    - **ビルドもテストも動かせない。** 依存を取りに行くネットワークが開いていないので
-      `go build` / `go test` は失敗する。よって **「実行して確認した」と書いてはいけない**。
+    - **ビルドもテストも動かせない。** `go build` / `go test` は動かせない（今のイメージに
+      go が入っていなければ command not found、go が入っていても `GOPROXY=off` で
+      依存取得は即座に失敗する）。よって **「実行して確認した」と書いてはいけない**。
       根拠は必ず「読んだ場所」で示す
+    - **許可されていない宛先への通信は、失敗ではなくタイムアウトまでハングする。**
+      `go build` / `go test` に限らず、ネットワークを使うこと自体を試さないこと
     - クラスタにも GitHub にも書けない。`kubectl` は届かず、PR にコメントも付けられない。
       報告の宛先は `report.md` だけ
 
@@ -84,80 +101,6 @@ data:
     ## 未確認
     （気になるが裏が取れなかったもの。無ければ「無し」）
     ```
----
-# 判定を Discord へ流すサイドカーの中身。**framework の規則を書き写さず、
-# FLOW_DIRECTORIES（コントローラが flow の next から作って全コンテナに注入する JSON 配列）を
-# 読んで同じ規則を適用する。** 語彙を写経すると flow の next を変えたときに Discord だけ
-# 古い語彙のまま黙り、Task の status と食い違う。
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: taskflow-notify
-  namespace: claude-code
-data:
-  notify.sh: |
-    # 判定そのものは framework が出す。ここは同じ規則で読み直すだけで、別の規則を持たない。
-    # 規則は 1 本 —「非空の宣言ディレクトリがちょうど 1 つ」。report.md の有無ではなく
-    # ディレクトリが空かどうかで見るのは、回収側がそう見ているから。
-    set -u
-    OUT=${NOTIFY_OUT:-/workspace/out}
-
-    nonempty() { [ -d "$1" ] && [ -n "$(ls -A "$1" 2>/dev/null)" ]; }
-
-    notify() {
-      count=0
-      found=
-      for d in $(printf '%s' "${FLOW_DIRECTORIES:-[]}" | jq -r '.[]' 2>/dev/null); do
-        nonempty "$OUT/$d" || continue
-        count=$((count + 1))
-        found=$d
-      done
-
-      REPORT=
-      REPORT_FILE=
-      if [ "$count" -eq 1 ] && [ "$found" = escalate ]; then
-        # escalate は §6 の「わからない」の逃げ道で、どの flow でも同じ意味を持つ唯一の名前。
-        VERDICT=escalated
-        COLOR=16753920
-        REPORT_FILE="$OUT/$found/report.md"
-      elif [ "$count" -eq 1 ]; then
-        VERDICT=$found
-        COLOR=65280
-        REPORT_FILE="$OUT/$found/report.md"
-      elif [ "$count" -eq 0 ]; then
-        VERDICT="no verdict"
-        COLOR=16711680
-        REPORT="エージェントは何も書かずに終わった（沈黙 → Escalated）。意図して降りたなら escalate/ に理由が残るので、これは途中で落ちたか時間切れの疑いが濃い。"
-      else
-        VERDICT=ambiguous
-        COLOR=16711680
-        REPORT="非空の宣言ディレクトリが ${count} 個あった。ちょうど 1 つでないので判定不能（→ Escalated）。"
-      fi
-
-      # ディレクトリは非空でも report.md が無いことはある（framework はエントリの存在しか
-      # 見ない）。その場合も判定は変えず、本文だけ断る。
-      if [ -n "$REPORT_FILE" ]; then
-        if [ -s "$REPORT_FILE" ]; then
-          REPORT=$(jq -Rsr --argjson max 3800 \
-            'if length > $max then .[0:$max] + "\n\n_(以降を省略)_" else . end' < "$REPORT_FILE")
-        else
-          REPORT="判定は出ているが report.md が無い（他のファイルだけが置かれた）。"
-        fi
-      fi
-
-      PAYLOAD=$(jq -n \
-        --arg title "${NOTIFY_TITLE:-taskflow}: ${VERDICT}" \
-        --argjson color "$COLOR" \
-        --arg report "${REPORT}
-
-    kubectl -n claude-code get task で確認できる。" \
-        --arg ts "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" \
-        '{embeds: [{title: $title, color: $color, description: $report, timestamp: $ts}]}')
-      wget -qO /dev/null --header="Content-Type: application/json" \
-        --post-data="$PAYLOAD" "$DISCORD_WEBHOOK_URL" || echo "discord post failed"
-    }
-    trap 'notify; exit 0' TERM INT
-    while :; do sleep 1; done
 ---
 # レビュアーは apiserver に用が無い。RBAC を与えないだけでなくトークン自体を配らない
 # （読む対象が信頼できない入力なので、置いてある資格情報は少ないほどよい）。
@@ -230,11 +173,14 @@ spec:
           - name: prompt
             projected:
               sources:
+                # taskflow-verdict-protocol は複数 flow で共有する定義。
+                # manifests/claude-code/taskflow-common.yaml にある。
                 - configMap:
                     name: taskflow-verdict-protocol
                 - configMap:
                     name: pr-review-prompt
           - name: notify
+            # taskflow-notify も共有定義。manifests/claude-code/taskflow-common.yaml にある。
             configMap:
               name: taskflow-notify
         initContainers:
@@ -281,6 +227,10 @@ spec:
             env:
               - name: NOTIFY_TITLE
                 value: "taskflow PR review"
+              # spec.bindings.レビュー.next.Escalated（TaskFlow pr-review）と
+              # 綴りを合わせること。片方だけ変えると escalate が緑として誤通知される。
+              - name: NOTIFY_ESCALATE_DIR
+                value: "escalate"
               - name: DISCORD_WEBHOOK_URL
                 valueFrom:
                   secretKeyRef:
@@ -348,11 +298,15 @@ spec:
                 else
                   printf '{}\n' > /workspace/pr.json
                 fi
+                # jq が成功したのに空を書く経路もある（API が 200 で空ボディを返す等）。
+                # どの経路を通っても最低限 {} にする。
+                [ -s /workspace/pr.json ] || printf '{}\n' > /workspace/pr.json
 
                 # PR 番号は上で数字だと確かめてある。
                 PROMPT="$(cat /prompt/pr-review.md; echo; cat /prompt/verdict-protocol.md; echo; \
                   printf '## 今回の対象\n\n%s の PR #%s\n' "$REPO" "$PR")"
 
+                rc=0
                 claude -p \
                   --verbose \
                   --output-format stream-json \
@@ -360,11 +314,25 @@ spec:
                   --allowedTools "Bash,Read,Write,Grep,Glob" \
                   --model sonnet \
                   --max-turns 80 \
-                  "$PROMPT" || true
-                # 判定はディレクトリで出る。ここから先は何もしない（回収は publish サイドカー）。
+                  "$PROMPT" || rc=$?
+                echo "claude exited with $rc"
+                # 判定はディレクトリで出る。終了コードはログに残すだけで判定には使わない —
+                # 既に ok/ に書かれていた場合、ここで escalate/ にも書くと「答えが 2 つ」に
+                # なって判定不能になる。ここから先は何もしない（回収は publish サイドカー）。
             env:
               - name: HOME
                 value: /tmp
+              # 今ピンしている digest には go が入っていない（/usr/local/go/bin が PATH に無い）
+              # ので、今日の時点では go build / go test は command not found で即座に失敗する。
+              # images #44 で go 本体はイメージに入っており、Renovate が digest を上げた瞬間に
+              # 失敗モードが変わる: DNS は CCNP allow-dns で解決できるが TCP は CNP で drop
+              # されるだけなので、proxy.golang.org 宛の取得は go のリトライ込みでタイムアウトまで
+              # ハングするようになる。GOPROXY=off と GOTOOLCHAIN=local はその先回りの保険で、
+              # **今は空振りしている**（go 自体が無いので、この 2 つが無くても今日は同じ結果）。
+              - name: GOPROXY
+                value: "off"
+              - name: GOTOOLCHAIN
+                value: local
               - name: CLAUDE_CODE_OAUTH_TOKEN
                 valueFrom:
                   secretKeyRef:
@@ -410,6 +378,8 @@ spec:
         完了: ok
         # 「材料が足りず判定できない」を書いて表明する出口（taskflow #63）。
         # 何も書かなければ NoAnswer で、途中で死んだのと区別が付かない。
+        # notify コンテナの NOTIFY_ESCALATE_DIR と綴りを合わせること。片方だけ変えると
+        # escalate が緑として誤通知される。
         Escalated: escalate
   terminals:
     完了: Success

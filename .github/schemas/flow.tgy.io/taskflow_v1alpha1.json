@@ -69,12 +69,17 @@
      "type": "string"
     },
     "ttl": {
-     "description": "TTLSpec is how long a finished task sticks around. Cleanup is anchored on\nthe Task and propagates through ownerReferences; Jobs are never given a TTL\nof their own, because a Job that deletes itself takes the verdict with it.",
+     "default": {},
+     "description": "TTLSpec is how long a finished task sticks around. Cleanup is anchored on\nthe Task and propagates through ownerReferences; Jobs are never given a TTL\nof their own, because a Job that deletes itself takes the verdict with it.\n\nBoth fields default rather than stay optional: a task that never goes away\nis a row in etcd that never goes away, and etcd has been lost here twice\n(§10 \"etcd 保護のため必須\"). The defaults are the design's own example.",
      "properties": {
       "failed": {
+       "default": "168h",
+       "description": "Failed applies to a task the framework stopped: Escalated or Failed.\nA human has to look at those, so they wait longer.",
        "type": "string"
       },
       "succeeded": {
+       "default": "1h",
+       "description": "Succeeded applies to a task that stopped at a phase the flow declared\nterminal — one with no binding of its own.",
        "type": "string"
       }
      },

@@ -13,7 +13,8 @@
 # 終端 要修正 を terminals で Failure と宣言してあるので、そこに着いた Task には
 # Warning Event（reason HandlerFailed）と Ready=False と metric が出る。Step 0 の cnp-check は
 # 通知サイドカーが判定を自前でやり直していたが、それは利用側が毎回書き直す羽目になる
-# （design.md §5）。Event / 条件 / metric から Discord への配線は別に置く。
+# （design.md §5）。metric から Discord への配線は
+# manifests/monitoring/prometheusrule-taskflow.yaml（Escalated も含めてこの Pod の外で完結する）。
 #
 # レビュアーが読む diff と PR 本文は**攻撃者が書ける入力**（設計 §8「信頼できない入力を読む
 # handler の制約」）。この flow はまさにそのケース — 束縛の無い終端（完了・要修正・Escalated）へ
@@ -141,7 +142,9 @@ automountServiceAccountToken: false
 ---
 # 専用 CNP。claude-code=true の共有ポリシーは apiserver / Loki / Prometheus / horenso / ArgoCD まで
 # 開くので、攻撃者が書ける diff を読む Pod には過大（設計 §16）。ここが開けるのは
-# GitHub（clone と PR の取得）・Anthropic API（推論）・Discord（notify サイドカーの報告）だけ。
+# GitHub（clone と PR の取得）・Anthropic API（推論）だけ。notify サイドカーは持たないので
+# Discord（discord.com）はここには開けていない（下の冒頭コメントの通り、通知は framework
+# の信号を Alertmanager 経由で出す。配線は manifests/monitoring/prometheusrule-taskflow.yaml）。
 # DNS は CCNP allow-dns で全 Pod に共通適用済み。ingress は 1 つも書かないので全 deny
 # （policyEnforcementMode: always なので、書かない = 遮断される）。
 apiVersion: cilium.io/v2

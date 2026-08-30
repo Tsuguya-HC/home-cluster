@@ -112,7 +112,10 @@ subjects:
     namespace: claude-code
 ---
 # 起票 Pod は argoexec が apiserver に Task を POST するだけ。claude-code=true の CNP は
-# api.anthropic.com や Loki まで開くので使わず、apiserver だけの専用 CNP にする。
+# api.anthropic.com や Loki まで開くので使わず、専用 CNP にする。apiserver のほかに要るのは
+# コントローラの workflowDefaults が全 Workflow に注入する 2 つ: archiveLogs の保存先
+# （SeaweedFS filer）と exit hook の discord-notify（discord.com）。初回は apiserver だけで
+# 起票は通ったが wait コンテナと onExit が i/o timeout で Error になった（2026-08-30 実測）。
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -131,6 +134,21 @@ spec:
       toPorts:
         - ports:
             - port: "6443"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: seaweedfs
+            app.kubernetes.io/component: filer
+            io.kubernetes.pod.namespace: seaweedfs
+      toPorts:
+        - ports:
+            - port: "8333"
+              protocol: TCP
+    - toFQDNs:
+        - matchName: "discord.com"
+      toPorts:
+        - ports:
+            - port: "443"
               protocol: TCP
 ---
 apiVersion: argoproj.io/v1alpha1

@@ -1,0 +1,98 @@
+# taskflow の配管だけを通すスモーク flow。LLM も Kata も通信も無し、数秒で終わる。
+#
+# コントローラやサイドカーを上げたあと、cnp-check（25 分・API 課金）を待たずに
+# 「prepare が out/ を敷く → handler が書く → publish が封じて termination log に返す →
+# コントローラが遷移する」の一周を確かめる。handler は AI 専用ではない（設計 §4）の実例でもある。
+#
+# 投げ方（cron は付けない。手動のスモーク）:
+#   kubectl -n claude-code create -f - <<EOF
+#   apiVersion: flow.tgy.io/v1alpha1
+#   kind: Task
+#   metadata: {generateName: smoke-, namespace: claude-code}
+#   spec: {flow: smoke}
+#   EOF
+# 期待: Task が 完了 (Success) に着く。publish の termination message の 1 行目が ok。
+---
+# トークンも通信も要らない。専用ラベルに CNP を書かないので全遮断（policyEnforcementMode: always）。
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: taskflow-smoke
+  namespace: claude-code
+automountServiceAccountToken: false
+---
+apiVersion: flow.tgy.io/v1alpha1
+kind: TaskHandler
+metadata:
+  name: smoke
+  namespace: claude-code
+spec:
+  phase: 確認
+  runner:
+    type: Job
+  timeout: 2m
+  maxInfraRetries: 1
+  workspace:
+    volume: workspace
+    mountPath: /workspace
+  jobTemplate:
+    template:
+      metadata:
+        labels:
+          taskflow-smoke: "true"
+      spec:
+        restartPolicy: Never
+        serviceAccountName: taskflow-smoke
+        automountServiceAccountToken: false
+        securityContext:
+          runAsUser: 65533
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        volumes:
+          - name: workspace
+            emptyDir: {}
+        containers:
+          - name: handler
+            image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:d5db59cac14b23a4ef85a456754522463267324e8ed3a84e795a2eba829c8f05
+            command: [sh, -c]
+            args:
+              - |
+                set -eu
+                # 語彙は FLOW_DIRECTORIES（コントローラ注入）で来る。ok があることだけ確かめて書く。
+                echo "FLOW_DIRECTORIES=$FLOW_DIRECTORIES"
+                ls -ld /workspace/out /workspace/out/*
+                # 宣言に無いディレクトリは作れないはず（prepare が out/ を 0555 に閉じている）
+                if mkdir /workspace/out/evil 2>/dev/null; then echo "out/ is not closed"; exit 1; fi
+                echo "smoke $(date -u +%FT%TZ) task=$FLOW_TASK_UID phase=$FLOW_PHASE" > /workspace/out/ok/report.md
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities:
+                drop: [ALL]
+            volumeMounts:
+              - name: workspace
+                mountPath: /workspace
+            resources:
+              requests:
+                cpu: 10m
+                memory: 16Mi
+              limits:
+                memory: 64Mi
+---
+apiVersion: flow.tgy.io/v1alpha1
+kind: TaskFlow
+metadata:
+  name: smoke
+  namespace: claude-code
+spec:
+  profile: investigate
+  start: 確認
+  bindings:
+    確認:
+      handler: smoke
+      next:
+        完了: ok
+  terminals:
+    完了: Success
+  reworkBudget: 0

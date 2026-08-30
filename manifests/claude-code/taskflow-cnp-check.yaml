@@ -88,7 +88,7 @@ spec:
                     name: cnp-check-prompt
         initContainers:
           - name: prepare
-            image: registry.infra.tgy.io/tools/agent-sidecar:latest@sha256:bc24a033a6368282b7977f4154c63c3a5c61756ab6768498e8b91ad606976cb5
+            image: registry.infra.tgy.io/tools/agent-sidecar:latest@sha256:18fddb65e2457fa788f4971f466d488e6e07d0ddc00c2d549b1db9db899fa00e
             args: ["prepare", "--out", "/workspace/out"]
             securityContext:
               runAsUser: 65532
@@ -107,7 +107,7 @@ spec:
           # ネイティブサイドカー。main 終了後の SIGTERM で out/ を見て、非空の宣言
           # ディレクトリがちょうど 1 つならその名前を termination log に書く。
           - name: publish
-            image: registry.infra.tgy.io/tools/agent-sidecar:latest@sha256:bc24a033a6368282b7977f4154c63c3a5c61756ab6768498e8b91ad606976cb5
+            image: registry.infra.tgy.io/tools/agent-sidecar:latest@sha256:18fddb65e2457fa788f4971f466d488e6e07d0ddc00c2d549b1db9db899fa00e
             args: ["publish", "--out", "/workspace/out"]
             restartPolicy: Always
             securityContext:

@@ -8,23 +8,36 @@
 # 自己ループ（レビュー → レビュー: more）はまだ載せない。循環はコントローラを書いた最大の
 # 理由だが、まず 1 周が役に立つことを確かめてから足す。
 #
+# **この Pod は人間に通知しない。** 判定を読み直して Discord へ流すサイドカーは持たず、
+# 「見るべきときに声が出る」のは framework 側の仕事にしてある（設計 §5 / §9）— 指摘ありの
+# 終端 要修正 を terminals で Failure と宣言してあるので、そこに着いた Task には
+# Warning Event（reason HandlerFailed）と Ready=False と metric が出る。Step 0 の cnp-check は
+# 通知サイドカーが判定を自前でやり直していたが、それは利用側が毎回書き直す羽目になる
+# （design.md §5）。Event / 条件 / metric から Discord への配線は別に置く。
+#
 # レビュアーが読む diff と PR 本文は**攻撃者が書ける入力**（設計 §8「信頼できない入力を読む
-# handler の制約」）。この flow はまさにそのケース — 束縛の無い終端（完了・Escalated）へ
+# handler の制約」）。この flow はまさにそのケース — 束縛の無い終端（完了・要修正・Escalated）へ
 # 直行する辺しか持たない。
 #
 # §8 が求める 2 つのうち、**ネットワーク隔離は満たしている**: claude-code=true の共有 CNP には
 # 相乗りせず、専用ラベル + 専用 CNP を立てて apiserver も Loki も store も閉じてある。この Pod
-# が到達できるのは GitHub・Anthropic API・Discord だけで、クラスタには一切触れない。
+# が到達できるのは GitHub と Anthropic API だけで、クラスタには一切触れない。
 # **終端へ直行しない制約は満たしていない** — `untrusted` プロファイル属性も人間承認ゲートも
 # taskflow にまだ実装されていないため（design.md §13 の未決事項として書かれているだけで、
 # これを追跡する専用の issue はまだ無い）。
 #
 # 残存リスク: 十分に細工された diff や PR 本文でエージェントを誘導できれば、悪意ある PR に
-# 対しても ok/report.md を書かせ、「完了」（Success）として緑の Discord 通知を出せる。
+# 対しても ok/report.md を書かせ、「完了」（Success）として通せる（＝指摘を握り潰せる）。
 #
-# ここで許容する理由: この flow の判定が動かすのは Discord への 1 通だけで、マージゲートでも
-# クラスタへの書き込みでも PR への書き込みでもない。人間は従来どおり自分で PR を読む。
+# ここで許容する理由: この flow の判定が動かすのは Task の status と Event だけで、マージゲート
+# でもクラスタへの書き込みでも PR への書き込みでもない。人間は従来どおり自分で PR を読む。
 # 判定は助言であって承認ではない。
+#
+# **通知を Pod の外に置いたのは、この §8 の状況でもう一つ効く。** Cilium の identity は Pod 単位
+# なので（design.md §7）、サイドカーのために開けた egress は agent コンテナからも到達できる。
+# Discord の webhook は誰でも作れて誰でも読めるため、開けてあれば注入されたエージェントが
+# CLAUDE_CODE_OAUTH_TOKEN を攻撃者自身の webhook へ送れる。github.com と api.anthropic.com には
+# この性質が無い（攻撃者が受信ログを読めない）。**この Pod に discord.com は開けない。**
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -87,6 +100,21 @@ data:
 
     **指摘が 0 件なら「0 件」と書く。** 無理に絞り出さない。件数はレビューの成果ではない。
 
+    ## どこに書くか（出口は 3 つ）
+
+    レビューを終えられたなら、**指摘が出たかどうかで置き場所を分ける**。
+
+    | あなたの結論 | 置き場所 |
+    |---|---|
+    | 見るべき指摘がある | `/workspace/out/findings/report.md` |
+    | 指摘は 0 件（このままマージしてよい） | `/workspace/out/ok/report.md` |
+    | 判定できない・材料が足りない | `/workspace/out/escalate/report.md` に**理由**を |
+
+    `findings/` に置かれた回は「人間が見るべき」として記録され、`ok/` は静かに終わる。
+    **だから件数を水増しする理由も、逆に指摘を握り潰す理由も無い。**
+    LOW を 1 件だけ見つけた場合も `findings/`（「見るべきものがある」は重大度ではなく有無の話）。
+    報告の中身はどちらの出口でも同じ形式で書く。
+
     ## 報告の構成
 
     ```
@@ -130,7 +158,6 @@ spec:
         - matchName: "api.anthropic.com"
         - matchName: "github.com"
         - matchName: "api.github.com"
-        - matchName: "discord.com"
       toPorts:
         - ports:
             - port: "443"
@@ -179,10 +206,6 @@ spec:
                     name: taskflow-verdict-protocol
                 - configMap:
                     name: pr-review-prompt
-          - name: notify
-            # taskflow-notify も共有定義。manifests/claude-code/taskflow-common.yaml にある。
-            configMap:
-              name: taskflow-notify
         initContainers:
           - name: prepare
             image: registry.infra.tgy.io/tools/agent-sidecar:latest@sha256:462d79d9a1354d3a1208a773a3adce390bab751b5e28d19b7e666aeb955ac561
@@ -220,40 +243,6 @@ spec:
                 memory: 16Mi
               limits:
                 memory: 64Mi
-          - name: notify
-            image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:d5db59cac14b23a4ef85a456754522463267324e8ed3a84e795a2eba829c8f05
-            restartPolicy: Always
-            command: [sh, /notify/notify.sh]
-            env:
-              - name: NOTIFY_TITLE
-                value: "taskflow PR review"
-              # spec.bindings.レビュー.next.Escalated（TaskFlow pr-review）と
-              # 綴りを合わせること。片方だけ変えると escalate が緑として誤通知される。
-              - name: NOTIFY_ESCALATE_DIR
-                value: "escalate"
-              - name: DISCORD_WEBHOOK_URL
-                valueFrom:
-                  secretKeyRef:
-                    name: discord-webhook-argo
-                    key: url
-            securityContext:
-              allowPrivilegeEscalation: false
-              readOnlyRootFilesystem: true
-              capabilities:
-                drop: [ALL]
-            volumeMounts:
-              - name: workspace
-                mountPath: /workspace
-                readOnly: true
-              - name: notify
-                mountPath: /notify
-                readOnly: true
-            resources:
-              requests:
-                cpu: 10m
-                memory: 32Mi
-              limits:
-                memory: 128Mi
         containers:
           - name: agent
             image: registry.infra.tgy.io/tools/claude-code:latest@sha256:3e95cb84f1deb993199f220d9b4083ab7202d8c6e1278fbe4ae802dfc343df06
@@ -376,13 +365,18 @@ spec:
       handler: pr-reviewer
       next:
         完了: ok
+        # 指摘が出た回の出口。ここを分けているのは報告のためではなく、**framework が声を
+        # 出せるようにするため** — 下の terminals で Failure と宣言してあるので、この終端に
+        # 着いた Task だけが Warning Event と Ready=False を持つ。
+        要修正: findings
         # 「材料が足りず判定できない」を書いて表明する出口（taskflow #63）。
         # 何も書かなければ NoAnswer で、途中で死んだのと区別が付かない。
-        # notify コンテナの NOTIFY_ESCALATE_DIR と綴りを合わせること。片方だけ変えると
-        # escalate が緑として誤通知される。
         Escalated: escalate
+  # 終端の意味は flow が言う（taskflow #64）。framework は 要修正 が悪い知らせだと知らない。
+  # 宣言しない終端は metric 上 Undeclared のままで、Event も条件も出ない。
   terminals:
     完了: Success
+    要修正: Failure
   # 差し戻しはまだ無い。自己ループ（レビュー → レビュー: more）は 1 周が役に立つと
   # 確かめてから足す（taskflow #39）。
   reworkBudget: 0

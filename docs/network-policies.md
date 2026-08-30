@@ -183,7 +183,7 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 |---|---|---|
 | **claude-code** (claude-code=true) | (deny world) | kube-apiserver, api.anthropic.com + github.com + api.github.com + *.githubusercontent.com + index.crates.io + static.crates.io + registry.npmjs.org + discord.com + gitmcp.io :443, seaweedfs-filer (seaweedfs):8333, loki-gateway (monitoring):8080, prometheus (monitoring):9090, horenso (horenso):3000, task-dispatch-eventsource (argo):12002, argocd-server (argocd):8080 |
 | **task-submitter** (task-submitter=true) | (deny world) | kube-apiserver, discord.com:443, seaweedfs-filer (seaweedfs):8333 |
-| **taskflow-pr-review** (taskflow-pr-review=true) | (書かない = 全 deny) | api.anthropic.com + github.com + api.github.com + discord.com :443 |
+| **taskflow-pr-review** (taskflow-pr-review=true) | (書かない = 全 deny) | api.anthropic.com + github.com + api.github.com :443 |
 
 `task-submitter` は Task を 1 つ作るだけの CronWorkflow の Pod。apiserver のほかに要る 2 つは
 コントローラの workflowDefaults が全 Workflow に注入するもの（archiveLogs の保存先と
@@ -191,7 +191,15 @@ discord-notify の exit hook）で、これが無いと起票自体は通って�
 
 `taskflow-pr-review` は**攻撃者が書ける入力（PR の diff）を読む** Pod なので、`claude-code=true` の
 共有ポリシーには相乗りさせない（設計 §8）。apiserver も Loki も store も開いておらず、
-到達できるのは GitHub と Anthropic API と Discord だけ。
+到達できるのは GitHub と Anthropic API だけ。
+
+**この Pod にだけ `discord.com` を開けていない**のは意図的で、他の claude-code Pod との違いはここ。
+Cilium の identity は Pod 単位なので、通知サイドカーのために開けた egress はエージェントの
+コンテナからも到達できる。Discord の webhook は誰でも作れて誰でも読めるため、開いていれば
+注入されたエージェントが `CLAUDE_CODE_OAUTH_TOKEN` を攻撃者自身の webhook へ送れてしまう
+（`github.com` / `api.anthropic.com` は攻撃者が受信ログを読めないのでこの性質が無い）。
+この flow は通知サイドカーを持たず、人間への通知は framework が終端で出す Warning Event /
+`Ready=False` / metric から引く。
 
 ## image-build (2 policies)
 

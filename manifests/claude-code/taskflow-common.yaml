@@ -7,9 +7,11 @@
 # 置かれている（taskflow-cnp-check.yaml 自体には ConfigMap 定義が無い）。taskflow 側は
 # 今回からこの規約に従う。
 #
-# **taskflow-cnp-check.yaml の notify サイドカーは、まだこの共有 notify.sh に移していない。**
-# 動いている通知経路を、目的の違う PR で書き換えないため。移すときは NOTIFY_TITLE /
-# NOTIFY_ESCALATE_DIR を渡して同じ文面が Discord に出ることを確かめてから切り替えること。
+# **判定を読み直して人間に通知する部品はここに置かない。** 通知は Pod の中の仕事ではなく、
+# framework が終端で出すもの（Warning Event / Ready=False / metric、design.md §5 / §9）から
+# 引くのが正。Step 0 の cnp-check は通知サイドカーが判定を自前でやり直しており、
+# taskflow-cnp-check.yaml には今もそれが残っている — terminals を宣言して Event / 条件 /
+# metric に寄せれば落とせる（taskflow #64 のフォロー）。pr-review はサイドカーを持たない。
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -22,17 +24,23 @@ data:
     結論は文章ではなく **置き場所** で表す。回収側はディレクトリしか見ず、
     あなたの発話は一切読まない。
 
+    **どの置き場所があるかは flow が決める。** `ls /workspace/out` に出るディレクトリが
+    その回に言えることの全部で、それ以外の語彙は存在しない（作れないのではなく無い）。
+    どの結論をどこに置くかは、この後に続く flow ごとの手順書に書いてある。
+
+    どの flow でも共通なのは 1 つだけ:
+
     | 結論 | すること |
     |---|---|
-    | 点検を完了し、報告できる | `/workspace/out/ok/report.md` を書く |
-    | 判定できない・材料が足りない | `/workspace/out/escalate/report.md` に**理由**を書く |
+    | 判定できない・材料が足りない | `escalate/report.md` に**理由**を書く（`escalate/` があれば） |
 
     ## 規則
 
     - **書き込み先は `/workspace/out/` の下に実際に存在するディレクトリだけ。**
       `ls /workspace/out` で確かめられる。新しいディレクトリは作れないし、
       作れなくても異常ではないので回避しようとしないこと
-    - **書くのはどちらか一方だけ。** 両方に書くと「答えが 2 つ」として判定不能になる
+    - **書くのはちょうど 1 つのディレクトリだけ。** 2 つ以上に書くと「答えが 2 つ」として
+      判定不能になる（回収側は非空のディレクトリがちょうど 1 つのときしか答えと認めない）
     - ファイル名は `report.md` 固定。他のファイルを置いてもよいが、回収側は report.md だけを人間に見せる
     - 「判定できない」は失敗ではない。無理に報告を書くより escalate に降りる方が正しい。
       **降りるなら黙って終わらず `escalate/report.md` に理由を書くこと** —
@@ -49,86 +57,3 @@ data:
     - **主張と、それを確かめた手順を対にして書く。** 確かめていないものは
       「未確認の推測」と明記する。確かめられるのに確かめていない主張は書かない
     - 対処案は、現状より権限や到達範囲を広げないものに限る
----
-# 判定を Discord へ流すサイドカーの中身。**framework の規則を書き写さず、
-# FLOW_DIRECTORIES（コントローラが flow の next から作って全コンテナに注入する JSON 配列）を
-# 読んで同じ規則を適用する。** 語彙を写経すると flow の next を変えたときに Discord だけ
-# 古い語彙のまま黙り、Task の status と食い違う。
-#
-# 唯一の例外が「どのディレクトリが escalate 相当か」で、これは framework が教えてくれない
-# （`PhaseBinding.Next` はディレクトリ名を flow 作者が自由に選べる `map[Phase]string`）。
-# だから env `NOTIFY_ESCALATE_DIR` で利用側（この flow の next）から渡す。未設定・空なら
-# 「escalate 扱いのディレクトリは無い」として全て緑の分岐に落ちる。
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: taskflow-notify
-  namespace: claude-code
-data:
-  notify.sh: |
-    # 判定そのものは framework が出す。ここは同じ規則で読み直すだけで、別の規則を持たない。
-    # 規則は 1 本 —「非空の宣言ディレクトリがちょうど 1 つ」。report.md の有無ではなく
-    # ディレクトリが空かどうかで見るのは、回収側がそう見ているから。
-    set -u
-    OUT=${NOTIFY_OUT:-/workspace/out}
-
-    nonempty() { [ -d "$1" ] && [ -n "$(ls -A "$1" 2>/dev/null)" ]; }
-
-    notify() {
-      count=0
-      found=
-      for d in $(printf '%s' "${FLOW_DIRECTORIES:-[]}" | jq -r '.[]' 2>/dev/null); do
-        nonempty "$OUT/$d" || continue
-        count=$((count + 1))
-        found=$d
-      done
-
-      REPORT=
-      REPORT_FILE=
-      if [ "$count" -eq 1 ] && [ -n "${NOTIFY_ESCALATE_DIR:-}" ] && [ "$found" = "$NOTIFY_ESCALATE_DIR" ]; then
-        # NOTIFY_ESCALATE_DIR はこの flow の next がそう綴っているという利用側の宣言で、
-        # framework が保証する名前ではない。flow の next を変えたらこの env も一緒に変えること。
-        VERDICT=escalated
-        COLOR=16753920
-        REPORT_FILE="$OUT/$found/report.md"
-      elif [ "$count" -eq 1 ]; then
-        VERDICT=$found
-        COLOR=65280
-        REPORT_FILE="$OUT/$found/report.md"
-      elif [ "$count" -eq 0 ]; then
-        VERDICT="no verdict"
-        COLOR=16711680
-        REPORT="エージェントは何も書かずに終わった（沈黙 → Escalated）。意図して降りたなら escalate/ に理由が残るので、これは途中で落ちたか時間切れの疑いが濃い。"
-      else
-        VERDICT=ambiguous
-        COLOR=16711680
-        REPORT="非空の宣言ディレクトリが ${count} 個あった。ちょうど 1 つでないので判定不能（→ Escalated）。"
-      fi
-
-      # ディレクトリは非空でも report.md が無いことはある（framework はエントリの存在しか
-      # 見ない）。その場合も判定は変えず、本文だけ断る。
-      if [ -n "$REPORT_FILE" ]; then
-        if [ -s "$REPORT_FILE" ]; then
-          REPORT=$(jq -Rsr --argjson max 3800 \
-            'if length > $max then .[0:$max] + "\n\n_(以降を省略)_" else . end' < "$REPORT_FILE")
-        else
-          REPORT="判定は出ているが report.md が無い（他のファイルだけが置かれた）。"
-        fi
-      fi
-
-      PAYLOAD=$(jq -n \
-        --arg title "${NOTIFY_TITLE:-taskflow}: ${VERDICT}" \
-        --argjson color "$COLOR" \
-        --arg report "${REPORT}
-
-    kubectl -n claude-code get task で確認できる。" \
-        --arg ts "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" \
-        '{embeds: [{title: $title, color: $color, description: $report, timestamp: $ts}]}')
-      # -T 10: Discord が無応答だと既定の terminationGracePeriodSeconds (30s) 内に
-      # 終わらず SIGKILL される。このサイドカーの唯一の目的が、Discord が不調なときに
-      # 一番効かなくなるのを避ける（busybox wget / GNU wget どちらも -T を受け付ける）。
-      wget -qO /dev/null -T 10 --header="Content-Type: application/json" \
-        --post-data="$PAYLOAD" "$DISCORD_WEBHOOK_URL" || echo "discord post failed"
-    }
-    trap 'notify; exit 0' TERM INT
-    while :; do sleep 1; done

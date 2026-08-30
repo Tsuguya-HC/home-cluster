@@ -1,0 +1,78 @@
+# taskflow の Task が「人間が見るべき」終端に着いたら Discord に出す（home-cluster #743 で
+# pr-review の Pod から notify サイドカーを外し、「framework の信号に乗せる」と決めた残り半分の配線）。
+#
+# 出典は design.md §5「終端の意味は flow が宣言する」と §9「人間への報告は絞る」:
+# 人間が見るべき瞬間は `terminals` で `Failure` と宣言された終端、そして framework 自身の
+# `Escalated`（0 個/2 個以上/時間切れ/宣言に無いディレクトリ）の 2 つだけ。`taskflow_task_outcomes_total`
+# （manifests/taskflow-system/servicemonitor.yaml が既に取っている）はこの 2 つを含む終端の種類を
+# 常に出すので、追加の exporter もコントローラへの変更も要らない。
+#
+# ## Task 名・理由の要点は載らない（意図的）
+#
+# taskflow のコントローラは flow / phase / severity の 3 label しか出さない
+# （taskflow internal/metrics/metrics.go）。Task 名を label にすると、Task を作れる者が
+# 実行時にカーディナリティを動かせてしまうため（`Task.spec.flow` に長さ・パターン制限が無いのと
+# 同じ理由）。理由の一行（`status.history[].reason`）も同様に自由記述で、metric の label には向かない。
+# なのでこの Discord 通知は「どの flow がどのフェーズで何の終端になったか」までしか言えない。
+# 対象の Task と理由は `kubectl -n claude-code get task` で絞り込み、`Ready` 条件の message
+# （Failure 終端では同じ本文が Warning Event `HandlerFailed` の note にも出る）を読む。
+#
+# ## severity label を 2 本の alert に分けている理由
+#
+# metric 自身が `severity` という label を持つが、値は taskflow の語彙（Success / Failure /
+# Escalated / Failed / Undeclared）。Alertmanager の `severity`（critical / warning / info。
+# manifests/monitoring/alertmanager-config.yaml のルーティングが見る）と同じ名前で語彙が違うので、
+# 1 本の alert で `severity=~"Failure|Escalated"` を通してしまうと、rule 側の label が query 結果の
+# 同名 label を上書きする Prometheus の挙動により、どちらの終端だったかが最終的な alert から
+# 落ちる（上書きされて "warning" にしかならない）。終端ごとに 1 本ずつに分け、
+# メッセージは alert 名の側で決め打ちにした。
+#
+# ## ルーティングは新規に書いていない
+#
+# `severity: warning` を付けるだけで、alertmanager-config.yaml の既定ルート（critical と
+# Watchdog / InfoInhibitor 以外はすべて `continue: true` の末尾ルールで `discord` receiver に落ちる）
+# に自然に乗る。alert-investigate（severity: critical 専用、根本原因調査までする重い経路）には
+# 意図的に乗せていない — Task の結論を伝えるだけで、ログを読み直す調査は要らない。
+#
+# ## Task 単位での二重通知は起きない
+#
+# 1 つの Task が終端に着くとカウンタが 1 だけ増える。`increase(...[5m]) > 0` はその増分が
+# 5 分ローリング窓に入っている間だけ真になり、窓を抜けると自動的に resolve するので、
+# 同じ Task について repeatInterval（4h）まで鳴り続けることはない。
+#
+# ## cnp-check の Pod 内 notify サイドカーとの重複
+#
+# taskflow-cnp-check.yaml の `notify` サイドカーは元々 ok / escalate / ambiguous / no-verdict の
+# 4 通りすべてを Discord に出していた。escalate 系の 3 つ（＝ここでいう Escalated 終端）はこの
+# PrometheusRule と二重になるため、taskflow-cnp-check.yaml 側で撤去した（残すのは
+# 完了 = Success の 1 通だけ。design.md §9 的には成功の報告も本来不要だが、日次 cron が
+# 動いた確認という既存の価値を壊さないためあえて残す。二重になる懸念が無いのは、
+# Success はこの PrometheusRule の対象外だから）。pr-review は #743 で Pod 内通知を
+# 全廃済みなので、この rule だけが唯一の通知経路になる。
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: taskflow
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: taskflow
+      rules:
+        - alert: TaskFlowTaskFailure
+          expr: |
+            increase(taskflow_task_outcomes_total{severity="Failure"}[5m]) > 0
+          labels:
+            severity: warning
+          annotations:
+            summary: "taskflow: {{ $labels.flow }} が Failure 終端（{{ $labels.phase }}）"
+            description: "{{ $labels.flow }} の Task がフェーズ {{ $labels.phase }} で flow 宣言の Failure 終端に着いた（= 指摘・要修正あり）。対象は `kubectl -n claude-code get task` で Ready=False のものを探す。理由は対象 Task の Ready 条件の message、または同じ内容の Warning Event（reason HandlerFailed）で分かる。"
+        - alert: TaskFlowTaskEscalated
+          expr: |
+            increase(taskflow_task_outcomes_total{severity="Escalated"}[5m]) > 0
+          labels:
+            severity: warning
+          annotations:
+            summary: "taskflow: {{ $labels.flow }} が Escalated（{{ $labels.phase }}）"
+            description: "{{ $labels.flow }} の Task がフェーズ {{ $labels.phase }} で Escalated に着いた（判定不能 = 0 個/2 個以上の宣言ディレクトリ・時間切れ・宣言に無いディレクトリのいずれか）。対象は `kubectl -n claude-code get task` で Ready=False のものを探す。理由は対象 Task の Ready 条件の message（reason は Escalated）で分かる。escalate/ に書いて表明した場合は理由が残るが、沈黙（NoAnswer）の場合は途中で死んだか時間切れの疑いが濃い。"

@@ -3,14 +3,21 @@
 #
 # 初回は 調査 の 1 フェーズだけ。設計 §16 の 調査 → 報告 の 2 フェーズは、前フェーズの
 # report を次フェーズへ渡す store 封印（results/<runID>/）がまだ無いので載せられない。
-# 人間への報告は 調査 Pod 内の notify サイドカーが担う（設計 §7: publish は利用側の
-# サイドカーの仕事。framework は判定ディレクトリしか見ない）。
 #
 # 語彙は next の宣言から来る。{完了: ok, Escalated: escalate} なので、エージェントが書けるのは
 # /workspace/out/ 下の ok/ と escalate/ の 2 つだけ。「判定できない」は escalate/ に理由を書いて
 # 明示する（taskflow #63）。何も書かなければ従来どおり Escalated だが、そちらは沈黙 — 途中で
 # 死んだのか意図して降りたのかが history から区別できない。
 # terminals で終端の意味も宣言する（taskflow #64）。宣言しないと metric 上は Undeclared のまま。
+#
+# 人間への報告は 完了（Success）だけ 調査 Pod 内の notify サイドカーが担う（設計 §7: publish は
+# 利用側のサイドカーの仕事。framework は判定ディレクトリしか見ない）。escalate / ambiguous /
+# no-verdict（＝いずれも Escalated）はここでは通知しない — manifests/monitoring/
+# prometheusrule-taskflow.yaml が taskflow_task_outcomes_total から Escalated を検知して
+# 既存の Alertmanager Discord 受け口に出すので、ここでも出すと同じ Escalated に対して
+# Discord が 2 通鳴る（home-cluster #743 が pr-review で決めた「通知は framework の信号に乗せる」
+# を cnp-check にも揃える）。完了だけ残しているのは日次 cron が実際に走って判定を出せたことの
+# ハートビートとしての価値のためで、Success はそちらの PrometheusRule の対象外なので重複しない。
 #
 # taskflow-verdict-protocol ConfigMap（プロンプトの一部）は複数 flow で共有するため
 # manifests/claude-code/taskflow-common.yaml に置いてある。ここの projected volume はそこを参照する。
@@ -61,10 +68,12 @@ spec:
                 - configMap:
                     name: cnp-check-prompt
         initContainers:
-          # 人間への報告。framework の関心事ではない（設計 §7 / §9）。SIGTERM で
-          # どのディレクトリに report.md があるかを見て、ok / escalate / 沈黙 の
-          # 3 通りを撃ち分ける。escalate と沈黙はどちらも Escalated だが、人間から見ると
-          # 「理由がある差し戻し」と「途中で落ちた疑い」で次の一手が違う。
+          # 人間への報告のうち 完了（Success）だけをここで扱う（設計 §7 / §9）。SIGTERM で
+          # out/ok が非空かどうかを見る。escalate / ambiguous（ok と escalate 両方が非空）/
+          # 沈黙（どちらも空）はいずれも Escalated 終端で、そちらは
+          # manifests/monitoring/prometheusrule-taskflow.yaml が taskflow_task_outcomes_total
+          # から検知して Discord に出す。ここでも出すと同じ Escalated に対して Discord が
+          # 2 通鳴るので、この sidecar は完了の 1 パターンしか報告しない。
           - name: notify
             image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:d5db59cac14b23a4ef85a456754522463267324e8ed3a84e795a2eba829c8f05
             restartPolicy: Always
@@ -79,29 +88,18 @@ spec:
                 notify() {
                   OK=/workspace/out/ok
                   ESC=/workspace/out/escalate
-                  REPORT_FILE=""
-                  if nonempty "$OK" && nonempty "$ESC"; then
-                    TITLE="CNP check (taskflow): ambiguous"; COLOR=16711680
-                    REPORT="ok/ と escalate/ の両方に書かれた。非空がちょうど 1 つでないので判定不能（→ Escalated）。kubectl -n claude-code get task で確認。"
-                  elif nonempty "$OK"; then
-                    TITLE="CNP check (taskflow): ok"; COLOR=65280
-                    REPORT_FILE="$OK/report.md"
-                  elif nonempty "$ESC"; then
-                    TITLE="CNP check (taskflow): escalated"; COLOR=16753920
-                    REPORT_FILE="$ESC/report.md"
-                  else
-                    TITLE="CNP check (taskflow): no verdict"; COLOR=16711680
-                    REPORT="エージェントは何も書かずに終わった（沈黙 → Escalated）。意図的な差し戻しなら escalate/ に理由が残るので、これは途中で落ちたか時間切れの疑いが濃い。kubectl -n claude-code get task で確認。"
-                  fi
+                  # 完了（ok だけが非空）以外は Escalated 終端で PrometheusRule 側の担当。
+                  # ここで抜けると Discord には投げない。
+                  nonempty "$OK" && ! nonempty "$ESC" || return 0
+                  TITLE="CNP check (taskflow): ok"; COLOR=65280
+                  REPORT_FILE="$OK/report.md"
                   # ディレクトリは非空でも report.md が無いことはある（framework は
                   # エントリの存在しか見ない）。その場合も判定は変えず、本文だけ断る。
-                  if [ -n "$REPORT_FILE" ]; then
-                    if [ -s "$REPORT_FILE" ]; then
-                      REPORT=$(jq -Rsr --argjson max 3900 \
-                        'if length > $max then .[0:$max] + "\n\n_(以降を省略)_" else . end' < "$REPORT_FILE")
-                    else
-                      REPORT="判定は出ているが report.md が無い（他のファイルだけが置かれた）。kubectl -n claude-code get task で確認。"
-                    fi
+                  if [ -s "$REPORT_FILE" ]; then
+                    REPORT=$(jq -Rsr --argjson max 3900 \
+                      'if length > $max then .[0:$max] + "\n\n_(以降を省略)_" else . end' < "$REPORT_FILE")
+                  else
+                    REPORT="判定は出ているが report.md が無い（他のファイルだけが置かれた）。kubectl -n claude-code get task で確認。"
                   fi
                   PAYLOAD=$(jq -n --arg title "$TITLE" --argjson color "$COLOR" --arg report "$REPORT" \
                     --arg ts "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" \

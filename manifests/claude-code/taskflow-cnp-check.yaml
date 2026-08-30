@@ -25,6 +25,10 @@ spec:
     type: Job
   timeout: 25m
   maxInfraRetries: 1
+  # prepare / publish はコントローラが Job 生成時に注入する（taskflow #73）。
+  workspace:
+    volume: workspace
+    mountPath: /workspace
   jobTemplate:
     template:
       metadata:
@@ -36,12 +40,10 @@ spec:
         restartPolicy: Never
         runtimeClassName: kata
         serviceAccountName: agent-cnp-reader
-        # prepare (65532) が out/ を作って 0555 に閉じ、エージェント (65533) は
-        # 同じ group で宣言ディレクトリにだけ書ける。uid が違うので out/ を開け直せない。
+        # runAsUser は必須。コントローラはこれと違う uid で out/ を 0555 に閉じるので、
+        # エージェントは宣言ディレクトリにだけ書ける。
         securityContext:
           runAsUser: 65533
-          runAsGroup: 65532
-          fsGroup: 65532
           runAsNonRoot: true
           seccompProfile:
             type: RuntimeDefault
@@ -59,42 +61,6 @@ spec:
                 - configMap:
                     name: cnp-check-prompt
         initContainers:
-          - name: prepare
-            image: registry.infra.tgy.io/tools/agent-sidecar:latest@sha256:462d79d9a1354d3a1208a773a3adce390bab751b5e28d19b7e666aeb955ac561
-            args: ["prepare", "--out", "/workspace/out"]
-            securityContext:
-              runAsUser: 65532
-              allowPrivilegeEscalation: false
-              capabilities:
-                drop: [ALL]
-            volumeMounts:
-              - name: workspace
-                mountPath: /workspace
-            resources:
-              requests:
-                cpu: 10m
-                memory: 16Mi
-              limits:
-                memory: 64Mi
-          # ネイティブサイドカー。main 終了後の SIGTERM で out/ を見て、非空の宣言
-          # ディレクトリがちょうど 1 つならその名前を termination log に書く。
-          - name: publish
-            image: registry.infra.tgy.io/tools/agent-sidecar:latest@sha256:462d79d9a1354d3a1208a773a3adce390bab751b5e28d19b7e666aeb955ac561
-            args: ["publish", "--out", "/workspace/out"]
-            restartPolicy: Always
-            securityContext:
-              allowPrivilegeEscalation: false
-              capabilities:
-                drop: [ALL]
-            volumeMounts:
-              - name: workspace
-                mountPath: /workspace
-            resources:
-              requests:
-                cpu: 10m
-                memory: 16Mi
-              limits:
-                memory: 64Mi
           # 人間への報告。framework の関心事ではない（設計 §7 / §9）。SIGTERM で
           # どのディレクトリに report.md があるかを見て、ok / escalate / 沈黙 の
           # 3 通りを撃ち分ける。escalate と沈黙はどちらも Escalated だが、人間から見ると

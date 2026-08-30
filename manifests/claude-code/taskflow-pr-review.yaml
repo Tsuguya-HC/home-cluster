@@ -174,6 +174,11 @@ spec:
     type: Job
   timeout: 30m
   maxInfraRetries: 1
+  # prepare / publish（out/ を敷く init と判定を読み戻すサイドカー）はコントローラが
+  # Job 生成時に注入する（taskflow #73）。ここで言うのはワークスペースの所在だけ。
+  workspace:
+    volume: workspace
+    mountPath: /workspace
   jobTemplate:
     template:
       metadata:
@@ -183,12 +188,10 @@ spec:
         restartPolicy: Never
         runtimeClassName: kata
         serviceAccountName: agent-pr-reviewer
-        # prepare (65532) が out/ を作って 0555 に閉じ、エージェント (65533) は同じ group で
-        # 宣言ディレクトリにだけ書ける。uid が違うので out/ を開け直せない。
+        # runAsUser は必須。コントローラはこれと違う uid で out/ を 0555 に閉じるので、
+        # エージェントは宣言ディレクトリにだけ書ける。
         securityContext:
           runAsUser: 65533
-          runAsGroup: 65532
-          fsGroup: 65532
           runAsNonRoot: true
           seccompProfile:
             type: RuntimeDefault
@@ -206,43 +209,6 @@ spec:
                     name: taskflow-verdict-protocol
                 - configMap:
                     name: pr-review-prompt
-        initContainers:
-          - name: prepare
-            image: registry.infra.tgy.io/tools/agent-sidecar:latest@sha256:462d79d9a1354d3a1208a773a3adce390bab751b5e28d19b7e666aeb955ac561
-            args: ["prepare", "--out", "/workspace/out"]
-            securityContext:
-              runAsUser: 65532
-              allowPrivilegeEscalation: false
-              readOnlyRootFilesystem: true
-              capabilities:
-                drop: [ALL]
-            volumeMounts:
-              - name: workspace
-                mountPath: /workspace
-            resources:
-              requests:
-                cpu: 10m
-                memory: 16Mi
-              limits:
-                memory: 64Mi
-          - name: publish
-            image: registry.infra.tgy.io/tools/agent-sidecar:latest@sha256:462d79d9a1354d3a1208a773a3adce390bab751b5e28d19b7e666aeb955ac561
-            args: ["publish", "--out", "/workspace/out"]
-            restartPolicy: Always
-            securityContext:
-              allowPrivilegeEscalation: false
-              readOnlyRootFilesystem: true
-              capabilities:
-                drop: [ALL]
-            volumeMounts:
-              - name: workspace
-                mountPath: /workspace
-            resources:
-              requests:
-                cpu: 10m
-                memory: 16Mi
-              limits:
-                memory: 64Mi
         containers:
           - name: agent
             image: registry.infra.tgy.io/tools/claude-code:latest@sha256:3e95cb84f1deb993199f220d9b4083ab7202d8c6e1278fbe4ae802dfc343df06

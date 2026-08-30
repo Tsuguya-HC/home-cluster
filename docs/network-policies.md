@@ -51,6 +51,8 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 | Argo Workflows server (argo) | SeaweedFS filer (seaweedfs) | 8333 | Archived log retrieval |
 | Prometheus (monitoring) | Trivy Operator (trivy-system) | 8080 | Metrics scrape |
 | Prometheus (monitoring) | Harbor (harbor) | 8001 | Metrics scrape |
+| Prometheus (monitoring) | cert-manager controller/webhook/cainjector (cert-manager) | 9402 | Metrics scrape |
+| Prometheus (monitoring) | taskflow-controller (taskflow-system) | 8443 | Metrics scrape |
 | Grafana (monitoring) | Kanidm (kanidm) | 8443 | OIDC token exchange (direct, via CoreDNS rewrite) |
 | ArgoCD server (argocd) | Kanidm (kanidm) | 8443 | OIDC token exchange (direct, via CoreDNS rewrite) |
 | Argo Workflows server (argo) | Kanidm (kanidm) | 8443 | OIDC token exchange (direct, via CoreDNS rewrite) |
@@ -93,6 +95,7 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 | Workflow pods (claude-code) | ArgoCD server (argocd) | 8080 | ArgoCD API access |
 | memory (memory) | qdrant (qdrant) | 6333 | Vector database |
 | memory (memory) | ollama (ollama) | 11434 | LLM inference |
+| Workflow pods (claude-code) | memory (memory) | 3000 | Memory service access |
 | Collector pods (trading) | SeaweedFS filer (seaweedfs) | 8333 | Market data ingestion |
 | aqua-checksum (argo) | SeaweedFS filer (seaweedfs) | 8333 | Workflow step log/artifact upload |
 | Collector pods (trading) | shared-pg (database) | 5432 | Market data ingestion |
@@ -119,7 +122,7 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 |---|---|---|
 | **server** | ingress, cloudflared, claude-code (claude-code) → 8080 | kube-apiserver, repo-server:8081, kanidm (kanidm):8443, redis:6379 |
 | **application-controller** | host → 8082 | kube-apiserver, repo-server:8081, redis:6379 |
-| **repo-server** | server, app-controller → 8081 | github.com + ghcr.io + {argoproj,grafana,grafana-community,oauth2-proxy,aquasecurity,kyverno,cloudnative-pg,kubernetes-sigs,prometheus-community,seaweedfs,stakater,qdrant}.github.io + *.githubusercontent.com + charts.jetstack.io + helm.cilium.io + helm.goharbor.io + charts.external-secrets.io + external-secrets.io + helm.otwld.com:443, redis:6379 |
+| **repo-server** | server, app-controller → 8081 | github.com + api.github.com + ghcr.io + {argoproj,grafana,grafana-community,oauth2-proxy,aquasecurity,kyverno,cloudnative-pg,kubernetes-sigs,prometheus-community,seaweedfs,stakater,qdrant}.github.io + *.githubusercontent.com + charts.jetstack.io + helm.cilium.io + helm.goharbor.io + charts.external-secrets.io + external-secrets.io + helm.otwld.com:443, redis:6379 |
 | **redis** | server, repo-server, app-controller → 6379 | (none) |
 | **applicationset-controller** | (deny world) | kube-apiserver |
 | **notifications-controller** | (deny world) | kube-apiserver, discord.com:443, horenso (horenso):3000, argocd-deployed-eventsource (argo):12003 |

@@ -17,6 +17,16 @@ spec:
         - ports:
             - port: "8081"
               protocol: TCP
+    # Prometheus からの metrics スクレイプ（:8443、HTTPS + authn/authz）。
+    # ここを開けないと ServiceMonitor があっても取れない。
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: prometheus
+            io.kubernetes.pod.namespace: monitoring
+      toPorts:
+        - ports:
+            - port: "8443"
+              protocol: TCP
   egress:
     # コントローラが話す相手は apiserver だけ。Job を作り、Pod の status を読むのみで、
     # ワークスペースにも store にも触らない（設計 §6「2 ホップ」）。DNS は CCNP で共通適用済み。

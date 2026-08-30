@@ -1,0 +1,45 @@
+# taskflow_task_outcomes_total を Prometheus に届ける。コントローラは kubebuilder の
+# scaffold どおり :8443 で HTTPS + authn/authz フィルタ越しに metrics を出しており、
+# 素の scrape は 401 で弾かれる。Prometheus 自身の SA トークンを Bearer で送り、
+# 下の ClusterRoleBinding でその SA に /metrics の get を与える。
+#
+# 証明書はコントローラの自己署名（cert-manager を挟んでいない）なので
+# insecureSkipVerify。同じ形が manifests/argo/servicemonitor-workflow-controller.yaml
+# にもある。
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: taskflow-controller
+  namespace: taskflow-system
+  labels:
+    release: kube-prometheus-stack
+spec:
+  endpoints:
+    - port: https
+      path: /metrics
+      scheme: https
+      interval: 30s
+      scrapeTimeout: 10s
+      bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+      tlsConfig:
+        insecureSkipVerify: true
+  selector:
+    matchLabels:
+      control-plane: controller-manager
+      app.kubernetes.io/name: taskflow
+---
+# metrics-reader ClusterRole（nonResourceURLs: /metrics の get）は taskflow の
+# config/rbac が持っているが、誰にも束縛されていない。認可の相手を決めるのは
+# 利用側なので、束縛はここで書く（設計 §8: SA / RBAC は framework の外）。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: taskflow-metrics-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: metrics-reader
+subjects:
+  - kind: ServiceAccount
+    name: kube-prometheus-stack-prometheus
+    namespace: monitoring

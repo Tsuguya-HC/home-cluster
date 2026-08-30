@@ -83,6 +83,16 @@ spec:
         - ports:
             - port: "9090"
               protocol: TCP
+    # taskflow コントローラ。HTTPS + authn/authz 越しの :8443（kubebuilder の既定）。
+    - toEndpoints:
+        - matchLabels:
+            control-plane: controller-manager
+            app.kubernetes.io/name: taskflow
+            io.kubernetes.pod.namespace: taskflow-system
+      toPorts:
+        - ports:
+            - port: "8443"
+              protocol: TCP
     # chart の ServiceMonitor は 3 コンポーネントとも対象にするので 3 つ書く。
     # matchLabels はラベルを跨いだパターンマッチができないため列挙が必要。
     - toEndpoints:

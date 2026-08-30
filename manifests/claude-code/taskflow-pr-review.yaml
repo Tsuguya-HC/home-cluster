@@ -214,7 +214,7 @@ spec:
                     name: pr-review-prompt
         containers:
           - name: agent
-            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:3e95cb84f1deb993199f220d9b4083ab7202d8c6e1278fbe4ae802dfc343df06
+            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:e53e26ca0fa0356e65b1ba5c130afad3a7b49548a06dfbb78178deb42cd1fcc5
             workingDir: /workspace
             command: [sh, -c]
             args:

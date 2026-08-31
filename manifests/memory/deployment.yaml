@@ -25,7 +25,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: memory
-          image: registry.infra.tgy.io/tools/memory:latest@sha256:d8af2e3ac64ec2084430ae9e3866b6cf2e7c46d9c3ae8fbf14b4918cc7432973
+          image: registry.infra.tgy.io/tools/memory:latest@sha256:361377edc907f25492f27a79c73acf73fd820a1fe23bc60c7881319f27f8f106
           ports:
             - containerPort: 3000
               protocol: TCP

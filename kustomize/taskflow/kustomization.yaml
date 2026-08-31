@@ -51,4 +51,4 @@ patches:
               - name: manager
                 env:
                   - name: SIDECAR_IMAGE
-                    value: registry.infra.tgy.io/tools/agent-sidecar:latest@sha256:aab6c9f82e8b55b741381a60ed35d07a78c665de1e4e22a695bebd9235f1a9a4
+                    value: registry.infra.tgy.io/tools/agent-sidecar:latest@sha256:3399fa13ec9be5f8541a5387e005c16b1fe4518ae2c22f8d2d3d640a0686630c

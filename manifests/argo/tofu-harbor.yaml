@@ -134,7 +134,7 @@ spec:
     parameters:
       - name: pr-number
       - name: branch
-      - name: author
+      - name: author-id
         default: ""
   templates:
     - name: main
@@ -251,8 +251,10 @@ spec:
               --arg output "$PLAN_OUTPUT" \
               '{body: ("### " + $title + "\n" + $msg + "\n\n<details>\n<summary>Plan Output</summary>\n\n```\n" + $output + "\n```\n\n</details>")}')
             echo "$BODY" | gh api "repos/$REPO/issues/$PR/comments" --input -
-            AUTHOR="{{workflow.parameters.author}}"
-            if [ "$EXIT_CODE" = "0" ] && [ "$AUTHOR" = "renovate[bot]" ]; then
+            # See tofu-cloudflare-plan for why the author is matched on
+            # numeric user id rather than login.
+            AUTHOR_ID="{{workflow.parameters.author-id}}"
+            if [ "$EXIT_CODE" = "0" ] && { [ "$AUTHOR_ID" = "29139614" ] || [ "$AUTHOR_ID" = "265309552" ]; }; then
               gh api "repos/$REPO/pulls/$PR/merge" --method PUT -f merge_method=squash
             fi
         volumeMounts:

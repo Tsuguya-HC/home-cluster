@@ -353,7 +353,7 @@ spec:
                       value: ""
                     - name: branch
                       value: ""
-                    - name: author
+                    - name: author-id
                       value: ""
           parameters:
             - src:
@@ -366,7 +366,7 @@ spec:
               dest: spec.arguments.parameters.1.value
             - src:
                 dependencyName: pull-request
-                dataKey: body.pull_request.user.login
+                dataKey: body.pull_request.user.id
               dest: spec.arguments.parameters.2.value
 ---
 apiVersion: argoproj.io/v1alpha1
@@ -434,7 +434,7 @@ spec:
                       value: ""
                     - name: sha
                       value: ""
-                    - name: author
+                    - name: author-id
                       value: ""
           parameters:
             - src:
@@ -451,7 +451,7 @@ spec:
               dest: spec.arguments.parameters.2.value
             - src:
                 dependencyName: pull-request
-                dataKey: body.pull_request.user.login
+                dataKey: body.pull_request.user.id
               dest: spec.arguments.parameters.3.value
 ---
 apiVersion: argoproj.io/v1alpha1
@@ -551,7 +551,7 @@ spec:
                       value: ""
                     - name: branch
                       value: ""
-                    - name: author
+                    - name: author-id
                       value: ""
           parameters:
             - src:
@@ -564,5 +564,5 @@ spec:
               dest: spec.arguments.parameters.1.value
             - src:
                 dependencyName: pull-request
-                dataKey: body.pull_request.user.login
+                dataKey: body.pull_request.user.id
               dest: spec.arguments.parameters.2.value

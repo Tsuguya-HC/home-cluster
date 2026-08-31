@@ -13,7 +13,7 @@ spec:
       - name: pr-number
       - name: branch
       - name: sha
-      - name: author
+      - name: author-id
         default: ""
   templates:
     - name: main
@@ -112,7 +112,7 @@ spec:
             REPO="Tsuguya-HC/home-unifi"
             PR="{{workflow.parameters.pr-number}}"
             SHA="{{workflow.parameters.sha}}"
-            AUTHOR="{{workflow.parameters.author}}"
+            AUTHOR_ID="{{workflow.parameters.author-id}}"
             RUN_URL="https://argo.infra.tgy.io/workflows/argo/{{workflow.name}}"
 
             # The commit status is the merge gate, so it is posted as pending
@@ -176,7 +176,9 @@ spec:
             # until it settles. Without the retry the PR just sits there green
             # and unmerged, which reads as "automerge is broken" rather than as
             # a race.
-            if [ "$DESC" = "No changes" ] && [ "$AUTHOR" = "renovate[bot]" ]; then
+            # See tofu-cloudflare-plan for why the author is matched on
+            # numeric user id rather than login.
+            if [ "$DESC" = "No changes" ] && { [ "$AUTHOR_ID" = "29139614" ] || [ "$AUTHOR_ID" = "265309552" ]; }; then
               for attempt in 1 2 3 4 5; do
                 if gh api "repos/$REPO/pulls/$PR/merge" --method PUT -f merge_method=squash; then
                   break

@@ -4,15 +4,40 @@ kind: Kustomization
 # taskflow のコントローラ本体は Tsuguya-HC/taskflow リポの config/default（CRD・RBAC・
 # Deployment）をそのまま remote base として取り込む。home-cluster 側が持つのは
 # イメージの差し替えとクラスタ固有の patch だけ（設計 §14: 「どう動くか」は taskflow、
-# 「何ができるか」は home-cluster）。ref は commit SHA で固定し Renovate が追う。
+# 「何ができるか」は home-cluster）。
+#
+# ref は commit SHA でのピン。git-refs で main の HEAD を追わせると CRD だけがイメージより
+# 先に進む（ビルド完了前に digest が動く）ため、CRD / RBAC が変わったときに、下の images の
+# digest と同じ commit へ人が揃えて上げる。両者が同じ commit を指しているかの検証は #687。
+#
+# 逆方向（イメージが CRD/RBAC より先に進む）のドリフトも構造的に起こりうる。Argo のビルドは
+# *.go 等の変更でのみ発火し config/ 単独では発火しないが、kubebuilder では CRD/RBAC が Go の
+# マーカーから make manifests で生成されるため、Go 変更と config/default 変更は同一コミットに
+# 同居しやすい。つまりコードが変わってイメージだけ自動マージされると、新しいコントローラ
+# バイナリが古い CRD/RBAC のまま動く（forbidden エラーに直結する）。対策として renovate.jsonc
+# で controller / agent-sidecar の両イメージも automerge: false にし、?ref= と一緒に人が
+# 上げる運用にしている（検証は #687）。
+#
+# この ref は Renovate の kustomize manager に github-tags dep として抽出される（commit SHA
+# でも currentValue にそのまま入る＝manager が見ていないから安全、ではない）。GITHUB_COM_TOKEN
+# 付きで lookup まで走らせても updates: [] にはなる（実測済み）が、その理由は確定していない —
+# 実測時点で upstream (Tsuguya-HC/taskflow) に tag/release が 0 件であることと、versioning が
+# semver-coerced で 40 桁の生 SHA を比較可能なバージョンとして解釈できないこと、両方の観測が
+# ある。どちらの条件が崩れたとき（タグが増えた時／versioning が変わった時）に何が起きるかは
+# 実測していない。この不確実性に賭けず、renovate.jsonc の packageRules で明示的に
+# enabled: false にして止めている。
 resources:
-  - https://github.com/Tsuguya-HC/taskflow//config/default?ref=187f5adbd2bcf9e0adfe2f1cb0ffb27b745011ec
+  - https://github.com/Tsuguya-HC/taskflow//config/default?ref=eb0d61ffc08e776a689db25e4a22d207cd096afe
 
+# newTag と digest を分けて併記すると、Renovate の kustomize manager が
+# invalid-dependency-specification で抽出を捨て、digest が自動更新されなくなる
+# （2026-08-30 のビルドに 3 日間据え置かれた実例あり）。newTag: tag@digest の
+# 1 フィールド形式は Renovate 自身が warning で案内している書き方で、レンダリング
+# 結果は併記時と同一。
 images:
   - name: controller
     newName: registry.infra.tgy.io/tools/taskflow
-    newTag: latest
-    digest: sha256:25b531d9e9dcef30a08fde9e52c34df0cf4b3ef6284ac2fb452f8a91c3105d83
+    newTag: latest@sha256:a34ca06f5d754625539369ca35e7201b868c368cf82c80f1495545f8676a1e32
 
 patches:
   # 全 namespace restricted 運用に合わせる（config/default の Namespace にはラベルが無い）

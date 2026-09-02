@@ -208,6 +208,22 @@
     },
     {
       "description": [
+        "kustomize/taskflow/kustomization.yaml の remote base ?ref= は commit SHA ピンで、",
+        "人が images の digest と同じ commit へ揃えて上げる運用（検証は home-cluster#687）。",
+        "Renovate の kustomize manager は commit SHA の ref も github-tags として抽出する",
+        "（manager が見ていないから安全、ではない）。lookup まで走らせても updates: [] には",
+        "なる（実測済み）が理由は確定していない — 実測時点で upstream にタグ/リリースが 0 件",
+        "であることと、versioning が semver-coerced で生の SHA を解釈できないこと、両方の観測",
+        "がある。どちらの条件が崩れたときに何が起きるかは実測していないため、CRD/RBAC が",
+        "コントローラのイメージより先に進むレースを避けるべく、その不確実性に依存せず",
+        "明示的に無効化する。"
+      ],
+      "matchDatasources": ["github-tags"],
+      "matchDepNames": ["Tsuguya-HC/taskflow"],
+      "enabled": false
+    },
+    {
+      "description": [
         "Lock file maintenance refreshes transitive versions; there is no single",
         "release to age, so the gate can never be satisfied. horenso#66 was stuck",
         "pending on it with automerge enabled, which means it would never have",
@@ -252,6 +268,27 @@
     {
       "description": "Do not automerge critical infrastructure",
       "matchPackageNames": ["cilium", "tetragon", "https://github.com/kubernetes-sigs/gateway-api.git"],
+      "automerge": false
+    },
+    {
+      "description": [
+        "taskflow は Tsuguya-HC/taskflow 1 リポジトリから 3 つの成果物を出す: remote base の",
+        "?ref=、controller image、agent-sidecar image。この 3 つは同じ commit を指している",
+        "必要がある（検証は home-cluster#687）。?ref= 側は上の github-tags ルールで自動更新を",
+        "止めてあるが、イメージだけを patch/digest 自動マージのままにすると、その skew が",
+        "毎回・自動で起きる: Argo のビルドは *.go 等の変更でのみ発火し config/ 単独では",
+        "発火しないが、kubebuilder では CRD/RBAC が Go のマーカーから make manifests で",
+        "生成されるため、Go 変更と config/default 変更は同一コミットに同居しやすい。つまり",
+        "コードが変わってイメージだけ自動マージされると、新しいバイナリが古い CRD/RBAC の",
+        "まま動く（forbidden エラーに直結する）。3 つが揃っているかを人が保証できるまでの",
+        "手動ゲートとして、この 2 イメージだけ automerge を止める。enabled: false ではなく",
+        "automerge: false なのは、digest が動いたこと自体は PR で知りたいため。"
+      ],
+      "matchDatasources": ["docker"],
+      "matchPackageNames": [
+        "registry.infra.tgy.io/tools/taskflow",
+        "registry.infra.tgy.io/tools/agent-sidecar"
+      ],
       "automerge": false
     },
     {

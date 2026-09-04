@@ -22,6 +22,9 @@ jobs:
     # The caller job is already named "AI review"; a reusable check renders as
     # "<caller job> / <callee job>", so keep this one short.
     name: review
+    # Not the whole gate: what this reviewer is for is narrowed again by the
+    # first step below, which needs the PR's changed files — something no `if:`
+    # expression can read.
     if: >-
       contains(fromJSON('["renovate[bot]", "tsuguya-home-cluster[bot]"]'),
                github.event.pull_request.user.login) &&
@@ -47,6 +50,65 @@ jobs:
       # returns "Resource not accessible by integration" for a check the token
       # cannot see — and one unreadable check fails the whole query
     steps:
+      # What this reviewer can actually do is `helm_values_diff`: render the
+      # old and new chart, diff the values schema against ours, and report the
+      # keys that disappeared under us. That is evidence the diff does not
+      # already contain. Nothing else it is pointed at produces any.
+      #
+      # Steps 2 through 4 of the prompt below run only when update_type is
+      # "helm" — the prompt says so in its own words. The release-notes
+      # fallback does not fill the gap either: get_pr_summary resolves an
+      # upstream through HELM_CHART_REPOS (.github/mcp/pr-review/src/lib/
+      # github.ts), a hardcoded map of chart names, so an image reference never
+      # matches it. And a digest bump has no version change, so Renovate writes
+      # no release notes in the body to fall back on. What is left is the diff:
+      # one line, one digest. SAFE comes back every time. #784 was approved and
+      # auto-merge armed four minutes after it opened; #754 merged three Talos
+      # extension digests with an approval that only restated the diff.
+      #
+      # The thing that decides whether those bumps were safe is not in the diff
+      # at all — kustomize/taskflow has to name one commit across a remote base
+      # `?ref=` and two images (#687), and a Talos extension has to match the
+      # release it is installed into, which lives in home-infra. Neither is
+      # visible from here, so a green review says nothing about either.
+      #
+      # The job-level `if:` used to be the only filter, and it selects on
+      # "Renovate automerge is off" — a proxy for "a human should look", not
+      # for "there is something here to read". So: gate on the chart bump
+      # directly.
+      #
+      # `apps/` is where that lives. One ArgoCD Application per service, and
+      # renovate.jsonc points the argocd manager at exactly `/apps/.+\.yaml$/`,
+      # so a chart version moving is a change to a file under apps/ and nothing
+      # else in the tree is one. Matching on files rather than on the title
+      # also catches the grouped PRs whose title never says "Helm release"
+      # (#769 and #561 bumped the seaweedfs chart alongside its image).
+      #
+      # Direction of failure: not reviewing. Every PR that reaches this job has
+      # Renovate automerge off, so a skip leaves it open for a human rather
+      # than merging it unread — which is what should have happened to #784.
+      - name: Skip anything that is not a Helm chart update
+        id: scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Read the files live, as dedupe and the CI wait below do. --paginate
+          # because `gh pr view --json files` stops at 100.
+          files=$(gh api "repos/${REPO}/pulls/${PR}/files" --paginate --jq '.[].filename')
+          # A here-string, not `... | grep -q`: grep exits on its first match,
+          # which SIGPIPEs the left side, and under `pipefail` that failure
+          # would read as "no chart change" and skip a PR that needed review.
+          if grep -qE '^apps/.+\.yaml$' <<<"${files}"; then
+            echo "::notice::chart version change under apps/ — reviewing."
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::no chart version change under apps/; this reviewer has nothing to read here — leaving it to a human."
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+          fi
+
       # Renovate rebases constantly, so the head SHA is not a stable identity
       # for "this PR was already judged" — PR #487 collected 28 approvals across
       # only 5 distinct SHAs before this guard existed. Auto-merge is the record
@@ -62,6 +124,7 @@ jobs:
       # until both are green on the current head.
       - name: Skip if this PR has already been judged
         id: dedupe
+        if: steps.scope.outputs.proceed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}

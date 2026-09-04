@@ -37,7 +37,7 @@ resources:
 images:
   - name: controller
     newName: registry.infra.tgy.io/tools/taskflow
-    newTag: latest@sha256:a34ca06f5d754625539369ca35e7201b868c368cf82c80f1495545f8676a1e32
+    newTag: latest@sha256:d075de86bb0195aa2a335b5a3ec3261f2e25804716e9d8b6e10c441cbc2d6ee4
 
 patches:
   # 全 namespace restricted 運用に合わせる（config/default の Namespace にはラベルが無い）

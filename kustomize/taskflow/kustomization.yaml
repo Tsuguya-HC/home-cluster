@@ -27,7 +27,7 @@ kind: Kustomization
 # 実測していない。この不確実性に賭けず、renovate.jsonc の packageRules で明示的に
 # enabled: false にして止めている。
 resources:
-  - https://github.com/Tsuguya-HC/taskflow//config/default?ref=eb0d61ffc08e776a689db25e4a22d207cd096afe
+  - https://github.com/Tsuguya-HC/taskflow//config/default?ref=b68a03d9d06b66b9f2c7de48a87de4d55b5ed6b8
 
 # newTag と digest を分けて併記すると、Renovate の kustomize manager が
 # invalid-dependency-specification で抽出を捨て、digest が自動更新されなくなる

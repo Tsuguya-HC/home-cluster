@@ -13,6 +13,7 @@ ArgoCD AppProject でアプリケーションをドメインごとに分離し�
 | security | Secret 管理・セキュリティ (ESO, OAuth2 Proxy, Kanidm, Trivy, Kyverno) | `*` | 8 |
 | apps | ユーザー向けアプリケーション (Nextcloud, Harbor) | nextcloud, harbor | 2 |
 | storage | ストレージ (SeaweedFS, CNPG, QNAP CSI, NFS) | cnpg-system, database, nfs-provisioner, seaweedfs, trident | 6 |
+| ai | AI/ML インフラ (Qdrant, Ollama, TaskFlow) | qdrant, ollama, taskflow-system | 3 |
 
 ## クラスタスコープリソースの許可 (clusterResourceWhitelist)
 
@@ -64,6 +65,7 @@ ArgoCD AppProject でアプリケーションをドメインごとに分離し�
 | storage | PersistentVolume | core | ストレージ |
 | storage | CSIDriver | `*` | QNAP CSI |
 | storage | TridentOrchestrator | `*` | QNAP Trident |
+| ai | ValidatingWebhookConfiguration | admissionregistration.k8s.io | taskflow の TaskFlow 構造検査 webhook |
 
 ## 新しいサービスを追加するとき
 
@@ -99,5 +101,6 @@ manifests/argocd/
 ├── appproject-monitoring.yaml
 ├── appproject-argo.yaml
 ├── appproject-security.yaml
-└── appproject-storage.yaml
+├── appproject-storage.yaml
+└── appproject-ai.yaml
 ```

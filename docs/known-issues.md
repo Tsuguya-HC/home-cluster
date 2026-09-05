@@ -162,3 +162,27 @@ ping -c3 -I <PREFIX>:4::1 <HGW の LAN GUA>          # → 0/3
 **構成の詳細**: [IPv6](ipv6.md) を参照。
 
 **検知**: `blackbox-exporter` + `Probe/ipv6-egress` で監視している（`Ipv6EgressDown`）。ノードの VLAN 10 GUA を送信元にした HTTPS 疎通を見ているため、この障害を検知できる。`ip_protocol_fallback: false` を外すと v4 にフォールバックして常に成功扱いになるので変更しないこと。
+
+## TaskFlow 構造検査 webhook: caBundle 注入レース / コントローラ不在時の書き込み拒否
+
+TaskFlow の ValidatingWebhookConfiguration（taskflow #17 / ADR-0006）は `failurePolicy: Fail`。以下 2 つの窓で TaskFlow の CREATE/UPDATE が一時的に拒否されうる。
+
+1. **cainjector の caBundle 注入レース**: `cert-manager.io/inject-ca-from`（`kustomize/taskflow/kustomization.yaml`）は cainjector の非同期パッチで、ArgoCD の sync-wave はこれを待たない（VWC の生成完了 ≠ caBundle が埋まったこと。ArgoCD に VWC の health check は無い）。sync 直後や Certificate の定期更新直後の**数秒間**、caBundle が空のまま webhook が有効になり、apiserver が TLS を検証できず拒否されることがある。**実害の長さは未実測**
+2. **コントローラ不在**: rollout や ノード drain（Talos アップグレード）中も同様に拒否されうる。`replicas: 2` + PDB（`manifests/taskflow-system/pdb.yaml`）で緩和したが、**ゼロにはならない**（2 replica 同時に落ちる窓は残る）
+
+sync-wave をこれ以上早める手段は無く（cainjector の反応速度に依存する構造）、根治はできない。
+
+**症状の見分け方**:
+
+| 観測 | 結果 |
+|---|---|
+| TaskFlow の apply | `failed calling webhook "..."` 系のエラーで失敗 |
+| ArgoCD の taskflow app | sync が進まず止まる |
+
+**切り分け**:
+
+```sh
+kubectl get validatingwebhookconfiguration taskflow-validating-webhook-configuration \
+  -o jsonpath='{.webhooks[0].clientConfig.caBundle}'   # 空なら caBundle 未注入
+hubble observe --to-namespace taskflow-system --verdict DROPPED
+```

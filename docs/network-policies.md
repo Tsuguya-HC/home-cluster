@@ -53,6 +53,7 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 | Prometheus (monitoring) | Harbor (harbor) | 8001 | Metrics scrape |
 | Prometheus (monitoring) | cert-manager controller/webhook/cainjector (cert-manager) | 9402 | Metrics scrape |
 | Prometheus (monitoring) | taskflow-controller (taskflow-system) | 8443 | Metrics scrape |
+| kube-apiserver | taskflow-controller (taskflow-system) | 9443 | TaskFlow admission webhook (failurePolicy: Fail) |
 | Grafana (monitoring) | Kanidm (kanidm) | 8443 | OIDC token exchange (direct, via CoreDNS rewrite) |
 | ArgoCD server (argocd) | Kanidm (kanidm) | 8443 | OIDC token exchange (direct, via CoreDNS rewrite) |
 | Argo Workflows server (argo) | Kanidm (kanidm) | 8443 | OIDC token exchange (direct, via CoreDNS rewrite) |
@@ -398,4 +399,11 @@ apiserver・Loki・Discord・GitHub・npm・crates・SeaweedFS・Prometheus・ho
 
 | Component | Ingress | Egress |
 |---|---|---|
-| **taskflow-controller** | host/remote-node → 8081 (probes); prometheus (monitoring) → 8443 (metrics, TLS + authn/authz) | kube-apiserver |
+| **taskflow-controller** | host/remote-node → 8081 (probes); kube-apiserver/host/remote-node → 9443 (TaskFlow admission webhook); prometheus (monitoring) → 8443 (metrics, TLS + authn/authz) | kube-apiserver |
+
+9443 は TaskFlow の構造検査 webhook（taskflow #17 / ADR-0006）。`fromEntities` に
+`kube-apiserver` / `host` / `remote-node` の 3 つを並べているのは、このクラスタの他の
+admission webhook（kyverno / cnpg / spin-operator、いずれも 9443）と同じ書き方に揃えているため。
+実際にどの identity で届くかはこのクラスタでは未実測。この webhook は `failurePolicy: Fail` なので、
+**ここを閉じると TaskFlow の作成・更新が全部拒否され、ArgoCD の sync が止まる**。絞るなら先に
+`hubble observe --to-namespace taskflow-system --verdict DROPPED` で実測してから。

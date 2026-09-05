@@ -1,0 +1,15 @@
+# webhook が failurePolicy: Fail (taskflow #17 / ADR-0006) になったことで、コントローラが
+# 落ちている間は TaskFlow の CREATE/UPDATE が拒否される。replicas 2 (kustomize/taskflow/
+# kustomization.yaml) だけでは、ノード drain (Talos アップグレード) で猶予なく両方 evict
+# されうる。minAvailable: 1 で drain 中も最低 1 replica を残す。
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: taskflow-controller
+  namespace: taskflow-system
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      control-plane: controller-manager
+      app.kubernetes.io/name: taskflow

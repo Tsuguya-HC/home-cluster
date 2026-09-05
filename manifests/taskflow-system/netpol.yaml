@@ -17,6 +17,23 @@ spec:
         - ports:
             - port: "8081"
               protocol: TCP
+    # apiserver からの admission リクエスト（:9443）。TaskFlow の構造検査 webhook は
+    # failurePolicy: Fail なので、ここが開いていないと apiserver が webhook に届かず
+    # **TaskFlow の作成・更新が全部拒否される**（ArgoCD の sync が通らなくなる）。
+    #
+    # kube-apiserver / host / remote-node の 3 つを並べるのは、このクラスタの他の
+    # admission webhook（kyverno / cnpg / spin-operator、いずれも 9443）と同じ書き方に
+    # 揃えているため。実際にどの identity で届くかはこのクラスタでは未実測 —
+    # failurePolicy: Fail で外すと TaskFlow の書き込みが全部落ちるので、絞るなら先に
+    # `hubble observe --to-namespace taskflow-system --verdict DROPPED` で実測してから。
+    - fromEntities:
+        - kube-apiserver
+        - host
+        - remote-node
+      toPorts:
+        - ports:
+            - port: "9443"
+              protocol: TCP
     # Prometheus からの metrics スクレイプ（:8443、HTTPS + authn/authz）。
     # ここを開けないと ServiceMonitor があっても取れない。
     - fromEndpoints:

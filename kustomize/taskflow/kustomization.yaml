@@ -27,7 +27,7 @@ kind: Kustomization
 # 実測していない。この不確実性に賭けず、renovate.jsonc の packageRules で明示的に
 # enabled: false にして止めている。
 resources:
-  - https://github.com/Tsuguya-HC/taskflow//config/default?ref=1b5603e6527f1fc5b7fb461a7a560af322f2bf4f
+  - https://github.com/Tsuguya-HC/taskflow//config/default?ref=df67e629223a07138083aa9eae85b15c65432f18
 
 # newTag と digest を分けて併記すると、Renovate の kustomize manager が
 # invalid-dependency-specification で抽出を捨て、digest が自動更新されなくなる
@@ -37,7 +37,7 @@ resources:
 images:
   - name: controller
     newName: registry.infra.tgy.io/tools/taskflow
-    newTag: latest@sha256:63dad962c78d546c1d6ef4783aa6fcbcabb797c1b7925f351bbe7f28d906586a
+    newTag: latest@sha256:0847b7e3d926e7d74f5dc936842ae37603c15ece13c4ff8d73318b69ec8ff6fc
 
 patches:
   # 全 namespace restricted 運用に合わせる（config/default の Namespace にはラベルが無い）
@@ -76,4 +76,61 @@ patches:
               - name: manager
                 env:
                   - name: SIDECAR_IMAGE
-                    value: registry.infra.tgy.io/tools/agent-sidecar:latest@sha256:88f491e85d054dd50f4691b37bc87ec179f8d4ada10f77fc9d13c2d69ba78cba
+                    value: registry.infra.tgy.io/tools/agent-sidecar:latest@sha256:22424078be8938e5404c53eb9116e572a75e0278ee378528dba07006a79905d7
+
+  # TaskFlow の構造検査 webhook（taskflow #17 / ADR-0006）。taskflow 側は caBundle を
+  # 持たない ValidatingWebhookConfiguration を配るだけなので、埋めるのはこちら —
+  # cainjector が manifests/taskflow-system/webhook-cert.yaml の Certificate から
+  # CA を読んで caBundle に書き込む。home-cluster で inject-ca-from を使うのはここが
+  # 初めてで、cainjector 自体は cert-manager 同梱で既に動いている。
+  #
+  # sync-wave 1: caBundle が空のまま webhook が有効になると、apiserver が証明書を
+  # 検証できず failurePolicy: Fail で TaskFlow の書き込みが全部落ちる。Certificate
+  # （wave -4）と Deployment（wave 0）の後に出す。
+  - target:
+      kind: ValidatingWebhookConfiguration
+      name: taskflow-validating-webhook-configuration
+    patch: |-
+      - op: add
+        path: /metadata/annotations
+        value:
+          cert-manager.io/inject-ca-from: taskflow-system/taskflow-serving-cert
+          argocd.argoproj.io/sync-wave: "1"
+
+  # webhook が failurePolicy: Fail になった (taskflow #17 / ADR-0006) ことで、コントローラが
+  # 落ちている間は reconcile が遅れるだけでなく TaskFlow の CREATE/UPDATE が拒否される。
+  # Deployment には既に --leader-elect が付いており HA 化前提の作りなので replicas を
+  # 2 に上げる。メモリは 29Mi/128Mi と余裕があり、ワーカーは 3 台あるので podAntiAffinity
+  # (required) で 2 replica を別ノードに分散できる。
+  #
+  # rollout 戦略も明示する。既定の maxSurge: 25% は replicas 2 では 1 に切り上がり、
+  # required な podAntiAffinity と合わさると rollout 中に旧2 + 新1 = 3 Pod が同時に
+  # 別ホストを要求する瞬間ができる。ワーカーは 3 台しかないので、Talos のノード drain と
+  # rollout が重なると surge Pod が 0/3 nodes are available で Pending になり rollout が
+  # 止まる（サービス断ではない — maxUnavailable: 0 なので旧 Pod は残り、PDB が守る
+  # 最低 1 replica が webhook に応答し続ける）。maxSurge: 0 にすれば要求は常に既存
+  # replica 数（2 台）以下に収まり、3 台目を要求する場面自体が無くなる。
+  - target:
+      kind: Deployment
+      name: taskflow-controller-manager
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 2
+      - op: add
+        path: /spec/template/spec/affinity
+        value:
+          podAntiAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              - labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: taskflow
+                    control-plane: controller-manager
+                topologyKey: kubernetes.io/hostname
+      - op: add
+        path: /spec/strategy
+        value:
+          type: RollingUpdate
+          rollingUpdate:
+            maxSurge: 0
+            maxUnavailable: 1

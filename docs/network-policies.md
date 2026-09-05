@@ -96,6 +96,7 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 | Workflow pods (claude-code) | ArgoCD server (argocd) | 8080 | ArgoCD API access |
 | memory (memory) | qdrant (qdrant) | 6333 | Vector database |
 | memory (memory) | ollama (ollama) | 11434 | LLM inference |
+| Workflow pods (claude-code) | memory (memory) | 3000 | Memory API access |
 | Collector pods (trading) | SeaweedFS filer (seaweedfs) | 8333 | Market data ingestion |
 | aqua-checksum (argo) | SeaweedFS filer (seaweedfs) | 8333 | Workflow step log/artifact upload |
 | Collector pods (trading) | shared-pg (database) | 5432 | Market data ingestion |

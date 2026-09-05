@@ -61,10 +61,10 @@ spec:
                 set -eu
                 # 語彙は FLOW_DIRECTORIES（コントローラ注入）で来る。ok があることだけ確かめて書く。
                 echo "FLOW_DIRECTORIES=$FLOW_DIRECTORIES"
-                ls -ld /workspace/out /workspace/out/*
+                ls -ld /workspace /workspace/*
                 # 宣言に無いディレクトリは作れないはず（prepare が out/ を 0555 に閉じている）
-                if mkdir /workspace/out/evil 2>/dev/null; then echo "out/ is not closed"; exit 1; fi
-                echo "smoke $(date -u +%FT%TZ) task=$FLOW_TASK_UID phase=$FLOW_PHASE" > /workspace/out/ok/report.md
+                if mkdir /workspace/evil 2>/dev/null; then echo "the run directory is not closed"; exit 1; fi
+                echo "smoke $(date -u +%FT%TZ) task=$FLOW_TASK_UID phase=$FLOW_PHASE" > /workspace/ok/report.md
             securityContext:
               allowPrivilegeEscalation: false
               readOnlyRootFilesystem: true

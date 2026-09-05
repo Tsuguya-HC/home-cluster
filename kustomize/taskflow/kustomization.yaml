@@ -10,6 +10,18 @@ kind: Kustomization
 # 先に進む（ビルド完了前に digest が動く）ため、CRD / RBAC が変わったときに、下の images の
 # digest と同じ commit へ人が揃えて上げる。両者が同じ commit を指しているかの検証は #687。
 #
+# **この ref を上げるときは .github/schemas/flow.tgy.io/*.json も同じ commit から再生成する。**
+#
+#   for c in tasks taskflows taskhandlers; do
+#     python3 scripts/crd2schema.py ../taskflow/config/crd/bases/flow.tgy.io_$c.yaml .github/schemas/flow.tgy.io
+#   done
+#
+# あれは飾りではなく、_kubeconform.yml が -schema-location で読み込んで manifests/ と apps/ を
+# -strict で検査している（manifests/claude-code/ の TaskFlow / Task がこれに掛かる）。再生成を
+# 強制する仕組みは無いので、忘れるとミラーだけが古い CRD を語り続ける — 2026-09-05 に実際
+# 2 週間ずれており（最後の再生成が #733）、消えたフィールドを使った manifest を -strict が
+# 誤って通す状態だった。忘れても CI は緑のままなので、気づく手段はこの行しかない。
+#
 # 逆方向（イメージが CRD/RBAC より先に進む）のドリフトも構造的に起こりうる。Argo のビルドは
 # *.go 等の変更でのみ発火し config/ 単独では発火しないが、kubebuilder では CRD/RBAC が Go の
 # マーカーから make manifests で生成されるため、Go 変更と config/default 変更は同一コミットに

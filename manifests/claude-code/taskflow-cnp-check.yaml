@@ -371,6 +371,9 @@ spec:
         restartPolicy: Never
         runtimeClassName: kata
         serviceAccountName: agent-cnp-reader
+        # 既定の 30 秒だと、TERM 後の子プロセス停止待ちと NFS 越しの sync で猶予を食い潰しうる
+        # （子の停止時間そのものは未実測。安全側のマージンとして確保）。
+        terminationGracePeriodSeconds: 60
         # runAsUser は必須。コントローラはこれと違う uid で /workspace 直下を 0555 に閉じるので、
         # エージェントは宣言ディレクトリにだけ書ける。
         securityContext:
@@ -404,7 +407,19 @@ spec:
                   --allowedTools "Bash,Read,Write,Grep,Glob" \
                   --model sonnet \
                   --max-turns 80 \
-                  "$PROMPT" || true
+                  "$PROMPT" &
+                pid=$!
+                # activeDeadlineSeconds の TERM は PID1 に飛ぶ。前面で claude を待っていると
+                # POSIX sh は前面コマンドの終了を待ってから trap を実行するため、猶予期間内に
+                # trap が発火しない（実測: foreground だと 30 秒、background + wait なら即時）。
+                # そのため background + wait にして、TERM を受けたら子を落としてから flush する。
+                trap 'kill -TERM $pid 2>/dev/null
+                      i=0
+                      while kill -0 $pid 2>/dev/null && [ $i -lt 10 ]; do sleep 1; i=$((i+1)); done
+                      kill -KILL $pid 2>/dev/null
+                      sync
+                      exit 143' TERM INT
+                wait $pid || true
                 # 判定はディレクトリで出る。ここから先は何もしない（回収は publish サイドカー）。
                 #
                 # sync は Kata + NFS の workspace PVC に要る。書き戻しが残ったままコンテナが
@@ -439,7 +454,9 @@ spec:
                 cpu: 500m
                 memory: 512Mi
               limits:
-                # Kata では memory limit が VM のサイズ
+                # Kata では limit がそのまま VM のサイズ。cpu limit を書かないと 1 vCPU に
+                # なる（[[image-build-kata-cpu-starvation]] の実測）ので必ず書く。
+                cpu: "2"
                 memory: 4Gi
 ---
 apiVersion: flow.tgy.io/v1alpha1
@@ -467,6 +484,9 @@ spec:
         runtimeClassName: kata
         serviceAccountName: agent-cnp-reporter
         automountServiceAccountToken: false
+        # 既定の 30 秒だと、TERM 後の子プロセス停止待ちと NFS 越しの sync で猶予を食い潰しうる
+        # （子の停止時間そのものは未実測。安全側のマージンとして確保）。
+        terminationGracePeriodSeconds: 60
         securityContext:
           runAsUser: 65533
           runAsNonRoot: true
@@ -555,14 +575,28 @@ spec:
             args:
               - |
                 PROMPT="$(cat /prompt/cnp-reporter.md; echo; cat /prompt/verdict-protocol.md)"
+                # max-turns 40 は過去に report を書く直前で打ち切られて判定不能になった値
+                # （taskflow-common.yaml の verdict-protocol.md 参照）なので避ける。
                 claude -p \
                   --verbose \
                   --output-format stream-json \
                   --dangerously-skip-permissions \
                   --allowedTools "Bash,Read,Write,Grep,Glob" \
                   --model sonnet \
-                  --max-turns 40 \
-                  "$PROMPT" || true
+                  --max-turns 60 \
+                  "$PROMPT" &
+                pid=$!
+                # activeDeadlineSeconds の TERM は PID1 に飛ぶ。前面で claude を待っていると
+                # POSIX sh は前面コマンドの終了を待ってから trap を実行するため、猶予期間内に
+                # trap が発火しない（実測: foreground だと 30 秒、background + wait なら即時）。
+                # そのため background + wait にして、TERM を受けたら子を落としてから flush する。
+                trap 'kill -TERM $pid 2>/dev/null
+                      i=0
+                      while kill -0 $pid 2>/dev/null && [ $i -lt 10 ]; do sleep 1; i=$((i+1)); done
+                      kill -KILL $pid 2>/dev/null
+                      sync
+                      exit 143' TERM INT
+                wait $pid || true
                 #
                 # sync は Kata + NFS の workspace PVC に要る。書き戻しが残ったままコンテナが
                 # exit すると Kata のゲストエージェントが応答を失い、shim が終了コードを
@@ -603,7 +637,9 @@ spec:
                 cpu: 500m
                 memory: 512Mi
               limits:
-                # Kata では memory limit が VM のサイズ
+                # Kata では limit がそのまま VM のサイズ。cpu limit を書かないと 1 vCPU に
+                # なる（[[image-build-kata-cpu-starvation]] の実測）ので必ず書く。
+                cpu: "2"
                 memory: 4Gi
 ---
 apiVersion: flow.tgy.io/v1alpha1

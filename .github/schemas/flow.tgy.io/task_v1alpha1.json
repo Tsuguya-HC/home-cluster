@@ -13,7 +13,7 @@
    "type": "object"
   },
   "spec": {
-   "description": "TaskSpec is the whole instance. Four fields, three of them optional: whoever\ncreates a task — a cron, an event, an agent — does not have to know the\ngraph, and the graph can change without them changing.\n\nThe spec is immutable after creation. Editing what a running task was asked\nto do would leave its history describing a question nobody asked.",
+   "description": "TaskSpec is the whole instance. Four fields, three of them optional: whoever\ncreates a task — a cron, an event, an agent — does not have to know the\ngraph, and the graph can change without them changing.\n\nThe spec is immutable after creation. Editing what a running task was asked\nto do would leave its history describing a question nobody asked.\n\nThe rule covers input as well, which is not obvious: input is\nx-kubernetes-preserve-unknown-fields, and CEL cannot address what is inside\nit. Comparing the whole spec still works — measured, with the rule removed\nas a control, in api_shapes_test.go.",
    "properties": {
     "dedupKey": {
      "description": "DedupKey suppresses creation while another task with the same key is\nstill running. Useful when the producer is an event source that may\ndeliver twice.",
@@ -35,17 +35,8 @@
    "additionalProperties": false
   },
   "status": {
-   "description": "TaskStatus holds control state only. Logs, reports and results are\nreferences — etcd has been lost twice here, and a design that puts payloads\nin it turns that from an outage into data loss.",
+   "description": "TaskStatus holds control state only. Logs, reports and results are not here\n— etcd has been lost twice here, and a design that puts payloads in it turns\nthat from an outage into data loss. Nor are pointers to them: where a run's\noutput was put is the deployment's arrangement, and this status is written\nby a controller that has no part in it (ADR-0008).",
    "properties": {
-    "artifacts": {
-     "properties": {
-      "store": {
-       "type": "string"
-      }
-     },
-     "type": "object",
-     "additionalProperties": false
-    },
     "conditions": {
      "items": {
       "description": "Condition contains details for one aspect of the current state of this API Resource.",
@@ -102,7 +93,7 @@
      "type": "array"
     },
     "currentRun": {
-     "description": "RunRef identifies one execution of one phase. runID separates the second\nvisit to a phase from the first, so a rework does not read what the previous\nattempt left behind.",
+     "description": "RunRef identifies one execution of one phase. runID separates the second\nvisit to a phase from the first, so a rework does not read what the previous\nrun left behind. It does not separate two attempts at starting one run —\nan infrastructure retry comes back with the same number (ADR-0004), and\ninfraRetries is what tells those apart.\n\nA task's currentRun, when it has one, always names the phase the task is\non. A task that has stopped has no currentRun at all.",
      "properties": {
       "deadline": {
        "format": "date-time",
@@ -114,7 +105,7 @@
        "type": "integer"
       },
       "jobName": {
-       "description": "JobName is derived deterministically from the task, phase and runID, so\na controller restart re-creates the same object instead of a second one.",
+       "description": "JobName is derived deterministically from the task, phase, runID and\nthe count of infrastructure retries, so a controller restart re-creates\nthe same object instead of a second one.",
        "type": "string"
       },
       "phase": {
@@ -140,7 +131,7 @@
     },
     "history": {
      "items": {
-      "description": "HistoryEntry records a completed run. This is the audit trail; the artifacts\nit points at live in object storage, never in etcd.",
+      "description": "HistoryEntry records a completed run. This is the audit trail, and it is\nthe whole of what the framework knows: what the run decided and why. Where\nthe run's output ended up is not here, because the controller never learns\nit — it does not touch the workspace or any store (ADR-0008).",
       "properties": {
        "directory": {
         "description": "Directory the handler wrote into, empty when the run produced no single\nanswer.",
@@ -161,10 +152,6 @@
        "reason": {
         "description": "Reason is the one line a human reads next to Outcome: which edge was\nfollowed, or why no answer counted, or what the handler said after\nnaming its directory. The transition never reads it.",
         "maxLength": 2048,
-        "type": "string"
-       },
-       "ref": {
-        "description": "Ref points at the run's output in the store.",
         "type": "string"
        },
        "runID": {
@@ -192,7 +179,7 @@
      "type": "integer"
     },
     "runID": {
-     "description": "RunID of the current or last run.",
+     "description": "RunID of the current or last run. It counts the runs this task has\ndecided its way through, not the attempts it took to start them: an\ninfrastructure retry leaves it alone, so the numbers on the results/\nshelf run without gaps (ADR-0004).",
      "format": "int32",
      "type": "integer"
     }

@@ -3,9 +3,13 @@
 # **handler 固有のプロンプトはここに置かない。** そのプロンプトを使う handler の pod spec が
 # projected volume で参照するパスを名指しするので、プロンプトを handler のファイルから離すと
 # 片方だけ直したときに黙ってズレる（→ pr-review-prompt は taskflow-pr-review.yaml に同居）。
-# cnp-check-prompt は taskflow 以前からの別の慣習で manifests/claude-code/agent-prompts.yaml に
-# 置かれている（taskflow-cnp-check.yaml 自体には ConfigMap 定義が無い）。taskflow 側は
-# 今回からこの規約に従う。
+#
+# **これは実際に起きた。** cnp-check のプロンプトだけは taskflow 以前の慣習で
+# manifests/claude-code/agent-prompts.yaml に離して置いてあり、ADR-0005 で out/ 層を撤去した
+# とき（home-cluster #797）に handler 側だけが直り、プロンプトの `/workspace/out/ok/report.md`
+# が取り残された。マウント直下は 0555 なので、エージェントは書けないまま黙って
+# NoAnswer になる。2 フェーズ化（cnp-planner-prompt / cnp-reporter-prompt）と同時に
+# taskflow-cnp-check.yaml へ引き取って、今は全 flow がこの規約に揃っている。
 #
 # **判定を読み直して人間に通知する部品はここに置かない。** 通知は Pod の中の仕事ではなく、
 # framework が終端で出すもの（Warning Event / Ready=False / metric、design.md §5 / §9）から
@@ -49,8 +53,8 @@ data:
     - 作業用の一時ファイルは `/tmp` に置く（`/workspace/` 直下には作れない）。宣言ディレクトリの下に置いたものは
       置いた場所がそのまま結論になる（空でないディレクトリが判定そのもの）
     - **ターン数は有限。** 手順の材料が揃った時点で、追加の探索より先に report.md を書く。
-      書いた後に余裕があれば追記すればよい。最初の 1 回（run 1）は 40 ターンで打ち切られ、
-      report を書く直前で終わって判定不能になった
+      書いた後に余裕があれば追記すればよい。過去に report を書く直前で打ち切られて
+      判定不能になったことがある
 
     ## 報告に必ず含めるもの
 

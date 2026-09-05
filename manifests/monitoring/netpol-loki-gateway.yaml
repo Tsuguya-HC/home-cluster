@@ -20,6 +20,11 @@ spec:
         - matchLabels:
             claude-code: "true"
             io.kubernetes.pod.namespace: claude-code
+        # taskflow の調査フェーズは共有ラベル claude-code=true に相乗りせず専用ラベルを
+        # 持つので、こちらにも並べる
+        - matchLabels:
+            taskflow-cnp-check: "true"
+            io.kubernetes.pod.namespace: claude-code
       toPorts:
         - ports:
             - port: "8080"

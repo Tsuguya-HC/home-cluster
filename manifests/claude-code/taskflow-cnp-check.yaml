@@ -1,26 +1,348 @@
-# taskflow に載せる最初の Task: CNP カバレッジ点検（Step 0 の cnp-check-cwf.yaml を
-# TaskFlow / TaskHandler に移したもの）。
+# taskflow に載せた最初の実務 Task: CNP カバレッジ点検（Step 0 の cnp-check-cwf.yaml を
+# TaskFlow / TaskHandler へ移したもの）を、設計 §16 どおりの 調査 → 報告 の 2 フェーズにしたもの。
 #
-# 初回は 調査 の 1 フェーズだけ。設計 §16 の 調査 → 報告 の 2 フェーズは、前フェーズの
-# report を次フェーズへ渡す store 封印（results/<runID>/）がまだ無いので載せられない。
+# 初版は 調査 の 1 フェーズだけだった。前フェーズの report を次フェーズへ渡す経路が無かったため
+# で、それは taskflow ADR-0002（Task ごとの workspace PVC）/ ADR-0003（run に pin、封印して
+# results/ へ）/ ADR-0005（語彙はマウント直下、out/ 撤去）で埋まり、
+# manifests/claude-code/taskflow-smoke-workspace.yaml が 2 フェーズで一周させて実証している。
 #
-# 語彙は next の宣言から来る。{完了: ok, Escalated: escalate} なので、エージェントが書けるのは
-# /workspace/ 直下の ok/ と escalate/ の 2 つだけ。「判定できない」は escalate/ に理由を書いて
-# 明示する（taskflow #63）。何も書かなければ従来どおり Escalated だが、そちらは沈黙 — 途中で
-# 死んだのか意図して降りたのかが history から区別できない。
+# ## なぜ 2 つに割るのか
+#
+# 割る理由は工程を増やすことではなく、**権限を工程に合わせて落とすこと**（設計 §1）。
+#
+# | フェーズ | 何をする | 到達できる先 |
+# |---|---|---|
+# | 調査 | クラスタを読んで、裏の取れた材料を書き出す | apiserver、Loki、Anthropic API |
+# | 報告 | 封印された材料だけを読み、人間向けの報告に絞る | Anthropic API、Discord |
+#
+# 報告 は apiserver も Loki も持たない。だから「材料に無いことを書く」には、書いた本人が
+# 確かめる手段が無い — 裏取りの検査を、プロンプトの約束ではなく到達可能性で支える。
+# 逆に 調査 は Discord を持たない。Cilium の identity は Pod 単位で、通知サイドカーのために
+# 開けた egress はエージェントのコンテナからも使えるため（docs/network-policies.md の
+# taskflow-pr-review の項）、`CLAUDE_CODE_OAUTH_TOKEN` を持つ Pod に webhook 宛の穴を
+# 開ける範囲は狭いほどよい。1 フェーズだった頃は 1 つの Pod が両方を持っていた。
+#
+# ## 語彙と終端
+#
+# 語彙は next の宣言から来る。エージェントが書けるのは `ls /workspace` に出るディレクトリだけで、
+# マウント直下は 0555 で閉じている（ADR-0005）。「判定できない」は escalate/ に理由を書いて
+# 明示する（taskflow #63）。何も書かなければ Escalated だが、そちらは沈黙 — 途中で死んだのか
+# 意図して降りたのかが history から区別できない。
 # terminals で終端の意味も宣言する（taskflow #64）。宣言しないと metric 上は Undeclared のまま。
 #
-# 人間への報告は 完了（Success）だけ 調査 Pod 内の notify サイドカーが担う（設計 §7: publish は
-# 利用側のサイドカーの仕事。framework は判定ディレクトリしか見ない）。escalate / ambiguous /
-# no-verdict（＝いずれも Escalated）はここでは通知しない — manifests/monitoring/
-# prometheusrule-taskflow.yaml が taskflow_task_outcomes_total から Escalated を検知して
-# 既存の Alertmanager Discord 受け口に出すので、ここでも出すと同じ Escalated に対して
-# Discord が 2 通鳴る（home-cluster #743 が pr-review で決めた「通知は framework の信号に乗せる」
-# を cnp-check にも揃える）。完了だけ残しているのは日次 cron が実際に走って判定を出せたことの
-# ハートビートとしての価値のためで、Success はそちらの PrometheusRule の対象外なので重複しない。
+# ## 人間への通知
 #
-# taskflow-verdict-protocol ConfigMap（プロンプトの一部）は複数 flow で共有するため
-# manifests/claude-code/taskflow-common.yaml に置いてある。ここの projected volume はそこを参照する。
+# 完了（Success）だけを 報告 Pod 内の notify サイドカーが担う（設計 §7: publish は利用側の
+# サイドカーの仕事。framework は判定ディレクトリしか見ない）。escalate / ambiguous / no-verdict
+# （いずれも Escalated）はここでは通知しない — manifests/monitoring/prometheusrule-taskflow.yaml が
+# taskflow_task_outcomes_total から Escalated を検知して既存の Alertmanager Discord 受け口に
+# 出すので、ここでも出すと同じ Escalated に Discord が 2 通鳴る（home-cluster #743）。
+# 完了 だけ残しているのは、日次 cron が実際に走って判定を出せたことのハートビートとしての
+# 価値のため。Success は PrometheusRule の対象外なので重複しない。
+#
+# 通知は終端の 報告 にだけ付ける。調査 の Success は「次のフェーズへ進む」であって人間への
+# 知らせではない。
+#
+# taskflow-verdict-protocol ConfigMap（プロンプトの前半）は複数 flow で共有するため
+# manifests/claude-code/taskflow-common.yaml にある。flow 固有のプロンプトは、参照する
+# pod spec と同じファイルに置く（taskflow-common.yaml 冒頭の規約）— 初版は
+# manifests/claude-code/agent-prompts.yaml に離して置いていて、ADR-0005 で out/ を撤去した
+# ときに handler だけ直してプロンプトの `/workspace/out/ok/report.md` が取り残された。
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cnp-planner-prompt
+  namespace: claude-code
+data:
+  cnp-planner.md: |
+    # CiliumNetworkPolicy カバレッジ点検（調査フェーズ）
+
+    全 namespace の Pod がポリシーに覆われているかを点検し、**裏の取れた材料**を書き出す。
+
+    ここは 2 フェーズの 1 つ目。あなたの report.md は人間ではなく、次の 報告 フェーズが読む。
+    報告 フェーズはクラスタに一切到達できず、あなたが書いたものだけを材料に人間向けの報告を
+    作る。**つまり、あなたが書き落としたことは二度と確かめられない。**
+
+    ## 与えられている権限
+
+    読み取り専用。`pods` / `namespaces` / `ciliumnetworkpolicies` /
+    `ciliumclusterwidenetworkpolicies` の get・list のみ。
+    `kubectl exec` も書き込みもできない。できないことを迂回しようとしないこと。
+
+    ## 実行環境（毎回の探りで無駄にしないために）
+
+    - 使えるのは `kubectl` / `jq` / `node` / `curl`。**`python3` は無い**
+    - `date` は busybox。`date -d '24 hours ago'` は使えない。
+      `NOW=$(date -u +%s); START=$((NOW - 86400))` で epoch を計算する
+    - 一致判定のロジックは最初から `node` で書く（jq → node への乗り換えを繰り返さない）
+    - Discord にも GitHub にも到達できない。通知は次のフェーズの仕事
+
+    ## Cilium の強制セマンティクス（読み違えやすいので必ず踏まえる）
+
+    - このクラスタは **`policyEnforcementMode: always`**。全エンドポイントが、どのポリシーに
+      選択されていなくても **両方向 default deny**。「どのポリシーにも一致しない Pod」は
+      無防備ではなく、全通信が遮断されている（＝そのまま動いているなら通信不要か壊れている）
+    - `ingress` / `ingressDeny` を持つポリシーに選択されていない Pod の ingress は **全 DENY**。
+      到達を受ける必要がある Pod（Service を持つ、probe 以外の受信がある）なら壊れている。
+      受ける必要が無い Job や sensor なら正常。**「ingress 無防備」という判定はこのクラスタでは
+      起きない**（default モード時代の指摘であり、もう当てはまらない）
+    - egress も同様で、`egress` / `egressDeny` を持つポリシーに選択されなければ全 DENY
+      （DNS だけは CCNP `allow-dns` が全 Pod に許可している）
+    - 旧来 sensor 系 CNP にある `ingressDeny: [{fromEntities: [world]}]` は default モード時代に
+      ingress 強制を有効化するためのダミー。always では意味を持たないが害も無い
+    - `ingress: []`（空リスト）は no-op で何も許可しない
+    - kubelet からの probe（`host` エンティティ）は `allow-localhost=auto` により常に許可される。
+      probe 失敗をポリシーのせいにしない
+
+    ## 手順
+
+    1. `kubectl get cnp -A -o json` と `kubectl get ccnp -o json` で全ポリシーを取得
+    2. `kubectl get pods -A -o json` で全 Pod とラベルを取得
+    3. 各 Pod について、**どのポリシーの `endpointSelector` に一致するか**を判定する。
+       一致したポリシーが `ingress` / `ingressDeny` / `egress` / `egressDeny` のどれを持つかを
+       **キーごとに**記録する。`ingress` が空でも `ingressDeny` があれば ingress は強制される
+    4. 直近 24 時間の `POLICY_DENIED` を Loki で確認する
+
+    ## Loki
+
+    ```
+    curl -sG 'http://loki-gateway.monitoring.svc.cluster.local:80/loki/api/v1/query_range' \
+      --data-urlencode 'query={job="hubble"}' \
+      --data-urlencode 'limit=5000' \
+      --data-urlencode "start=${START}000000000"
+    ```
+
+    取得できない場合はその旨を書いて次に進む。**取れなかったこと自体を report.md に書く** —
+    報告 フェーズは Loki に届かないので、あなたが黙ると「調べた結果ゼロ件」と区別が付かない。
+
+    `limit` の上限は 5000 で、24 時間分に届かないことがある。取得できたフローの最古・最新
+    時刻を確認し、実際に見えている範囲を report.md に書く（「24 時間」と言い切らない）。
+
+    ### 既知のノイズ（毎回報告しない）
+
+    - claude-code namespace の Pod → `34.149.66.165:443` の drop は Claude Code CLI の
+      テレメトリ（Datadog）送信で、**遮断が意図どおり**。宛先の正体調査に時間を使わず、
+      ポリシー変更も提案しない。件数だけ一行で触れればよい
+    - ollama namespace の Pod → `34.36.133.15:443` の drop は `ollama.com`（apex）への更新チェック。
+      CNP の `*.ollama.com` は apex に一致しない（matchPattern は 1 ラベル分）。推論に不要なので
+      遮断で正しい。同じく件数だけ
+    - argo の renovate Pod → `169.254.169.254:80` はクラウドメタデータ探査。遮断で正しい
+
+    **Hubble の export は DROPPED しか流していない。** よって「宛先 X のフローが無い」は
+    「誰も X と通信していない」の証拠にならない。許可された通信は記録に残らないので、
+    フローの不在から通信の不在を結論しないこと。
+
+    ## 対象外
+
+    - `hostNetwork: true` の Pod（ポリシーの対象外）
+    - `Completed` / `Succeeded` の Pod
+
+    ## 主張ごとに要求される裏取り
+
+    次のフェーズは、この表を使ってあなたの主張を検査する。**根拠の列が空の主張は落とされる。**
+
+    | 主張 | 併記する根拠 |
+    |---|---|
+    | Pod X は未カバー | X のラベルと、照合したポリシー名（一致が無いなら「一致なし」と明記） |
+    | X は ingress を受ける必要があるのに許可が無い | X の Service / 受信ポートと、X を選択している全ポリシー名、**そのいずれにも該当する `ingress` 許可が無い**こと |
+    | Y が原因で DENIED になっている | Y を実際に確認したコマンドと結果。ラベル不一致を疑うなら**その Pod のラベルを見る** |
+
+    裏が取れなかった主張は、書かないか「未確認の推測」と明記する。
+
+    ## 対処案の制約
+
+    - `toCIDR: 0.0.0.0/0` は使わない。外部 HTTPS は `toFQDNs` でドメイン単位に絞る
+    - 現状より到達範囲を広げる案を出さない
+    - DNS egress は CCNP で全 Pod に共通適用済みなので、個別 CNP には書かない
+
+    ## どこに書くか（出口は 2 つ）
+
+    | あなたの結論 | 置き場所 |
+    |---|---|
+    | 点検を完了し、材料を渡せる | `/workspace/ok/report.md` |
+    | 判定できない・材料が足りない | `/workspace/escalate/report.md` に**理由**を |
+
+    書くのはどちらか一方だけ。共通の規則は `verdict-protocol.md` にある。
+
+    ## report.md の書き方
+
+    **ここでは字数を削らない。** 削るのは 報告 フェーズの仕事で、あなたが落とした根拠は
+    そこでは復元できない。主張と根拠を対にして、全部書く。
+
+    次の順で並べる。
+
+    1. 点検できた範囲（対象 namespace 数・Pod 数、Loki で実際に見えた時間範囲）
+    2. 未カバー Pod（namespace ごと。上の表の根拠を必ず併記）
+    3. `POLICY_DENIED` の送信元・宛先・理由・件数（既知ノイズは 1 行にまとめる）
+    4. 対処案（上の制約の範囲で）
+
+    重要度の判断も添えておくと 報告 フェーズが絞りやすい。ただし、重要でないと判断したものも
+    根拠ごと残すこと — 絞るのは次の工程。
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cnp-reporter-prompt
+  namespace: claude-code
+data:
+  cnp-reporter.md: |
+    # CiliumNetworkPolicy カバレッジ点検（報告フェーズ）
+
+    前の 調査 フェーズが封印した材料を読み、**人間に届く形へ絞って書き直す**。
+
+    ## あなたに無いもの
+
+    クラスタへの到達手段が無い。apiserver にも Loki にも届かず、`kubectl` は動かない。
+    到達できるのは推論 API だけ。**材料に無いことは、あなたには確かめようがない。**
+
+    これは制約ではなく役割。あなたの仕事は新しく調べることではなく、**調べられたことの
+    裏取りを検査して、確かなものだけを人間に渡すこと**。
+
+    ## 材料の在り処
+
+    `/shelf/<runID>/ok/report.md` に前フェーズの report がある。`<runID>` は数字で、
+    最大のものが直前の run。
+
+    ```
+    latest=$(ls /shelf | sort -n | tail -1)
+    cat "/shelf/$latest/ok/report.md"
+    ```
+
+    `/shelf` は読み取り専用。ここには書けない。
+
+    材料が読めない（`/shelf` が空、`ok/report.md` が無い、中身が空）ときは、自分で
+    調べ直そうとせず `escalate/` に降りる。あなたには調べ直す手段が無い。
+
+    ## 裏取りの検査
+
+    前フェーズには、主張ごとに併記すべき根拠が指示してある。同じ表で読み直す。
+
+    | 主張 | 併記されているべき根拠 |
+    |---|---|
+    | Pod X は未カバー | X のラベルと、照合したポリシー名（一致が無いなら「一致なし」の明記） |
+    | X は ingress を受ける必要があるのに許可が無い | X の Service / 受信ポートと、X を選択している全ポリシー名、そのいずれにも該当する `ingress` 許可が無いこと |
+    | Y が原因で DENIED になっている | Y を実際に確認したコマンドと結果 |
+
+    - 根拠が揃っている主張 → そのまま伝える
+    - 根拠が欠けている主張 → **落とすか、「根拠未確認」と明記して格下げする**。
+      あなたが補うことはできない
+    - 前フェーズ自身が「未確認の推測」と書いたもの → その断りを残したまま伝える
+
+    **落とした主張は末尾に 1 行でまとめて残す**（「根拠不足で落とした指摘: N 件」）。
+    黙って消すと、次に人間が同じ点検を読むとき件数が理由なく変わって見える。
+
+    ## Cilium の強制セマンティクス（読み直すときに踏まえる）
+
+    このクラスタは `policyEnforcementMode: always`。どのポリシーにも選択されない Pod は
+    無防備ではなく全通信が遮断されている。「ingress 無防備」という指摘がもし材料にあれば、
+    それは default モード時代の言い回しなので、そのまま人間に流さず落とす。
+
+    Hubble の export は DROPPED しか流していない。「宛先 X のフローが無い」を
+    「誰も X と通信していない」と読み替えた主張が材料にあれば、それも落とす。
+
+    ## 対処案
+
+    材料にある対処案のうち、**現状より到達範囲を広げるもの**（`toCIDR: 0.0.0.0/0` を含む、
+    ワイルドカードで FQDN を広げる、等）は人間に渡さず落とす。DNS egress は CCNP で
+    全 Pod に共通適用済みなので、個別 CNP に足す案も落とす。
+
+    ## どこに書くか（出口は 2 つ）
+
+    | あなたの結論 | 置き場所 |
+    |---|---|
+    | 報告を書けた | `/workspace/ok/report.md` |
+    | 材料が読めない・検査できない | `/workspace/escalate/report.md` に**理由**を |
+
+    書くのはどちらか一方だけ。共通の規則は `verdict-protocol.md` にある。
+
+    ## レポート
+
+    **これがそのまま Discord に出る。3900 バイトで切られ、後ろに置いた内容は人間に届かない。**
+
+    - 冒頭に結論の箇条書き（3〜5 行）。読んだ人が「今日は何もしなくていい」か
+      「これを見に行く」かを、そこだけで決められること
+    - その後に詳細を重要度順
+    - 末尾に、点検できた範囲（Pod 数・Loki で実際に見えた時間範囲）と、落とした指摘の件数
+
+    字数を `wc` と `Edit` で詰める往復はしない。1 回で書き切り、超えた分は切られるものとして
+    重要度順に並べておけばよい。
+---
+# 報告 フェーズの ServiceAccount。apiserver に用が無いので RBAC を与えないだけでなく
+# トークン自体を配らない（読む対象は前フェーズの LLM が書いたテキストで、そこに
+# 「kubectl でこれを実行しろ」と書かれていても実行できる資格情報を持たせない）。
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: agent-cnp-reporter
+  namespace: claude-code
+automountServiceAccountToken: false
+---
+# 調査 フェーズ専用 CNP。共有の claude-code=true は GitHub / npm / crates / SeaweedFS /
+# Prometheus / horenso / ArgoCD / Discord まで開くので、CNP と Pod を読んで報告するだけの
+# Pod には過大（設計 §16）。ここが開けるのは apiserver（点検対象の取得）・Loki（DROPPED の
+# 確認）・Anthropic API（推論）だけ。
+#
+# **Discord をここに開けないのは意図的。** 通知サイドカーは終端の 報告 フェーズにしか無く、
+# Cilium の identity は Pod 単位なので、開けた穴はエージェントのコンテナからも使える。
+# この Pod は CLAUDE_CODE_OAUTH_TOKEN を持つため、webhook 宛の穴は要る Pod にだけ開ける
+# （docs/network-policies.md の taskflow-pr-review の項に同じ理由）。
+#
+# DNS は CCNP allow-dns で全 Pod に共通適用済み。ingress は 1 つも書かないので全 deny
+# （policyEnforcementMode: always なので、書かない = 遮断される）。
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: taskflow-cnp-check
+  namespace: claude-code
+spec:
+  endpointSelector:
+    matchLabels:
+      taskflow-cnp-check: "true"
+  egress:
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "6443"
+              protocol: TCP
+    - toFQDNs:
+        - matchName: "api.anthropic.com"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: monitoring
+            app.kubernetes.io/name: loki
+            app.kubernetes.io/component: gateway
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+---
+# 報告 フェーズ専用 CNP。材料は PVC 越しに来るので、ネットワークで要るのは推論 API と、
+# notify サイドカーの Discord だけ。apiserver も Loki も開けない — 「材料に無いことは
+# 確かめようがない」をプロンプトの約束ではなく到達可能性で支えるのがこのフェーズの主旨。
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: taskflow-cnp-report
+  namespace: claude-code
+spec:
+  endpointSelector:
+    matchLabels:
+      taskflow-cnp-report: "true"
+  egress:
+    - toFQDNs:
+        - matchName: "api.anthropic.com"
+        - matchName: "discord.com"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+---
 apiVersion: flow.tgy.io/v1alpha1
 kind: TaskHandler
 metadata:
@@ -33,20 +355,25 @@ spec:
   timeout: 25m
   maxInfraRetries: 1
   # prepare / publish はコントローラが Job 生成時に注入する（taskflow #73）。
+  # 予約名 flow-workspace のマウントに subPath を書かなければ、この run（work/<runID>）が焼かれる
+  # （ADR-0003 決定1）。マウント直下がそのまま語彙で、他には何も置けない（0555、ADR-0005）。
   workspace:
-    volume: workspace
+    volume: flow-workspace
     mountPath: /workspace
   jobTemplate:
     template:
       metadata:
         labels:
-          # 既存の CNP（manifests/claude-code/netpol.yaml）がこのラベルで選ぶ:
-          # apiserver / api.anthropic.com / Loki / Prometheus / discord.com
-          claude-code: "true"
+          # 上の taskflow-cnp-check CNP がこのラベルで選ぶ（apiserver / Loki / Anthropic API）。
+          # 共有の claude-code=true には相乗りしない。
+          taskflow-cnp-check: "true"
       spec:
         restartPolicy: Never
         runtimeClassName: kata
         serviceAccountName: agent-cnp-reader
+        # 既定の 30 秒だと、TERM 後の子プロセス停止待ちと NFS 越しの sync で猶予を食い潰しうる
+        # （子の停止時間そのものは未実測。安全側のマージンとして確保）。
+        terminationGracePeriodSeconds: 60
         # runAsUser は必須。コントローラはこれと違う uid で /workspace 直下を 0555 に閉じるので、
         # エージェントは宣言ディレクトリにだけ書ける。
         securityContext:
@@ -55,8 +382,6 @@ spec:
           seccompProfile:
             type: RuntimeDefault
         volumes:
-          - name: workspace
-            emptyDir: {}
           - name: tmp
             emptyDir: {}
           - name: prompt
@@ -66,7 +391,117 @@ spec:
                 - configMap:
                     name: taskflow-verdict-protocol
                 - configMap:
-                    name: cnp-check-prompt
+                    name: cnp-planner-prompt
+        containers:
+          - name: agent
+            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:43735b8c019ed5d68edc935b6c068f2ef30c223ec8b1e4fa336ae268af5e06aa
+            workingDir: /tmp
+            command: [sh, -c]
+            args:
+              - |
+                PROMPT="$(cat /prompt/cnp-planner.md; echo; cat /prompt/verdict-protocol.md)"
+                claude -p \
+                  --verbose \
+                  --output-format stream-json \
+                  --dangerously-skip-permissions \
+                  --allowedTools "Bash,Read,Write,Grep,Glob" \
+                  --model sonnet \
+                  --max-turns 80 \
+                  "$PROMPT" &
+                pid=$!
+                # activeDeadlineSeconds の TERM は PID1 に飛ぶ。前面で claude を待っていると
+                # POSIX sh は前面コマンドの終了を待ってから trap を実行するため、猶予期間内に
+                # trap が発火しない（実測: foreground だと 30 秒、background + wait なら即時）。
+                # そのため background + wait にして、TERM を受けたら子を落としてから flush する。
+                trap 'kill -TERM $pid 2>/dev/null
+                      i=0
+                      while kill -0 $pid 2>/dev/null && [ $i -lt 10 ]; do sleep 1; i=$((i+1)); done
+                      kill -KILL $pid 2>/dev/null
+                      sync
+                      exit 143' TERM INT
+                wait $pid || true
+                # 判定はディレクトリで出る。ここから先は何もしない（回収は publish サイドカー）。
+                #
+                # sync は Kata + NFS の workspace PVC に要る。書き戻しが残ったままコンテナが
+                # exit すると Kata のゲストエージェントが応答を失い、shim が終了コードを
+                # 取れずに 255 を返す（report.md は落ちているのに Pod は Failed）。
+                # 2026-09-05 に wn-03 / kata-containers 3.30.0 で実測: 書いて即 exit は 5/5 で
+                # 255、sync か 1 秒の待ちを挟むと 0。同じ Pod のサイドカーも巻き添えで 255 に
+                # なるため publish サイドカー側では手当てできない — 書いた本人が flush する。
+                sync
+            env:
+              - name: HOME
+                value: /tmp
+              - name: CLAUDE_CODE_OAUTH_TOKEN
+                valueFrom:
+                  secretKeyRef:
+                    name: claude-code-token
+                    key: credential
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop: [ALL]
+            volumeMounts:
+              - name: flow-workspace
+                mountPath: /workspace
+              - name: tmp
+                mountPath: /tmp
+              - name: prompt
+                mountPath: /prompt
+                readOnly: true
+            resources:
+              requests:
+                cpu: 500m
+                memory: 512Mi
+              limits:
+                # Kata では limit がそのまま VM のサイズ。cpu limit を書かないと 1 vCPU に
+                # なる（[[image-build-kata-cpu-starvation]] の実測）ので必ず書く。
+                cpu: "2"
+                memory: 4Gi
+---
+apiVersion: flow.tgy.io/v1alpha1
+kind: TaskHandler
+metadata:
+  name: cnp-reporter
+  namespace: claude-code
+spec:
+  phase: 報告
+  runner:
+    type: Job
+  timeout: 15m
+  maxInfraRetries: 1
+  workspace:
+    volume: flow-workspace
+    mountPath: /workspace
+  jobTemplate:
+    template:
+      metadata:
+        labels:
+          # 上の taskflow-cnp-report CNP がこのラベルで選ぶ（Anthropic API と Discord だけ）。
+          taskflow-cnp-report: "true"
+      spec:
+        restartPolicy: Never
+        runtimeClassName: kata
+        serviceAccountName: agent-cnp-reporter
+        automountServiceAccountToken: false
+        # 既定の 30 秒だと、TERM 後の子プロセス停止待ちと NFS 越しの sync で猶予を食い潰しうる
+        # （子の停止時間そのものは未実測。安全側のマージンとして確保）。
+        terminationGracePeriodSeconds: 60
+        securityContext:
+          runAsUser: 65533
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        volumes:
+          - name: tmp
+            emptyDir: {}
+          - name: prompt
+            projected:
+              sources:
+                - configMap:
+                    name: taskflow-verdict-protocol
+                - configMap:
+                    name: cnp-reporter-prompt
         initContainers:
           # 人間への報告のうち 完了（Success）だけをここで扱う（設計 §7 / §9）。SIGTERM で
           # ok/ が非空かどうかを見る。escalate / ambiguous（ok と escalate 両方が非空）/
@@ -74,6 +509,9 @@ spec:
           # manifests/monitoring/prometheusrule-taskflow.yaml が taskflow_task_outcomes_total
           # から検知して Discord に出す。ここでも出すと同じ Escalated に対して Discord が
           # 2 通鳴るので、この sidecar は完了の 1 パターンしか報告しない。
+          #
+          # 2 フェーズ化でこのサイドカーは 調査 から 報告 へ移った。終端はこちらで、
+          # 調査 の Success は「次へ進む」であって人間への知らせではない。
           - name: notify
             image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:d5db59cac14b23a4ef85a456754522463267324e8ed3a84e795a2eba829c8f05
             restartPolicy: Always
@@ -120,7 +558,7 @@ spec:
               capabilities:
                 drop: [ALL]
             volumeMounts:
-              - name: workspace
+              - name: flow-workspace
                 mountPath: /workspace
                 readOnly: true
             resources:
@@ -132,20 +570,41 @@ spec:
         containers:
           - name: agent
             image: registry.infra.tgy.io/tools/claude-code:latest@sha256:43735b8c019ed5d68edc935b6c068f2ef30c223ec8b1e4fa336ae268af5e06aa
-            workingDir: /workspace
+            workingDir: /tmp
             command: [sh, -c]
             args:
               - |
-                PROMPT="$(cat /prompt/cnp-check.md; echo; cat /prompt/verdict-protocol.md)"
+                PROMPT="$(cat /prompt/cnp-reporter.md; echo; cat /prompt/verdict-protocol.md)"
+                # max-turns 40 は過去に report を書く直前で打ち切られて判定不能になった値
+                # （taskflow-common.yaml の verdict-protocol.md 参照）なので避ける。
                 claude -p \
                   --verbose \
                   --output-format stream-json \
                   --dangerously-skip-permissions \
                   --allowedTools "Bash,Read,Write,Grep,Glob" \
                   --model sonnet \
-                  --max-turns 80 \
-                  "$PROMPT" || true
-                # 判定はディレクトリで出る。ここから先は何もしない（回収は publish サイドカー）。
+                  --max-turns 60 \
+                  "$PROMPT" &
+                pid=$!
+                # activeDeadlineSeconds の TERM は PID1 に飛ぶ。前面で claude を待っていると
+                # POSIX sh は前面コマンドの終了を待ってから trap を実行するため、猶予期間内に
+                # trap が発火しない（実測: foreground だと 30 秒、background + wait なら即時）。
+                # そのため background + wait にして、TERM を受けたら子を落としてから flush する。
+                trap 'kill -TERM $pid 2>/dev/null
+                      i=0
+                      while kill -0 $pid 2>/dev/null && [ $i -lt 10 ]; do sleep 1; i=$((i+1)); done
+                      kill -KILL $pid 2>/dev/null
+                      sync
+                      exit 143' TERM INT
+                wait $pid || true
+                #
+                # sync は Kata + NFS の workspace PVC に要る。書き戻しが残ったままコンテナが
+                # exit すると Kata のゲストエージェントが応答を失い、shim が終了コードを
+                # 取れずに 255 を返す（report.md は落ちているのに Pod は Failed）。
+                # 2026-09-05 に wn-03 / kata-containers 3.30.0 で実測: 書いて即 exit は 5/5 で
+                # 255、sync か 1 秒の待ちを挟むと 0。同じ Pod のサイドカーも巻き添えで 255 に
+                # なるため publish サイドカー側では手当てできない — 書いた本人が flush する。
+                sync
             env:
               - name: HOME
                 value: /tmp
@@ -159,8 +618,15 @@ spec:
               capabilities:
                 drop: [ALL]
             volumeMounts:
-              - name: workspace
+              # 自分の run（subPath 無し → work/<runID> が焼かれる）
+              - name: flow-workspace
                 mountPath: /workspace
+              # 封印済み run の棚。subPath を明示したので pin されない（ADR-0002 決定5 の読み側推奨形）。
+              # レイアウトは results/<runID>/<宣言ディレクトリ>/report.md で、手元の /workspace/ と同じ形。
+              - name: flow-workspace
+                mountPath: /shelf
+                subPath: results
+                readOnly: true
               - name: tmp
                 mountPath: /tmp
               - name: prompt
@@ -171,7 +637,9 @@ spec:
                 cpu: 500m
                 memory: 512Mi
               limits:
-                # Kata では memory limit が VM のサイズ
+                # Kata では limit がそのまま VM のサイズ。cpu limit を書かないと 1 vCPU に
+                # なる（[[image-build-kata-cpu-starvation]] の実測）ので必ず書く。
+                cpu: "2"
                 memory: 4Gi
 ---
 apiVersion: flow.tgy.io/v1alpha1
@@ -181,15 +649,25 @@ metadata:
   namespace: claude-code
 spec:
   profile: investigate
+  # 中身を書かない = CRD の struct default {RWX, 1Gi} が admission で実体化され、
+  # storageClassName も既定 SC（qnap-nfs）に落ちる。フェーズ間の受け渡しはこの PVC の
+  # results/ 越し（ADR-0002 / ADR-0003）。Task が消えると PVC も一緒に消える。
+  workspace: {}
   start: 調査
   bindings:
     調査:
       handler: cnp-planner
       next:
-        完了: ok
+        報告: ok
         # 「判定できない」を書いて表明する出口（taskflow #63）。宣言すると escalate/ が
         # 敷かれ、そこに書いた run は outcome Declined として記録される。宣言しなければ
         # 「何も書かない」= NoAnswer しか無く、途中で死んだのと区別が付かない。
+        Escalated: escalate
+    報告:
+      handler: cnp-reporter
+      next:
+        完了: ok
+        # 材料が読めない場合の出口。報告 には調べ直す手段が無いので、降りるしかない。
         Escalated: escalate
   # 終端の意味は flow が言う（taskflow #64）。framework は 完了 が良い知らせだと知らない。
   # 宣言しない終端は metric 上 Undeclared のままになる。

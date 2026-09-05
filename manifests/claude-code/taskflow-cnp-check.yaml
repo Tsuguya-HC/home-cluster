@@ -5,7 +5,7 @@
 # report を次フェーズへ渡す store 封印（results/<runID>/）がまだ無いので載せられない。
 #
 # 語彙は next の宣言から来る。{完了: ok, Escalated: escalate} なので、エージェントが書けるのは
-# /workspace/out/ 下の ok/ と escalate/ の 2 つだけ。「判定できない」は escalate/ に理由を書いて
+# /workspace/ 直下の ok/ と escalate/ の 2 つだけ。「判定できない」は escalate/ に理由を書いて
 # 明示する（taskflow #63）。何も書かなければ従来どおり Escalated だが、そちらは沈黙 — 途中で
 # 死んだのか意図して降りたのかが history から区別できない。
 # terminals で終端の意味も宣言する（taskflow #64）。宣言しないと metric 上は Undeclared のまま。
@@ -47,7 +47,7 @@ spec:
         restartPolicy: Never
         runtimeClassName: kata
         serviceAccountName: agent-cnp-reader
-        # runAsUser は必須。コントローラはこれと違う uid で out/ を 0555 に閉じるので、
+        # runAsUser は必須。コントローラはこれと違う uid で /workspace 直下を 0555 に閉じるので、
         # エージェントは宣言ディレクトリにだけ書ける。
         securityContext:
           runAsUser: 65533
@@ -69,7 +69,7 @@ spec:
                     name: cnp-check-prompt
         initContainers:
           # 人間への報告のうち 完了（Success）だけをここで扱う（設計 §7 / §9）。SIGTERM で
-          # out/ok が非空かどうかを見る。escalate / ambiguous（ok と escalate 両方が非空）/
+          # ok/ が非空かどうかを見る。escalate / ambiguous（ok と escalate 両方が非空）/
           # 沈黙（どちらも空）はいずれも Escalated 終端で、そちらは
           # manifests/monitoring/prometheusrule-taskflow.yaml が taskflow_task_outcomes_total
           # から検知して Discord に出す。ここでも出すと同じ Escalated に対して Discord が
@@ -86,8 +86,8 @@ spec:
                 # なくディレクトリが空かどうかで見るのは、回収側がそう見ているから。
                 nonempty() { [ -d "$1" ] && [ -n "$(ls -A "$1" 2>/dev/null)" ]; }
                 notify() {
-                  OK=/workspace/out/ok
-                  ESC=/workspace/out/escalate
+                  OK=/workspace/ok
+                  ESC=/workspace/escalate
                   # 完了（ok だけが非空）以外は Escalated 終端で PrometheusRule 側の担当。
                   # ここで抜けると Discord には投げない。
                   nonempty "$OK" && ! nonempty "$ESC" || return 0

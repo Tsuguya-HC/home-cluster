@@ -21,14 +21,14 @@
 # 確かめていること:
 #   - flow が spec.workspace を持つと PVC が実際に作られ、既定 {RWX, 1Gi} が default SC に落ちる
 #   - 予約名 flow-workspace のマウントに、subPath を書かなければ work/<runID> が焼かれる
-#   - prepare が out/ を 0555 で閉じるのは PVC 上でも同じ（宣言外のディレクトリを作れない）
+#   - prepare が run ディレクトリ（= マウント直下）を 0555 で閉じるのは PVC 上でも同じ（宣言外のディレクトリを作れない）
 #   - publish の rename が qnap-nfs 上で成立し、results/<runID> に現れる
-#   - out/ を閉じた 0555 が rename を越えて棚の上でも保たれる（NFS 越しの権限保持は実測が要る）
+#   - 閉じた 0555 が rename を越えて棚の上でも保たれる（publish が rename のために一度開けて閉じ直す）
 #   - 後続フェーズが subPath: results で「棚」を読める（自分の run ではなく前の run が見える）
 #
-# 棚のレイアウトは results/<runID>/out/<宣言ディレクトリ>/report.md。
-# out/ の1階層を忘れやすい（初版で踏んだ）。prepare は work/ を1階層上でマウントして
-# <runID>/out/ を作り、publish は <runID> ごと rename するので、out/ は棚に移っても残る。
+# 棚のレイアウトは results/<runID>/<宣言ディレクトリ>/report.md。手元の run と同じ形
+# （/workspace/ok/report.md ↔ /shelf/<runID>/ok/report.md）。初版は間に out/ が挟まっていて
+# 読む側が落とした（taskflow #92 → ADR-0005 で撤去）。
 ---
 apiVersion: flow.tgy.io/v1alpha1
 kind: TaskHandler
@@ -72,11 +72,11 @@ spec:
               - |
                 set -eu
                 echo "FLOW_DIRECTORIES=$FLOW_DIRECTORIES phase=$FLOW_PHASE"
-                ls -ld /workspace/out /workspace/out/*
+                ls -ld /workspace /workspace/*
                 # 宣言に無いディレクトリは作れないはず（emptyDir と同じ性質が PVC 上でも成り立つか）
-                if mkdir /workspace/out/evil 2>/dev/null; then echo "out/ is not closed"; exit 1; fi
+                if mkdir /workspace/evil 2>/dev/null; then echo "the run directory is not closed"; exit 1; fi
                 # 読み出し フェーズが results/ 越しに拾って照合するマーカー
-                echo "$FLOW_TASK_UID" > /workspace/out/ok/report.md
+                echo "$FLOW_TASK_UID" > /workspace/ok/report.md
                 echo "wrote marker $FLOW_TASK_UID"
             securityContext:
               allowPrivilegeEscalation: false
@@ -135,12 +135,10 @@ spec:
                 # /shelf は封印済み run の棚。最大番号が直前の run（= 書き込み フェーズ）。
                 latest=$(ls /shelf | sort -n | tail -1)
                 echo "shelf: $(ls /shelf | tr '\n' ' ') -> latest=$latest"
-                # 棚のレイアウトは results/<runID>/out/<宣言ディレクトリ>/。
-                # prepare が work/ を1階層上でマウントして <runID>/out/ を作り、publish が
-                # <runID> ごと rename するので、out/ の階層は棚に移っても残る。
-                marker=$(cat "/shelf/$latest/out/ok/report.md")
+                # 棚のレイアウトは results/<runID>/<宣言ディレクトリ>/ — 手元の /workspace/ と同じ形。
+                marker=$(cat "/shelf/$latest/ok/report.md")
                 # /shelf は readOnly マウントなので書き込み系の検査はマウントで潰れて何も
-                # 確かめられない（vacuous）。prepare が out/ を 0555 (dr-xr-xr-x) へ chmod
+                # 確かめられない（vacuous）。prepare が run ディレクトリを 0555 (dr-xr-xr-x) へ chmod
                 # した状態が publish の rename を越えて qnap-nfs 上でも保たれているかを、
                 # 読むだけで効く stat のモード確認で見る（sidecar.go の Prepare/modeOut）。
                 # 見たいのは下3桁の許可ビットで、setuid/setgid/sticky の有無ではない。
@@ -148,16 +146,16 @@ spec:
                 # 2555 のような4桁を返しうる（実イメージで確認済み）。それは封印が緩んで
                 # いるわけではないので、末尾3桁の一致だけを見る。755 や 777 のような
                 # 封印の緩みはこれでも従来どおり落ちる。
-                outmode=$(stat -c %a "/shelf/$latest/out")
+                outmode=$(stat -c %a "/shelf/$latest")
                 case "$outmode" in
                   *555) ;;
                   *)
-                    echo "shelf out/ is not sealed: mode=$outmode (want *555)"
+                    echo "shelf run is not sealed: mode=$outmode (want *555)"
                     exit 1
                     ;;
                 esac
-                # 自分の run は自分の out/ に書く（こちらは subPath 無しのマウント）
-                echo "read $marker from run $latest" > /workspace/out/ok/report.md
+                # 自分の run は自分の宣言ディレクトリに書く（こちらは subPath 無しのマウント）
+                echo "read $marker from run $latest" > /workspace/ok/report.md
                 # 同じ Task の中なので、書き込み フェーズが残したマーカーと一致するはず
                 test "$marker" = "$FLOW_TASK_UID"
                 echo "marker matches: $marker"

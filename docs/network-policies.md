@@ -179,13 +179,15 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 |---|---|---|
 | **talos-build** (talos-build=true) | (deny world) | kube-apiserver, ghcr.io + github.com + api.github.com + uploads.github.com + *.githubusercontent.com + dl-cdn.alpinelinux.org + discord.com :443, seaweedfs-filer (seaweedfs):8333 |
 
-## claude-code (3 policies)
+## claude-code (5 policies)
 
 | Component | Ingress | Egress |
 |---|---|---|
 | **claude-code** (claude-code=true) | (deny world) | kube-apiserver, api.anthropic.com + github.com + api.github.com + *.githubusercontent.com + index.crates.io + static.crates.io + registry.npmjs.org + discord.com + gitmcp.io :443, seaweedfs-filer (seaweedfs):8333, loki-gateway (monitoring):8080, prometheus (monitoring):9090, horenso (horenso):3000, task-dispatch-eventsource (argo):12002, argocd-server (argocd):8080 |
 | **task-submitter** (task-submitter=true) | (deny world) | kube-apiserver, discord.com:443, seaweedfs-filer (seaweedfs):8333 |
 | **taskflow-pr-review** (taskflow-pr-review=true) | (書かない = 全 deny) | api.anthropic.com + github.com + api.github.com :443 |
+| **taskflow-cnp-check** (taskflow-cnp-check=true) | (書かない = 全 deny) | kube-apiserver:6443, api.anthropic.com:443, loki-gateway (monitoring):8080 |
+| **taskflow-cnp-report** (taskflow-cnp-report=true) | (書かない = 全 deny) | api.anthropic.com + discord.com :443 |
 
 `task-submitter` は Task を 1 つ作るだけの CronWorkflow の Pod。apiserver のほかに要る 2 つは
 コントローラの workflowDefaults が全 Workflow に注入するもの（archiveLogs の保存先と
@@ -202,6 +204,21 @@ Cilium の identity は Pod 単位なので、通知サイドカーのために�
 （`github.com` / `api.anthropic.com` は攻撃者が受信ログを読めないのでこの性質が無い）。
 この flow は通知サイドカーを持たず、人間への通知は framework が終端で出す Warning Event /
 `Ready=False` / metric から引く。
+
+`taskflow-cnp-check` / `taskflow-cnp-report` は cnp-check flow の 2 フェーズに 1 枚ずつ。
+割った理由は工程ではなく**到達範囲**で、フェーズごとに要るものだけを開ける。
+
+- **調査**（`taskflow-cnp-check`）は点検対象を読むので apiserver と Loki が要る。
+  **Discord は開けない** — 通知サイドカーは終端の 報告 にしかなく、Cilium の identity は
+  Pod 単位なので、開けた穴は `CLAUDE_CODE_OAUTH_TOKEN` を持つエージェントのコンテナからも
+  使える（上の taskflow-pr-review と同じ理由）
+- **報告**（`taskflow-cnp-report`）は材料を workspace PVC 越しに受け取るので、
+  ネットワークで要るのは推論 API と通知先だけ。**apiserver も Loki も開けない** —
+  「材料に無いことは確かめようがない」を、プロンプトの約束ではなく到達可能性で支えている
+
+1 フェーズだった頃は共有の `claude-code=true` に相乗りしており、1 つの Pod が
+apiserver・Loki・Discord・GitHub・npm・crates・SeaweedFS・Prometheus・horenso・ArgoCD を
+まとめて持っていた。
 
 ## image-build (2 policies)
 

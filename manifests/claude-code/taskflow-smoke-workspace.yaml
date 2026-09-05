@@ -25,6 +25,17 @@
 #   - publish の rename が qnap-nfs 上で成立し、results/<runID> に現れる
 #   - 閉じた 0555 が rename を越えて棚の上でも保たれる（publish が rename のために一度開けて閉じ直す）
 #   - 後続フェーズが subPath: results で「棚」を読める（自分の run ではなく前の run が見える）
+#   - **Kata + NFS の組み合わせで一周する**（本番の handler は runtimeClassName: kata なので、
+#     runc で通っただけでは「本番でも通る」と言えない）
+#
+# Kata を載せているのは飾りではない。Kata のゲストは NFS を virtio-fs 越しに見ており、
+# **書き戻しが残ったままコンテナが exit すると、ゲストエージェントが応答を失って shim が
+# 終了コードを取れず 255 を返す** — ファイルは落ちているのに Pod は Failed になる。
+# 2026-09-05 に wn-03 / kata-containers 3.30.0 で実測（書いて即 exit は 5/5 で 255、
+# sync か 1 秒の待ちを挟むと 0）。同じ Pod のサイドカーも巻き添えで 255 になるので、
+# framework の publish サイドカーでは手当てできず、**書いた本人が sync する**しかない。
+# 下の 2 つの handler が末尾で sync しているのはそのため。この smoke が runc のままだと
+# この罠は本番の cnp-check で初めて出る。
 #
 # 棚のレイアウトは results/<runID>/<宣言ディレクトリ>/report.md。手元の run と同じ形
 # （/workspace/ok/report.md ↔ /shelf/<runID>/ok/report.md）。初版は間に out/ が挟まっていて
@@ -54,6 +65,8 @@ spec:
           taskflow-smoke: "true"
       spec:
         restartPolicy: Never
+        # 本番の handler と同じランタイム。runc で通っても Kata で通るとは限らない（冒頭参照）。
+        runtimeClassName: kata
         # taskflow-smoke.yaml が定義する ServiceAccount を再利用（ここでは定義しない）。
         # 権限ゼロ・automountServiceAccountToken: false が一致しているので使い回して問題ない。
         serviceAccountName: taskflow-smoke
@@ -78,6 +91,8 @@ spec:
                 # 読み出し フェーズが results/ 越しに拾って照合するマーカー
                 echo "$FLOW_TASK_UID" > /workspace/ok/report.md
                 echo "wrote marker $FLOW_TASK_UID"
+                # Kata + NFS では書き戻しを残したまま exit するとゲストが落ちる（冒頭参照）
+                sync
             securityContext:
               allowPrivilegeEscalation: false
               readOnlyRootFilesystem: true
@@ -92,7 +107,8 @@ spec:
                 cpu: 10m
                 memory: 16Mi
               limits:
-                memory: 64Mi
+                # Kata では memory limit が VM のサイズ。16Mi 級だとゲストが起動しない
+                memory: 512Mi
 ---
 apiVersion: flow.tgy.io/v1alpha1
 kind: TaskHandler
@@ -115,6 +131,8 @@ spec:
           taskflow-smoke: "true"
       spec:
         restartPolicy: Never
+        # 本番の handler と同じランタイム。runc で通っても Kata で通るとは限らない（冒頭参照）。
+        runtimeClassName: kata
         # taskflow-smoke.yaml が定義する ServiceAccount を再利用（ここでは定義しない）。
         # 権限ゼロ・automountServiceAccountToken: false が一致しているので使い回して問題ない。
         serviceAccountName: taskflow-smoke
@@ -159,6 +177,8 @@ spec:
                 # 同じ Task の中なので、書き込み フェーズが残したマーカーと一致するはず
                 test "$marker" = "$FLOW_TASK_UID"
                 echo "marker matches: $marker"
+                # Kata + NFS では書き戻しを残したまま exit するとゲストが落ちる（冒頭参照）
+                sync
             securityContext:
               allowPrivilegeEscalation: false
               readOnlyRootFilesystem: true
@@ -178,7 +198,8 @@ spec:
                 cpu: 10m
                 memory: 16Mi
               limits:
-                memory: 64Mi
+                # Kata では memory limit が VM のサイズ。16Mi 級だとゲストが起動しない
+                memory: 512Mi
 ---
 apiVersion: flow.tgy.io/v1alpha1
 kind: TaskFlow

@@ -1,0 +1,45 @@
+# TaskFlow の構造検査 webhook が使うサーバー証明書。
+#
+# taskflow 自身は cert-manager を知らない（ADR-0006 決定3）。配る
+# ValidatingWebhookConfiguration は caBundle を持たず、コントローラは
+# --webhook-cert-path の下のファイルを読むだけで、どこから来た証明書かを問わない。
+# 「どう動くか」は taskflow、「何ができるか」は home-cluster という §14 の分担が
+# 証明書にもそのまま当てはまるので、供給はこちらの裁量で決める。
+#
+# 自己署名で足りる。この証明書を検証するのは apiserver 1 者だけで、その apiserver は
+# caBundle を cainjector から受け取る。外から来る誰かに見せるものではないので、
+# letsencrypt-prod も pg-ca-issuer も要らない。
+#
+# sync-wave: Deployment（wave 0）が Secret webhook-server-cert を必須マウントするので、
+# 証明書が先に立っていないと manager Pod が起動しない。
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: taskflow-webhook-selfsigned
+  namespace: taskflow-system
+  annotations:
+    argocd.argoproj.io/sync-wave: "-5"
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: taskflow-serving-cert
+  namespace: taskflow-system
+  annotations:
+    argocd.argoproj.io/sync-wave: "-4"
+spec:
+  # ValidatingWebhookConfiguration の cert-manager.io/inject-ca-from はこの
+  # namespace/name を指す（kustomize/taskflow の patch）。cainjector がここから
+  # CA を読んで caBundle を埋めるので、両者の名前がずれると webhook は
+  # 「証明書を検証できない」で落ち続ける。
+  secretName: webhook-server-cert
+  issuerRef:
+    kind: Issuer
+    name: taskflow-webhook-selfsigned
+  # apiserver が引く名前。Service 名と namespace は taskflow の config/webhook が
+  # 決めており（namePrefix taskflow-）、ここはそれに追従する。
+  dnsNames:
+    - taskflow-webhook-service.taskflow-system.svc
+    - taskflow-webhook-service.taskflow-system.svc.cluster.local

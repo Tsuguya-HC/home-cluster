@@ -27,7 +27,7 @@ kind: Kustomization
 # 実測していない。この不確実性に賭けず、renovate.jsonc の packageRules で明示的に
 # enabled: false にして止めている。
 resources:
-  - https://github.com/Tsuguya-HC/taskflow//config/default?ref=b68a03d9d06b66b9f2c7de48a87de4d55b5ed6b8
+  - https://github.com/Tsuguya-HC/taskflow//config/default?ref=1b5603e6527f1fc5b7fb461a7a560af322f2bf4f
 
 # newTag と digest を分けて併記すると、Renovate の kustomize manager が
 # invalid-dependency-specification で抽出を捨て、digest が自動更新されなくなる
@@ -37,7 +37,7 @@ resources:
 images:
   - name: controller
     newName: registry.infra.tgy.io/tools/taskflow
-    newTag: latest@sha256:d075de86bb0195aa2a335b5a3ec3261f2e25804716e9d8b6e10c441cbc2d6ee4
+    newTag: latest@sha256:63dad962c78d546c1d6ef4783aa6fcbcabb797c1b7925f351bbe7f28d906586a
 
 patches:
   # 全 namespace restricted 運用に合わせる（config/default の Namespace にはラベルが無い）
@@ -76,4 +76,4 @@ patches:
               - name: manager
                 env:
                   - name: SIDECAR_IMAGE
-                    value: registry.infra.tgy.io/tools/agent-sidecar:latest@sha256:5bec8d1b35966145729ddf3d1c4284ac692e86f69d993a9f5a7c95a7416e88bb
+                    value: registry.infra.tgy.io/tools/agent-sidecar:latest@sha256:88f491e85d054dd50f4691b37bc87ec179f8d4ada10f77fc9d13c2d69ba78cba

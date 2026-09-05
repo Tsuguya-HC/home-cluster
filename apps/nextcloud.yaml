@@ -15,7 +15,7 @@ spec:
           - $values/helm-values/nextcloud/values.yaml
     - repoURL: https://valkey.io/valkey-helm/
       chart: valkey
-      targetRevision: "0.11.0"
+      targetRevision: "0.12.0"
       helm:
         releaseName: valkey
         valueFiles:

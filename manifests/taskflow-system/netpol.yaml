@@ -23,9 +23,12 @@ spec:
     #
     # kube-apiserver / host / remote-node の 3 つを並べるのは、このクラスタの他の
     # admission webhook（kyverno / cnpg / spin-operator、いずれも 9443）と同じ書き方に
-    # 揃えているため。実際にどの identity で届くかはこのクラスタでは未実測 —
-    # failurePolicy: Fail で外すと TaskFlow の書き込みが全部落ちるので、絞るなら先に
-    # `hubble observe --to-namespace taskflow-system --verdict DROPPED` で実測してから。
+    # 揃えているため。
+    #
+    # **この 3 つのうち実際に届くのは remote-node だけ**（2026-09-07 実測、taskflow #107）。
+    # kube-apiserver だけに絞ると drop されて書き込みが落ちる。ここを触る前に
+    # docs/network-policies.md の taskflow-system 節を読むこと（実測の全文と、
+    # 絞って測るときの罠はあちらにある）。
     - fromEntities:
         - kube-apiserver
         - host

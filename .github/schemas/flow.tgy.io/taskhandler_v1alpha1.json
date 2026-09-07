@@ -16,7 +16,7 @@
    "description": "TaskHandlerSpec is the box that fills one phase.\n\nThere is no field here for a prompt, a model, an API key, a store or a\nnotification target, and that absence is the design: the controller's\nvocabulary is phases, Jobs and verdicts, and everything an LLM needs lives\nin the pod spec its author writes. The same shape therefore accepts a\nlinter, a test suite or a shell script — from the controller's side there is\nno difference between those and an agent.",
    "properties": {
     "jobTemplate": {
-     "description": "JobTemplate is handed to the runner as written. The controller does not\nadd labels, service accounts or images to it: what a pod must carry to\nbe selected by a network policy is a property of the cluster it runs in,\nnot something a framework may decide. What the framework provides is one\nplace to say it — a pod template as CronJob users know it, but with only\ntemplate and no job-level spec (no backoffLimit, no completions, no\nparallelism) — rather than the two locations with differing semantics\nthat Argo requires.\n\nRequired when runner.type is Job; ignored when it is External.",
+     "description": "JobTemplate is handed to the runner as written. The controller does not\nadd labels, service accounts or images to it: what a pod must carry to\nbe selected by a network policy is a property of the cluster it runs in,\nnot something a framework may decide. What the framework provides is one\nplace to say it — a pod template as CronJob users know it, but with only\ntemplate and no job-level spec (no backoffLimit, no completions, no\nparallelism) — rather than the two locations with differing semantics\nthat a workflow engine's own template would ask for.\n\nRequired when runner.type is Job; ignored when it is External.",
      "properties": {
       "template": {
        "description": "PodTemplate is the pod a run consists of.",
@@ -7153,7 +7153,7 @@
      "properties": {
       "type": {
        "default": "Job",
-       "description": "RunnerType selects how a phase is executed.\n\nArgo Workflows is deliberately absent. Multi-step work fits in one pod with\nshared volumes, so an Argo runner would buy only the reuse of existing\nWorkflowTemplates — not worth the dependency, and a single pod structurally\navoids the \"emptyDir is not shared between steps\" trap that cost a day.",
+       "description": "RunnerType selects how a phase is executed.\n\nA workflow engine is deliberately absent. Multi-step work fits in one pod\nwith shared volumes, so an engine-backed runner would buy only the reuse of\ndefinitions already written for it — not worth the dependency, and a single\npod structurally avoids the class of trap where a volume the steps are meant\nto share turns out to be scoped to one pod.",
        "enum": [
         "Job",
         "External"

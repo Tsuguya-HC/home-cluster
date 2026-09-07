@@ -75,6 +75,14 @@ spec:
         - ports:
             - port: "8000"
               protocol: TCP
+    # pg.infra.tgy.io（pg-gateway、TLS パススルー）からの流入。Envoy が中継するので送信元は
+    # reserved:ingress になり、クライアントの IP はここでは見えない。
+    - fromEntities:
+        - ingress
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
   egress:
     - toEntities:
         - kube-apiserver

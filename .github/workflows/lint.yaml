@@ -153,28 +153,34 @@ jobs:
   kubeconform:
     needs: detect
     if: ${{ needs.detect.outputs.kubeconform == 'true' }}
-    uses: ./.github/workflows/_kubeconform.yml
+    # zizmor 1.30 の self-repository は `./` を `$/` にしろと言う。従わないのは、
+    # `$/` にすると actionlint が呼び出しを解決できなくなり、reusable workflow の
+    # input 検証（必須の欠落・存在しない input 名）がまるごと消えるから（実測）。
+    # audit の根拠である「前段ステップが clone したものを掴む」も、job レベルの
+    # 呼び出しには当たらない — GitHub が同じ commit から解決し FS を見ない。
+    # ignore は行単位。ステップの `uses: ./my-action` は今も検出される。
+    uses: ./.github/workflows/_kubeconform.yml # zizmor: ignore[self-repository]
     permissions:
       contents: read
 
   helm-template:
     needs: detect
     if: ${{ needs.detect.outputs.charts == 'true' }}
-    uses: ./.github/workflows/_helm-template.yml
+    uses: ./.github/workflows/_helm-template.yml # zizmor: ignore[self-repository]
     permissions:
       contents: read
 
   unread-values:
     needs: detect
     if: ${{ needs.detect.outputs.unread == 'true' }}
-    uses: ./.github/workflows/_unread-values.yml
+    uses: ./.github/workflows/_unread-values.yml # zizmor: ignore[self-repository]
     permissions:
       contents: read
 
   image-existence:
     needs: detect
     if: ${{ needs.detect.outputs.images == 'true' }}
-    uses: ./.github/workflows/_image-existence.yml
+    uses: ./.github/workflows/_image-existence.yml # zizmor: ignore[self-repository]
     permissions:
       contents: read
       # leaf 側が GHCR の private パッケージ (home-rss) を読む。reusable では
@@ -185,21 +191,21 @@ jobs:
   argo-lint:
     needs: detect
     if: ${{ needs.detect.outputs.argo == 'true' }}
-    uses: ./.github/workflows/_argo-lint.yml
+    uses: ./.github/workflows/_argo-lint.yml # zizmor: ignore[self-repository]
     permissions:
       contents: read
 
   mcp:
     needs: detect
     if: ${{ needs.detect.outputs.mcp == 'true' }}
-    uses: ./.github/workflows/_mcp.yml
+    uses: ./.github/workflows/_mcp.yml # zizmor: ignore[self-repository]
     permissions:
       contents: read
 
   configmap-scripts:
     needs: detect
     if: ${{ needs.detect.outputs.cmscripts == 'true' }}
-    uses: ./.github/workflows/_configmap-scripts.yml
+    uses: ./.github/workflows/_configmap-scripts.yml # zizmor: ignore[self-repository]
     permissions:
       contents: read
 

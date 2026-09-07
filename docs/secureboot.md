@@ -77,7 +77,7 @@ talos-build アプリを同期したときに `talos-extension-bump` Sensor が�
 `minimumReleaseAge` がイメージの created から測るためリセットされる——`plan-build` はこれを
 止めるために居る。
 
-比較材料は、run ごとに Argo が `status.storedTemplates` へ凍結する imager の引数（拡張の digest
+比較材料は、run ごとに Argo が `status.storedWorkflowTemplateSpec` へ凍結する imager の引数（拡張の digest
 とカーネル引数）と、`resolve-version` が出した版。**署名鍵のローテーションと、同じ版のまま
 installer-base / imager を焼き直した場合は見ていない。** どちらも判定材料（版・imager 引数）が
 変わらないので、前回成功 run と一致して skip される。署名鍵のローテーションは `manifests/secrets/`

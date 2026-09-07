@@ -16,10 +16,16 @@ data:
     # 測るので、無関係な変更が 3 日より短い間隔で入る限り Talos の更新 PR が出てこない。
     #
     # 判定材料は「前回成功した run 自身」から取る。Argo は run ごとに参照先 WorkflowTemplate
-    # の全テンプレートを status.storedTemplates に凍結して持っており（実測: 2 テンプレートしか
-    # 実行せず Error で終わった run にも未実行分が入っている）、そこに imager へ渡す引数
-    # ——拡張の digest とカーネル引数——がそのまま残っている。だからレジストリに目印を足す
-    # 必要も、指紋を持ち回る必要もない。
+    # の全テンプレートを status.storedWorkflowTemplateSpec に凍結して持っており、そこに
+    # imager へ渡す引数——拡張の digest とカーネル引数——がそのまま残っている。だから
+    # レジストリに目印を足す必要も、指紋を持ち回る必要もない。
+    #
+    # **`status.storedTemplates` ではない。** そちらはコントローラが解決したテンプレートを
+    # 順に足していく器で、このステップが走る時点（2 番目）では build 系がまだ入っていない。
+    # 完了した run を見ると全部入っているので揃っているように見えるが、それは完了後の姿。
+    # 2026-09-07 に実際に storedTemplates で書いて本番に出し、今回の run の imager 入力を
+    # 取り出せず build 側へ倒れて 1 回余分に焼いた。storedWorkflowTemplateSpec は
+    # setStoredWfSpec が run の最初に一度だけ書くので、どのステップから見ても揃っている。
     #
     # 判定に要るものが 1 つでも取れなければ焼く。初回・Argo が古い run を GC した後・
     # apiserver 不通は全部そちらに倒れる。逆に倒すと「焼くべきものを焼かないまま緑」になる。
@@ -44,7 +50,7 @@ data:
 
     # imager を使う initContainer だけを名前順に取る。同じファイルに載っている
     # argo-tools や alpine の digest は入らない——そこが「無関係な変更で焼き直さない」の要。
-    SEL='[.status.storedTemplates | to_entries[] | .value | .initContainers[]?
+    SEL='[.status.storedWorkflowTemplateSpec.templates[]? | .initContainers[]?
           | select(.image | test("ghcr\\.io/tsuguya/imager")) | {name, image, args}]
          | sort_by(.name)'
 

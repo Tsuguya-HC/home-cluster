@@ -194,3 +194,17 @@ hubble observe --to-namespace taskflow-system --verdict DROPPED
 LAN / 外部クライアントはクラスタ内 CoreDNS を引かず Cloudflare の公開レコード（external-dns 管理）を引くので、`argocd.infra.tgy.io` はワイルドカード（.190）ではなく individual レコード（.191）に正しく解決される。クラスタ内 Pod がこれらの `*.infra.tgy.io` 名を引く用途は現状無い（各サービスは `*.svc.cluster.local` を使う）。
 
 infra.tgy.io 配下で個別 IP を返すのは external-dns の個別レコード（HTTPRoute / TLSRoute の hostname から生成）の役目であり、CoreDNS の hosts に足しても LAN / 外部クライアントには効かない。CoreDNS 側で専用サーバブロック（`example.infra.tgy.io:53 { hosts { ... } }`）を切れば template を経由せず直接応答させる手段としては可能だが、クラスタ内解決にしか効かないため通常はこちらを使う理由がない。
+
+## CNPG: cert-manager が再発行したサーバ証明書がインスタンスに配られない
+
+`manifests/database/pg-certificates.yaml` の dnsNames を変えると cert-manager は `shared-pg-server-tls` を即時再発行するが、CNPG（1.30.0）のインスタンスは新しい Secret を取り込まず、旧証明書を出し続ける（2026-09-07 実測: 再発行から 7 分以上経っても `openssl s_client -servername pg.infra.tgy.io` の SAN は旧 12 件のまま。Cluster の `status.certificates.expirations` も旧値のまま）。
+
+**回復手順**: Cluster に `cnpg.io/reloadedAt` を打つ（`kubectl cnpg reload` 相当。`pg_ctl reload` だけで Pod は再起動しない）。20 秒で新証明書が配られる。
+
+```sh
+kubectl annotate cluster -n database shared-pg cnpg.io/reloadedAt="$(date -u +%Y-%m-%dT%H:%M:%SZ)" --overwrite
+echo | openssl s_client -connect 192.168.10.193:443 -servername pg.infra.tgy.io 2>/dev/null \
+  | openssl x509 -noout -ext subjectAltName
+```
+
+通常の期限更新（renewBefore による再発行）で同じことが起きるかは未確認。起きるなら `pg.infra.tgy.io` の `verify-full` が期限切れの日に落ちるので、次回の更新日（`kubectl get certificate -n database shared-pg-server-tls`）に確認する。

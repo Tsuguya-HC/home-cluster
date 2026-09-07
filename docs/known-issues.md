@@ -165,19 +165,38 @@ ping -c3 -I <PREFIX>:4::1 <HGW の LAN GUA>          # → 0/3
 
 ## TaskFlow 構造検査 webhook: caBundle 注入レース / コントローラ不在時の書き込み拒否
 
-TaskFlow の ValidatingWebhookConfiguration（taskflow #17 / ADR-0006）は `failurePolicy: Fail`。以下 2 つの窓で TaskFlow の CREATE/UPDATE が一時的に拒否されうる。
+TaskFlow の ValidatingWebhookConfiguration（taskflow #17 / ADR-0006）は `failurePolicy: Fail`。以下 2 つの窓で TaskFlow の CREATE/UPDATE が一時的に拒否されうる。**どちらも 2026-09-07 に意図的に起こして測った**（taskflow #107）。それまでは「初回投入で 1 回通った」以外の根拠が無かった。
 
-1. **cainjector の caBundle 注入レース**: `cert-manager.io/inject-ca-from`（`kustomize/taskflow/kustomization.yaml`）は cainjector の非同期パッチで、ArgoCD の sync-wave はこれを待たない（VWC の生成完了 ≠ caBundle が埋まったこと。ArgoCD に VWC の health check は無い）。sync 直後や Certificate の定期更新直後の**数秒間**、caBundle が空のまま webhook が有効になり、apiserver が TLS を検証できず拒否されることがある。**実害の長さは未実測**
-2. **コントローラ不在**: rollout や ノード drain（Talos アップグレード）中も同様に拒否されうる。`replicas: 2` + PDB（`manifests/taskflow-system/pdb.yaml`）で緩和したが、**ゼロにはならない**（2 replica 同時に落ちる窓は残る）
+taskflow #107 で測ったのはこの 2 つと、**admission リクエストがどの Cilium identity で届くか**の計 3 点。3 点目（`remote-node` だけで届き、`kube-apiserver` だけに絞ると drop される）は通信の話なので [network-policies.md の taskflow-system 節](network-policies.md) と `manifests/taskflow-system/netpol.yaml` のコメントにある。
 
-sync-wave をこれ以上早める手段は無く（cainjector の反応速度に依存する構造）、根治はできない。
+1. **cainjector の caBundle 注入レース**: `cert-manager.io/inject-ca-from`（`kustomize/taskflow/kustomization.yaml`）は cainjector の非同期パッチで、ArgoCD の sync-wave はこれを待たない（VWC の生成完了 ≠ caBundle が埋まったこと。ArgoCD に VWC の health check は無い）。sync 直後や Certificate の定期更新直後、caBundle が空のまま webhook が有効になり、apiserver が TLS を検証できず拒否されることがある。
+
+   **実測**: caBundle を空にしても cainjector が埋め直すまで 3 回とも **0.13 秒以下**（kubectl 1 往復ぶんの分解能で、初回のポーリングで既に 1540 文字に戻っていた）。0.29 秒後の TaskFlow 書き込みは通っている。**放置して踏める窓ではない**。
+
+2. **コントローラ不在**: rollout や ノード drain（Talos アップグレード）中も同様に拒否されうる。`replicas: 2` + PDB（`manifests/taskflow-system/pdb.yaml`）+ ノードをまたぐ `podAntiAffinity` + `maxSurge: 0` で緩和している。
+
+   **実測**: ワーカー 1 台を cordon → その上の replica を削除 → **同時に** `rollout restart` を掛けても、rollout は 50 秒で完了し（cordon したまま、3 台目のワーカーへ退避）、`availableReplicas` は 1 を下回らず、その間 1 秒間隔で投げた **56 回の TaskFlow 書き込みは全部成功**（最長 0.16 秒）。PDB も効いている: 2 replica の片方の eviction は `201 Success`、続けてもう片方は `429 TooManyRequests: Cannot evict pod as it would violate the pod's disruption budget` で拒否され、その間の 28 回の書き込みも全部成功した。
+
+   **測っていないもの**: これは cordon したノード上の taskflow replica を狙って evict したもので、`kubectl drain` によるノード全体の退避ではない。ノードの容量が逼迫したときに他の Pod ごと押し出される経路は別。
+
+**窓に入ったときに何が起きるか**（cainjector の注入を止めて 2 分間開けたまま保持した実測）:
+
+- TaskFlow の書き込みは **0.15 秒で即座に失敗する**（webhook の `timeoutSeconds: 10` を待たない）。
+  エラーは `failed calling webhook "vtaskflow-v1alpha1.kb.io": ... tls: failed to verify certificate: x509: certificate signed by unknown authority`
+- ArgoCD は**諦めずに再試行し続ける**。`claude-code` app は OutOfSync のまま operation phase が `Running`、message は `one or more objects failed to apply, reason: Internal error occurred: failed calling webhook ...`、2 分間で `retryCount` が 4 まで進んだ（`syncPolicy.retry` は書いていないが再試行はする）
+- **caBundle が戻れば 20 秒以内に人手なしで復旧する**。窓の間に付けたドリフト（TaskFlow の `spec.reworkBudget`）は selfHeal がそのまま巻き戻した
+
+sync-wave をこれ以上早める手段は無く（cainjector の反応速度に依存する構造）、根治はできない。**が、実測した限りでは窓は 1 秒未満で、開いたままにしても ArgoCD が吸収する**。
 
 **症状の見分け方**:
 
 | 観測 | 結果 |
 |---|---|
 | TaskFlow の apply | `failed calling webhook "..."` 系のエラーで失敗 |
-| ArgoCD の taskflow app | sync が進まず止まる |
+| **TaskFlow CR を持つ app**（`claude-code`） | sync が進まず止まる |
+| `taskflow` app | **止まらない**（CRD / コントローラ / webhook 定義しか持たず、TaskFlow の書き込みが無いため） |
+
+詰まるのは webhook そのものを配る `taskflow` app ではなく、**TaskFlow の実インスタンスを配る app** の方（`manifests/claude-code/taskflow-*.yaml`）。2026-09-07 の実測でも、窓を開けている間 OutOfSync のまま `retryCount` が進んだのは `claude-code` app だった。
 
 **切り分け**:
 
@@ -186,6 +205,8 @@ kubectl get validatingwebhookconfiguration taskflow-validating-webhook-configura
   -o jsonpath='{.webhooks[0].clientConfig.caBundle}'   # 空なら caBundle 未注入
 hubble observe --to-namespace taskflow-system --verdict DROPPED
 ```
+
+**エラーメッセージで窓を見分ける**: `x509: certificate signed by unknown authority` なら caBundle 側（1）、`context deadline exceeded`（10 秒待たされる）なら webhook に届いていない側 — コントローラ不在（2）か CNP の drop。
 
 ## CoreDNS: `.:53` の hosts に足した `*.infra.tgy.io` 名は template に先取りされる（クラスタ内解決に限る）
 

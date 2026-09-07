@@ -404,6 +404,23 @@ apiserver・Loki・Discord・GitHub・npm・crates・SeaweedFS・Prometheus・ho
 9443 は TaskFlow の構造検査 webhook（taskflow #17 / ADR-0006）。`fromEntities` に
 `kube-apiserver` / `host` / `remote-node` の 3 つを並べているのは、このクラスタの他の
 admission webhook（kyverno / cnpg / spin-operator、いずれも 9443）と同じ書き方に揃えているため。
-実際にどの identity で届くかはこのクラスタでは未実測。この webhook は `failurePolicy: Fail` なので、
-**ここを閉じると TaskFlow の作成・更新が全部拒否され、ArgoCD の sync が止まる**。絞るなら先に
-`hubble observe --to-namespace taskflow-system --verdict DROPPED` で実測してから。
+この webhook は `failurePolicy: Fail` なので、
+**ここを閉じると TaskFlow の作成・更新が全部拒否され、ArgoCD の sync が止まる**。
+
+**どの identity で届くかは 2026-09-07 に実測した**（taskflow #107）。admission リクエストは
+identity 6 = `reserved:remote-node` **だけ**で届き、`reserved:kube-apiserver` を持つ identity 7
+では一度も来ない（hostNetwork の apiserver が CP ノードの cilium_host に SNAT され、
+`kube-apiserver` ラベルが落ちるため）。外して確かめた結果、`remote-node` だけなら書き込みは
+全部通り、`kube-apiserver` だけにすると `POLICY_DENIED` で drop されて書き込みは
+`context deadline exceeded` で失敗する。**この行を支えているのは `remote-node`** で、
+`kube-apiserver` はその部分集合なので残しても境界は広がらない。
+
+`host` は Pod が CP ノードに乗る場合のための行だが、CP には `node-role.kubernetes.io/control-plane:NoSchedule`
+taint があり taskflow-controller に toleration が無いので、現状は効いていない。
+
+CNP を絞って測るときは、apiserver が張り済みの TCP 接続がそのまま通り続けることに注意する。
+絞った直後に通っても許可の証拠にならない。Pod を入れ替えて接続を張り直させてから測ること
+（2026-09-07 の実測でこれを踏み、`kube-apiserver` だけでも足りていると一度誤結論を出しかけた）。
+
+この webhook が拒否側に倒れたときの症状と切り分けは [known-issues.md](known-issues.md) の
+「TaskFlow 構造検査 webhook」節にある（caBundle 注入窓とコントローラ不在の 2 つ）。

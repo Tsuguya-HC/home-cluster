@@ -24,9 +24,12 @@ data:
     # 判定に要るものが 1 つでも取れなければ焼く。初回・Argo が古い run を GC した後・
     # apiserver 不通は全部そちらに倒れる。逆に倒すと「焼くべきものを焼かないまま緑」になる。
     #
-    # 見ないもの（どちらも手動操作のときだけ起きるので、そのときは version を明示して
-    # workflow_dispatch で回す）:
-    #   * 署名鍵のローテーション —— 前回 run の spec は同じままなので差が出ない
+    # 見ないもの（判定材料——版・imager 引数——が変わらないので、前回成功 run と一致して
+    # skip される）:
+    #   * 署名鍵のローテーション —— 前回 run の spec は同じままなので差が出ない。しかも
+    #     ローテーションは manifests/secrets/（app: secrets）の変更で、このワークフローを
+    #     叩く talos-build app とは別 app（reconcile が隔離）のため、自動では sync も
+    #     再判定も起きない
     #   * 同じ版のまま CI が installer-base / imager を焼き直した場合
     set -euo pipefail
 

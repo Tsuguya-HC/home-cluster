@@ -79,8 +79,14 @@ talos-build アプリを同期したときに `talos-extension-bump` Sensor が�
 
 比較材料は、run ごとに Argo が `status.storedTemplates` へ凍結する imager の引数（拡張の digest
 とカーネル引数）と、`resolve-version` が出した版。**署名鍵のローテーションと、同じ版のまま
-installer-base / imager を焼き直した場合は見ていない。** どちらも手動操作のときだけ起きるので、
-そのときは version を明示して手動で回すこと。
+installer-base / imager を焼き直した場合は見ていない。** どちらも判定材料（版・imager 引数）が
+変わらないので、前回成功 run と一致して skip される。署名鍵のローテーションは `manifests/secrets/`
+配下の変更で、`talos-build` app とは別 app（reconcile が隔離されている）のため、**ローテーション
+だけでは `talos-build` の sync も plan-build の再判定も自動では起きない。**
+
+比較できる前回成功 run が見つからないときは焼く側へ倒れる。成功した Workflow CR は
+`spec.ttlStrategy.secondsAfterSuccess: 2592000`（30日、クラスタ既定の 24時間を上書き）まで残す
+——実際の変更間隔は 1〜6日・2日が最頻で、24時間だとほとんど比較できずに終わるため。
 
 ### カーネル引数
 

@@ -33,7 +33,7 @@ spec:
         labels:
           kanidm-backup: "true"
       container:
-        image: registry.infra.tgy.io/tools/talos-tools:latest@sha256:cfb21f3ac23f3b0a9efd36d58b7e776b1c61a2b295162c787c168457af597c0a
+        image: registry.infra.tgy.io/tools/talos-tools:latest@sha256:d0a393a948cad4d983172534ed19424ab9bfa5edcce4e8a90fec951a29bb2da8
         resources:
           requests:
             cpu: 10m

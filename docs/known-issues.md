@@ -186,3 +186,11 @@ kubectl get validatingwebhookconfiguration taskflow-validating-webhook-configura
   -o jsonpath='{.webhooks[0].clientConfig.caBundle}'   # 空なら caBundle 未注入
 hubble observe --to-namespace taskflow-system --verdict DROPPED
 ```
+
+## CoreDNS: `.:53` の hosts に足した `*.infra.tgy.io` 名は template に先取りされる（クラスタ内解決に限る）
+
+**クラスタ内 CoreDNS からの解決に限る話。** `.:53` サーバブロックは `template IN A infra.tgy.io`（plugin.cfg の順で `hosts` より先）が `*.infra.tgy.io` にマッチする全クエリに answer を返し `fallthrough` する。`fallthrough` は **regex 不一致時のみ** hosts に流すので、`.:53` の hosts に個別 IP を足しても template が先に答えて握りつぶす。既存の `192.168.10.191 argocd.infra.tgy.io` の hosts 行もこの理由でクラスタ内 CoreDNS には効いていない（2026-09-07 rendering レビューで実測）。
+
+LAN / 外部クライアントはクラスタ内 CoreDNS を引かず Cloudflare の公開レコード（external-dns 管理）を引くので、`argocd.infra.tgy.io` はワイルドカード（.190）ではなく individual レコード（.191）に正しく解決される。クラスタ内 Pod がこれらの `*.infra.tgy.io` 名を引く用途は現状無い（各サービスは `*.svc.cluster.local` を使う）。
+
+infra.tgy.io 配下で個別 IP を返すのは external-dns の個別レコード（HTTPRoute / TLSRoute の hostname から生成）の役目であり、CoreDNS の hosts に足しても LAN / 外部クライアントには効かない。CoreDNS 側で専用サーバブロック（`example.infra.tgy.io:53 { hosts { ... } }`）を切れば template を経由せず直接応答させる手段としては可能だが、クラスタ内解決にしか効かないため通常はこちらを使う理由がない。

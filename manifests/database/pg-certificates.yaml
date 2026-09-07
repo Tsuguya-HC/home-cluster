@@ -21,6 +21,7 @@ spec:
     - shared-pg-ro.database
     - shared-pg-ro.database.svc
     - shared-pg-ro.database.svc.cluster.local
+    - pg.infra.tgy.io
   privateKey:
     algorithm: ECDSA
     size: 256

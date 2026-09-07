@@ -256,7 +256,7 @@ apiserver・Loki・Discord・GitHub・npm・crates・SeaweedFS・Prometheus・ho
 
 | Component | Ingress | Egress |
 |---|---|---|
-| **shared-pg** | grafana (monitoring), argo-workflows-controller (argo), argo-workflows-server (argo), nextcloud (nextcloud), harbor-core (harbor), harbor-exporter (harbor), harbor-jobservice (harbor), seaweedfs-filer (seaweedfs), horenso (horenso), trading (collector), trading (reporter) → 5432; self → 5432/8000 (replication); cloudnative-pg (cnpg-system), host → 8000 (probes) | kube-apiserver, self:5432/8000, *.r2.cloudflarestorage.com:443 (backup) |
+| **shared-pg** | grafana (monitoring), argo-workflows-controller (argo), argo-workflows-server (argo), nextcloud (nextcloud), harbor-core (harbor), harbor-exporter (harbor), harbor-jobservice (harbor), seaweedfs-filer (seaweedfs), horenso (horenso), trading (collector), trading (reporter) → 5432; ingress (pg-gateway: pg.infra.tgy.io TLS passthrough, 192.168.10.193:443 → shared-pg-rw:5432, direct-TLS clients only。**注意**: `pg_hba` の既定は `host all all all scram-sha-256` で、Envoy 中継のためクライアントの送信元 IP が見えず経路を区別できない。この ingress ルールは shared-pg の全ロール（grafana / argo / nextcloud / seaweedfs / horenso / trading / app）に到達可能にする。段階 2（クライアント証明書）までの暫定であり、反映後に `pg_stat_activity.client_addr` で Envoy 側の送信元アドレスを実測し、`pg_hba` で経路を分けられるか確認すること) → 5432; self → 5432/8000 (replication); cloudnative-pg (cnpg-system), host → 8000 (probes) | kube-apiserver, self:5432/8000, *.r2.cloudflarestorage.com:443 (backup) |
 
 ## cert-manager (4 policies)
 

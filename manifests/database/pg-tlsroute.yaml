@@ -1,0 +1,24 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: TLSRoute
+metadata:
+  name: shared-pg
+  namespace: database
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: pg-gateway
+      namespace: database
+      sectionName: passthrough
+  hostnames:
+    - pg.infra.tgy.io
+  # SNI で振り分けるので、クライアントは最初のバイトから TLS で話す必要がある
+  # （libpq 17+ の sslnegotiation=direct、サーバは PostgreSQL 17+）。通常の PG ハンドシェイクは
+  # 平文の SSLRequest から始まり SNI が見えないため、この経路では繋がらない。
+  rules:
+    - backendRefs:
+        - group: ""
+          kind: Service
+          name: shared-pg-rw
+          port: 5432
+          weight: 1

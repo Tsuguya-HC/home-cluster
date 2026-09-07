@@ -1,0 +1,25 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: pg-gateway
+  namespace: database
+spec:
+  gatewayClassName: cilium
+  # external-dns が TLSRoute の hostname からこの IP の A レコードを公開 DNS に作る
+  # （argocd.infra.tgy.io と同じ）。LB-IPAM の割り当てに任せず指名して、レコードが動かないようにする。
+  addresses:
+    - type: IPAddress
+      value: 192.168.10.193
+  listeners:
+    - name: passthrough
+      hostname: pg.infra.tgy.io
+      port: 443
+      protocol: TLS
+      tls:
+        mode: Passthrough
+      allowedRoutes:
+        kinds:
+          - group: gateway.networking.k8s.io
+            kind: TLSRoute
+        namespaces:
+          from: Same

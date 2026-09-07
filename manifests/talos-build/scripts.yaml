@@ -4,6 +4,89 @@ metadata:
   name: talos-build-scripts
   namespace: talos-build
 data:
+  plan-build.sh: |
+    #!/bin/sh
+    # 前回成功した run と入力が同じなら焼かない。
+    #
+    # このワークフローは ArgoCD が talos-build アプリを同期するたびに走る。同期は
+    # manifests/talos-build/ が変われば起きるので、argo-tools の digest bump のように
+    # イメージの中身と何の関係も無い変更でも、16 分×2 のビルドが丸ごと走り直して
+    # installer:<version> が同じタグに上書きされていた。上書きするとイメージの created が
+    # 動き、talconfig.yaml の talosVersion を追う Renovate は minimumReleaseAge をそこから
+    # 測るので、無関係な変更が 3 日より短い間隔で入る限り Talos の更新 PR が出てこない。
+    #
+    # 判定材料は「前回成功した run 自身」から取る。Argo は run ごとに参照先 WorkflowTemplate
+    # の全テンプレートを status.storedTemplates に凍結して持っており（実測: 2 テンプレートしか
+    # 実行せず Error で終わった run にも未実行分が入っている）、そこに imager へ渡す引数
+    # ——拡張の digest とカーネル引数——がそのまま残っている。だからレジストリに目印を足す
+    # 必要も、指紋を持ち回る必要もない。
+    #
+    # 判定に要るものが 1 つでも取れなければ焼く。初回・Argo が古い run を GC した後・
+    # apiserver 不通は全部そちらに倒れる。逆に倒すと「焼くべきものを焼かないまま緑」になる。
+    #
+    # 見ないもの（判定材料——版・imager 引数——が変わらないので、前回成功 run と一致して
+    # skip される）:
+    #   * 署名鍵のローテーション —— 前回 run の spec は同じままなので差が出ない。しかも
+    #     ローテーションは manifests/secrets/（app: secrets）の変更で、このワークフローを
+    #     叩く talos-build app とは別 app（reconcile が隔離）のため、自動では sync も
+    #     再判定も起きない
+    #   * 同じ版のまま CI が installer-base / imager を焼き直した場合
+    set -euo pipefail
+
+    build() {
+      echo "=> build: $1" >&2
+      printf 'true' > /tmp/build.txt
+      exit 0
+    }
+
+    [ -n "${VERSION:-}" ] || build "VERSION が空"
+    [ -n "${WORKFLOW_NAME:-}" ] || build "WORKFLOW_NAME が空"
+
+    # imager を使う initContainer だけを名前順に取る。同じファイルに載っている
+    # argo-tools や alpine の digest は入らない——そこが「無関係な変更で焼き直さない」の要。
+    SEL='[.status.storedTemplates | to_entries[] | .value | .initContainers[]?
+          | select(.image | test("ghcr\\.io/tsuguya/imager")) | {name, image, args}]
+         | sort_by(.name)'
+
+    ALL=$(kubectl --request-timeout=10s -n talos-build get workflow -o json) \
+      || build "Workflow を一覧できなかった"
+
+    # 前回成功した run。version はその run の resolve-version が出力した値。
+    LAST=$(printf '%s' "$ALL" | jq -c "
+      [ .items[]
+        | select(.status.phase == \"Succeeded\")
+        | select(.metadata.labels[\"workflows.argoproj.io/workflow-template\"] == \"talos-secureboot-build\")
+        | select(.metadata.name != \"${WORKFLOW_NAME}\")
+      ]
+      | sort_by(.status.finishedAt) | last
+      | if . == null then null else
+          { version: ([ .status.nodes[]?
+                        | select(.templateName == \"resolve-version\")
+                        | .outputs.parameters[]? | select(.name == \"version\") | .value ] | first)
+          , imager: ($SEL) }
+        end") || build "前回の run を読めなかった"
+
+    case "$LAST" in ''|null) build "比較できる成功 run が無い" ;; esac
+    printf '%s' "$LAST" | jq -e '.version != null and (.imager | length) > 0' >/dev/null \
+      || build "前回の run から版か imager 入力を取り出せなかった"
+
+    # 今回の run。焼くのはこの凍結 spec なので、比較もこれで行う。
+    NOW=$(printf '%s' "$ALL" | jq -c "
+      [ .items[] | select(.metadata.name == \"${WORKFLOW_NAME}\") ] | first
+      | if . == null then null else { version: \"${VERSION}\", imager: ($SEL) } end") \
+      || build "今回の run を読めなかった"
+
+    case "$NOW" in ''|null) build "今回の run を読めなかった" ;; esac
+    printf '%s' "$NOW" | jq -e '(.imager | length) > 0' >/dev/null \
+      || build "今回の run から imager 入力を取り出せなかった"
+
+    if [ "$LAST" = "$NOW" ]; then
+      echo "=> skip: 前回成功した run と版・imager 入力が同じ" >&2
+      printf 'false' > /tmp/build.txt
+      exit 0
+    fi
+    build "版か imager 入力が前回と違う"
+
   push-installer.sh: |
     #!/bin/sh
     set -euo pipefail

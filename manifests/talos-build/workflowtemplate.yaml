@@ -29,6 +29,13 @@ metadata:
 spec:
   # ビルドテンプレートは最大3回まで再試行するので、その最悪ケースを収める
   activeDeadlineSeconds: 7200
+  # plan-build が見ている前回成功 run は Succeeded の Workflow CR そのものなので、それが GC
+  # されると比較できずに焼く側へ倒れる（fail-safe だが機能が空振りする）。実際の変更間隔は
+  # 1〜6日・2日が最頻なので、クラスタ既定の secondsAfterSuccess: 86400（24h）だと大半が
+  # 比較不能になる。守りたい帯（3日より短い間隔での焼き直し）を十分に覆う 30日に伸ばす。
+  # secondsAfterFailure はクラスタ既定のまま——失敗は見えるうちに消えてよい。
+  ttlStrategy:
+    secondsAfterSuccess: 2592000
   synchronization:
     mutexes:
       - name: talos-secureboot-build
@@ -78,14 +85,27 @@ spec:
               parameters:
                 - name: version
                   value: "{{workflow.parameters.version}}"
+        - - name: plan-build
+            template: plan-build
+            arguments:
+              parameters:
+                - name: version
+                  value: "{{steps.resolve-version.outputs.parameters.version}}"
+        # 前回成功した run と入力が同じなら焼かない。`!= 'false'` にしてあるのは、
+        # 出力が空や想定外の値になったときも焼く側へ倒すため（`== 'true'` だと
+        # 空文字が「skip」と評価されて、何も焼かずに緑で終わる）。
+        # finalize-release はゲートしない。`gh release edit` は冪等で、
+        # 前回そこだけ落ちていた回をここで拾い直せる。
         - - name: build-and-push-installer
             template: build-and-push-installer
+            when: "'{{steps.plan-build.outputs.parameters.build}}' != 'false'"
             arguments:
               parameters:
                 - name: version
                   value: "{{steps.resolve-version.outputs.parameters.version}}"
           - name: build-and-push-iso
             template: build-and-push-iso
+            when: "'{{steps.plan-build.outputs.parameters.build}}' != 'false'"
             arguments:
               parameters:
                 - name: version
@@ -151,6 +171,67 @@ spec:
             memory: 32Mi
           limits:
             memory: 64Mi
+
+    - name: plan-build
+      # kubectl は 1 回（--request-timeout=10s）呼ぶだけで、結果を jq で 2 回（前回 run・
+      # 今回 run の抽出）使い回している。ここでハングすると spec.synchronization.mutexes
+      # を握ったまま後続の run を全部詰まらせるので、workflow 全体の 7200 秒ではなく
+      # 短い上限を自前で持つ。
+      #
+      # apiserver への依存はこのステップで新設したもの。apiserver に到達できないと
+      # build 側へ倒れて焼き直すだけで壊れはしないが、retry を使い切って Failed になると
+      # build-and-push-* だけでなく finalize-release まで実行されずワークフロー全体が
+      # 止まる（`gh release edit` が冪等なので再トリガーで復旧はする）。
+      activeDeadlineSeconds: 60
+      retryStrategy:
+        limit: 3
+        retryPolicy: Always
+        backoff:
+          duration: 10s
+          factor: 2
+      inputs:
+        parameters:
+          - name: version
+      outputs:
+        parameters:
+          - name: build
+            valueFrom:
+              path: /tmp/build.txt
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      container:
+        image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:0b658d03cee98b3118622d47d07950b5dc5dd8ef73689bab68ff28c00299f296
+        command: [sh, /scripts/plan-build.sh]
+        env:
+          - name: VERSION
+            value: "{{inputs.parameters.version}}"
+          - name: WORKFLOW_NAME
+            value: "{{workflow.name}}"
+          # readOnlyRootFilesystem なので kubectl の既定のキャッシュ先が書けない。
+          - name: HOME
+            value: /tmp
+          - name: KUBECACHEDIR
+            value: /tmp/kubecache
+        securityContext:
+          runAsUser: 65532
+          runAsNonRoot: true
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: [ALL]
+        volumeMounts:
+          - name: scripts
+            mountPath: /scripts
+            readOnly: true
+          - name: tmp
+            mountPath: /tmp
+        resources:
+          requests:
+            cpu: 10m
+            memory: 64Mi
+          limits:
+            memory: 128Mi
 
     - name: build-and-push-installer
       # ghcr.io からの extension pull が HTTP/2 PROTOCOL_ERROR で落ちることがある。

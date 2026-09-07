@@ -9,10 +9,10 @@
 ```
 GHA (talos-custom-build)              Argo Workflows (talos-build namespace)
 ┌────────────────────────┐            ┌──────────────────────────────────────┐
-│ kernel (UFS config)    │            │ build-and-push-installer (Pod 1)    │
-│ installer-base         │            │  imager (initContainer) → crane push│
-│ imager                 │──webhook──→│ build-and-push-iso (Pod 2, 並列)    │
-│ Pre-release 作成       │            │  imager×2 (initContainer) → gh upload│
+│ kernel (UFS config)    │            │ plan-build (前回成功 run と比較)     │
+│ installer-base         │            │  入力が同じなら次の 2 つを skip     │
+│ imager                 │──webhook──→│ build-and-push-installer (Pod 1)    │
+│ Pre-release 作成       │            │ build-and-push-iso (Pod 2, 並列)    │
 └────────────────────────┘            │ finalize-release (pre→release)      │
                                       └──────────────────────────────────────┘
 ```
@@ -54,7 +54,8 @@ ExternalSecret: `manifests/secrets/talos-build-secureboot-signing-keys.yaml`
 | ファイル | 内容 |
 |----------|------|
 | `manifests/talos-build/workflowtemplate.yaml` | WorkflowTemplate + SA + RBAC |
-| `manifests/talos-build/scripts.yaml` | push-installer.sh, push-iso.sh, finalize-release.sh |
+| `manifests/talos-build/scripts.yaml` | plan-build.sh, push-installer.sh, push-iso.sh, finalize-release.sh |
+| `manifests/argo/talos-extension-bump-sensor.yaml` | Sensor (ArgoCD app-deployed → WF trigger、version 未指定) |
 | `manifests/argo/talos-build-sensor.yaml` | Sensor (release webhook → WF trigger) |
 | `manifests/secrets/talos-build-ghcr-pat.yaml` | GHCR push 用 PAT (ExternalSecret) |
 
@@ -63,9 +64,29 @@ ExternalSecret: `manifests/secrets/talos-build-secureboot-signing-keys.yaml`
 1. GHA が `talos-custom-build` で imager + installer-base をビルド → GHCR push
 2. GHA が pre-release 作成 → GitHub webhook
 3. Argo Events Sensor が `prerelease: true` のリリースをフィルタ
-4. Argo WF が imager コンテナで SecureBoot installer/ISO をビルド
-5. GHCR に installer push、GitHub Release に ISO + PXE assets upload
-6. Release を pre-release → release に更新
+4. `plan-build` が前回成功した run と比較し、**版と imager への入力が同じなら 5 を skip する**
+5. Argo WF が imager コンテナで SecureBoot installer/ISO をビルド → GHCR に installer push、
+   GitHub Release に ISO + PXE assets upload
+6. Release を pre-release → release に更新（skip した回も走る。`gh release edit` は冪等）
+
+トリガーは 2 経路ある。上が release webhook 経由（version 指定あり）で、もう 1 本は ArgoCD が
+talos-build アプリを同期したときに `talos-extension-bump` Sensor が起動する経路（version 未指定
+＝最新 release を解決）。後者は `manifests/talos-build/` が変われば発火するので、拡張の digest
+更新だけでなく argo-tools の digest bump のような無関係な変更でも走る。焼き直すと
+`installer:<version>` が同じタグに上書きされ、talconfig の talosVersion を追う Renovate の
+`minimumReleaseAge` がイメージの created から測るためリセットされる——`plan-build` はこれを
+止めるために居る。
+
+比較材料は、run ごとに Argo が `status.storedTemplates` へ凍結する imager の引数（拡張の digest
+とカーネル引数）と、`resolve-version` が出した版。**署名鍵のローテーションと、同じ版のまま
+installer-base / imager を焼き直した場合は見ていない。** どちらも判定材料（版・imager 引数）が
+変わらないので、前回成功 run と一致して skip される。署名鍵のローテーションは `manifests/secrets/`
+配下の変更で、`talos-build` app とは別 app（reconcile が隔離されている）のため、**ローテーション
+だけでは `talos-build` の sync も plan-build の再判定も自動では起きない。**
+
+比較できる前回成功 run が見つからないときは焼く側へ倒れる。成功した Workflow CR は
+`spec.ttlStrategy.secondsAfterSuccess: 2592000`（30日、クラスタ既定の 24時間を上書き）まで残す
+——実際の変更間隔は 1〜6日・2日が最頻で、24時間だとほとんど比較できずに終わるため。
 
 ### カーネル引数
 

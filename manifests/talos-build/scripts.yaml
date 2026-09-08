@@ -54,27 +54,43 @@ data:
           | select(.image | test("ghcr\\.io/tsuguya/imager")) | {name, image, args}]
          | sort_by(.name)'
 
-    ALL=$(kubectl --request-timeout=10s -n talos-build get workflow -o json) \
+    # `--request-timeout` は付けない。**このフラグは kubectl の in-cluster 設定の解決を
+    # 壊す** —— 付けると kubeconfig も SA トークンも env も揃っているのに localhost:8080 へ
+    # フォールバックして必ず失敗する（2026-09-07 に実 Argo Pod で A/B 確認。フラグ以外は
+    # 同一の呼び出しで、無ければ workflow を一覧でき、有れば connection refused）。
+    # このスクリプトはそれで毎回 build 側へ倒れ、仕掛けが本番で 2 回空振りした。
+    #
+    # クライアント側のタイムアウトはそもそも要らない。このテンプレートには
+    # activeDeadlineSeconds が付いていて、`maxDuration` を設定していないので 1 試行ごとに
+    # 効く。kubectl が何をしようと Pod が切られるので、mutex を握り続ける窓は retry 込みで
+    # 数分に収まる。**同じ懸念に二重に手当てして、片方が機構を殺していた。**
+    ALL=$(kubectl -n talos-build get workflow -o json) \
       || build "Workflow を一覧できなかった"
 
     # 前回成功した run。version はその run の resolve-version が出力した値。
+    #
+    # **「直近の成功 run」ではなく「材料が揃っている直近の成功 run」を選ぶ。** 同じ
+    # WorkflowTemplate を entrypoint 指定で部分実行すると（診断で実際にやった）、
+    # resolve-version を通らないので版を持たない Succeeded な run がラベル付きで残る。
+    # 単に最新を取ると、その 1 件が居るだけで比較が成立しなくなり、GC されるまで
+    # 焼き続ける。materials が揃っているものだけに絞ってから最新を取る。
     LAST=$(printf '%s' "$ALL" | jq -c "
       [ .items[]
         | select(.status.phase == \"Succeeded\")
         | select(.metadata.labels[\"workflows.argoproj.io/workflow-template\"] == \"talos-secureboot-build\")
         | select(.metadata.name != \"${WORKFLOW_NAME}\")
-      ]
-      | sort_by(.status.finishedAt) | last
-      | if . == null then null else
-          { version: ([ .status.nodes[]?
+        | { finishedAt: .status.finishedAt
+          , version: ([ .status.nodes[]?
                         | select(.templateName == \"resolve-version\")
                         | .outputs.parameters[]? | select(.name == \"version\") | .value ] | first)
           , imager: ($SEL) }
-        end") || build "前回の run を読めなかった"
+        | select(.version != null and (.imager | length) > 0)
+      ]
+      | sort_by(.finishedAt) | last
+      | if . == null then null else { version: .version, imager: .imager } end") \
+      || build "前回の run を読めなかった"
 
-    case "$LAST" in ''|null) build "比較できる成功 run が無い" ;; esac
-    printf '%s' "$LAST" | jq -e '.version != null and (.imager | length) > 0' >/dev/null \
-      || build "前回の run から版か imager 入力を取り出せなかった"
+    case "$LAST" in ''|null) build "材料の揃った成功 run が無い" ;; esac
 
     # 今回の run。焼くのはこの凍結 spec なので、比較もこれで行う。
     NOW=$(printf '%s' "$ALL" | jq -c "

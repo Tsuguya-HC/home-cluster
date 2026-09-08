@@ -173,10 +173,14 @@ spec:
             memory: 64Mi
 
     - name: plan-build
-      # kubectl は 1 回（--request-timeout=10s）呼ぶだけで、結果を jq で 2 回（前回 run・
-      # 今回 run の抽出）使い回している。ここでハングすると spec.synchronization.mutexes
-      # を握ったまま後続の run を全部詰まらせるので、workflow 全体の 7200 秒ではなく
-      # 短い上限を自前で持つ。
+      # kubectl は 1 回呼ぶだけで、結果を jq で 2 回（前回 run・今回 run の抽出）使い回して
+      # いる。ここでハングすると spec.synchronization.mutexes を握ったまま後続の run を
+      # 全部詰まらせるので、workflow 全体の 7200 秒ではなく短い上限を自前で持つ。
+      #
+      # **クライアント側のタイムアウトはここが代わりに担っている。** `maxDuration` を
+      # 設定していないのでこの deadline は 1 試行ごとに効き、kubectl が何をしようと Pod が
+      # 60 秒で切られる。kubectl に `--request-timeout` を足してはいけない —— あれは
+      # in-cluster 設定の解決を壊し、必ず localhost:8080 へ落ちる（scripts.yaml 側に実測）。
       #
       # apiserver への依存はこのステップで新設したもの。apiserver に到達できないと
       # build 側へ倒れて焼き直すだけで壊れはしないが、retry を使い切って Failed になると

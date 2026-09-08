@@ -229,3 +229,15 @@ echo | openssl s_client -connect 192.168.10.193:443 -servername pg.infra.tgy.io 
 ```
 
 通常の期限更新（renewBefore による再発行）で同じことが起きるかは未確認。起きるなら `pg.infra.tgy.io` の `verify-full` が期限切れの日に落ちるので、次回の更新日（`kubectl get certificate -n database shared-pg-server-tls`）に確認する。
+
+## Renovate webhook sensor: org 移管でフィルタが黙って false になっていた（解決済み 2026-09-08）
+
+`manifests/argo/renovate-webhook-sensor.yaml` の Lua フィルタは `repo.owner.login ~= sender.login` で認可判定していたが、2026-08-29 の org `Tsuguya-HC` 移管で `repo.owner.login` が `Tsuguya-HC`（Organization）に変わり、`sender.login`（`Tsuguya`, User）と常に不一致になった。移管前は両方 `Tsuguya` で一致していた。
+
+**症状**: Dependency Dashboard issue の "Check this box to trigger a request for Renovate to run again" にチェックを入れても Renovate が起動しない。チェックは issue の body 編集として保存されるため、押した側からは成功したように見える。cron `renovate-periodic`（4h 周期）はこの影響を受けず動き続けるため、「Renovate 自体が止まっている」ようにも見えない。**2026-08-29 の org 移管から 2026-09-08 に発覚するまで誰も気付かなかった。**
+
+**影響範囲**: このフィルタは YAML アンカー `&renovateFilter` で home-cluster / home-infra / home-cloudflare / home-trading の 4 リポの dependency に共有されており、全滅していた。push イベント（`event.body.ref` を見る分岐）はこのフィルタより前で return するため無事だった。
+
+**切り分け**: GitHub 側の webhook 配信自体は生きている（`gh api /repos/<owner>/<repo>/hooks/<id>/deliveries` が `status=200` を返す）。配線が生きていることと Sensor が発火することは別で、フィルタの判定は argo-events と同じ gopher-lua ランタイムでスクリプトを単体実行すれば決定論的に再現できる。
+
+**修正**: 認可を可変な login でなく不変の数値 id（`sender.id`）による比較に変更した。

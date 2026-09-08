@@ -54,7 +54,7 @@ spec:
       aqua-checksum: "true"
   arguments:
     parameters:
-      - name: repository # Tsuguya/<name>
+      - name: repository # Tsuguya-HC/<name>
       - name: branch # the pull request's head branch
   templates:
     - name: main

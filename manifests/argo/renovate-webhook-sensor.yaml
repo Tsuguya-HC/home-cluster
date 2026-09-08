@@ -38,21 +38,37 @@ spec:
           -- checkbox clicks arrive as a body edit; ignore renovate's own edits
           -- (bot unchecking the box) to avoid a self-trigger loop
           if event.body.action ~= "edited" then return false end
-          -- public repos: anyone can open an issue/PR and edit its own body,
-          -- so the edit must come from the repo owner and the issue/PR itself
-          -- must have been authored by the renovate app
+          -- public repos: anyone can open an issue/PR and edit its own body, so
+          -- the edit must come from a sender allowed to trigger a run and the
+          -- issue/PR itself must have been authored by the renovate app.
+          -- The repos are owned by the Tsuguya-HC org, so repo.owner no longer
+          -- names a person and cannot be compared against the sender.
+          -- Matched on the sender's immutable numeric id, not the login: a
+          -- login can be renamed and the old one reclaimed by someone else.
+          -- This filter is shared via the anchor below, so it also applies to
+          -- the private home-trading dependency -- stricter than necessary
+          -- there, but harmless.
+          -- To allow another sender, chain another `and sender.id ~= <id>`
+          -- (not `or`, which would always be true and lock everyone out).
+          -- Do not turn this into a numeric-keyed table: gopher-lua's
+          -- LTable.RawSet puts keys in [0, 2^26) into the array part and
+          -- pads it with nils up to that index, blowing past this pod's
+          -- 64Mi memory limit.
+          --   6055622  Tsuguya
           local sender = event.body.sender
-          local repo = event.body.repository
           if sender == nil or sender.type ~= "User" then return false end
-          if repo == nil or repo.owner == nil or repo.owner.login ~= sender.login then
-            return false
-          end
+          if sender.id ~= 6055622 then return false end
           local function checked(body)
             return body ~= nil and string.find(body, "%[[xX]%]") ~= nil
           end
+          -- Both first-party Renovate bot ids (Mend-hosted and self-hosted
+          -- App) are accepted so a Mend <-> self-host move cannot silently
+          -- disarm this filter again -- a login check already did once.
+          -- See tofu-cloudflare-plan for why the author is matched on
+          -- numeric user id rather than login.
           local function byRenovate(u)
             return u ~= nil and u.type == "Bot"
-              and u.login == "tsuguya-home-cluster[bot]"
+              and (u.id == 29139614 or u.id == 265309552)
           end
           if event.body.issue ~= nil then
             local issue = event.body.issue

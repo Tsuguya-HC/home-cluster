@@ -89,7 +89,7 @@ spec:
             limits:
               memory: 64Mi
       container:
-        image: ghcr.io/renovatebot/renovate:44.39.3@sha256:27f008cc48b952dff1fdceed42ef91f243f31e64596dc7f5a8754467961243ad
+        image: ghcr.io/renovatebot/renovate:44.65.5@sha256:4e10f76a79f1c597f427f83c788a9f5b14a6295784c4cb68307b89b0a954abce
         command: [sh, -c]
         args:
           - |

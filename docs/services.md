@@ -13,7 +13,6 @@ ArgoCD のみ TLS Passthrough（専用 argocd-gateway、ArgoCD 自身が TLS 終
 | Hubble UI | https://hubble.infra.tgy.io | oauth2-proxy-hubble:4180 (oauth2-proxy) → hubble-ui:8081 | Terminate (main-gateway) |
 | Argo Workflows | https://argo.infra.tgy.io | argo-workflows-server:2746 (argo) | Terminate (main-gateway) |
 | SeaweedFS UI | https://seaweedfs.infra.tgy.io | oauth2-proxy-seaweedfs:4180 (oauth2-proxy) → seaweedfs-filer:8888 | Terminate (main-gateway) |
-| SeaweedFS S3 (LAN 直結、手元の home-trading 用) | https://s3.infra.tgy.io | seaweedfs-s3:8333 (seaweedfs) | Terminate (main-gateway)。pg.infra.tgy.io と同じく公開 DNS にはプライベート IP が載るだけで Tunnel には入れない。認可は S3 identity + バケット権限（trading identity は Read/Write のみ、List 不可） |
 | Nextcloud | https://nc.tgy.io | nextcloud:80 (nextcloud) | Cloudflare Tunnel (cloudflared) |
 | Harbor | https://registry.infra.tgy.io | harbor-nginx:8080 (harbor) | Cloudflare Tunnel (cloudflared) |
 | RSS Reader | https://reader.tgy.io | oauth2-proxy-rss:4180 (oauth2-proxy) → rss-ui:80 / rss-server:80 (/api) | Terminate (main-gateway) + Cloudflare Tunnel (cloudflared) |
@@ -25,6 +24,7 @@ ArgoCD のみ TLS Passthrough（専用 argocd-gateway、ArgoCD 自身が TLS 終
 | PostgreSQL (RW) | shared-pg-rw.database.svc:5432 | CNPG 管理、2 インスタンス |
 | PostgreSQL (RO) | shared-pg-ro.database.svc:5432 | リードレプリカ |
 | PostgreSQL (LAN 直結、trading 台帳の手元作業用) | pg.infra.tgy.io:443 | Passthrough (pg-gateway) → shared-pg-rw:5432。external-dns が Cloudflare に A レコード（LAN のプライベート IP 192.168.10.193）を作る。argocd.infra.tgy.io と同じ扱いで、公開 DNS に載るがインターネットからは到達不能。(a) direct TLS 必須（libpq 17+ `sslnegotiation=direct`）、(b) `sslmode=verify-full` + pg-ca-issuer の CA を信頼する必要あり。到達できない場合のフォールバックは home-trading の `scripts/pg_tunnel.sh`（kubectl port-forward） |
+| SeaweedFS S3 (LAN 直結、手元の home-trading 用) | s3.infra.tgy.io:443 | Terminate (main-gateway) → seaweedfs-s3:8333。pg.infra.tgy.io と同じく公開 DNS にはプライベート IP が載るだけで Tunnel には入れない。認可は S3 identity + バケット権限（trading identity は Read/Write のみ、List 不可）。到達できない場合のフォールバックは `kubectl port-forward svc/seaweedfs-s3 18333:8333` |
 | Loki | loki-gateway.monitoring.svc:80 | ログ集約 |
 | Tempo (HTTP API) | tempo.monitoring.svc:3200 | 分散トレーシング（クエリ） |
 | Tempo (OTLP gRPC) | tempo.monitoring.svc:4317 | トレース取り込み |

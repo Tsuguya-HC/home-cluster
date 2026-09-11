@@ -93,7 +93,7 @@
      "type": "array"
     },
     "currentRun": {
-     "description": "RunRef identifies one execution of one phase. runID separates the second\nvisit to a phase from the first, so a rework does not read what the previous\nrun left behind. It does not separate two attempts at starting one run —\nan infrastructure retry comes back with the same number (ADR-0004), and\ninfraRetries is what tells those apart.\n\nA task's currentRun, when it has one, always names the phase the task is\non. A task that has stopped has no currentRun at all.",
+     "description": "RunRef identifies one execution of one phase. runID separates the second\nvisit to a phase from the first, so a rework does not read what the previous\nrun left behind. It does not separate two attempts at starting one run —\nan infrastructure retry comes back with the same number (ADR-0004), and\ninfraRetries is what tells those apart.\n\nA task's currentRun, when it has one, ordinarily names the phase the task\nis on. The one exception is the cleanup run a task that has reached its\nending may carry: there, currentRun.phase is the reserved name Finally\nwhile status.phase stays at the ending itself (ADR-0009), and\ntaskstate.InFinally is the predicate that tells that apart from a task\nmid-flight. A task that has stopped for good, with no cleanup run in\nflight or owed, has no currentRun at all.",
      "properties": {
       "deadline": {
        "format": "date-time",
@@ -109,7 +109,7 @@
        "type": "string"
       },
       "phase": {
-       "description": "Phase is a status name. It is a free string chosen by whoever writes the\nflow: this framework does not know what the work is, so it has no business\nnaming its stages. \"調査\" and \"Planning\" are equally valid.\n\nTwo names are reserved, because they are the framework's own answers rather\nthan anything in the author's domain — see ReservedPhases.",
+       "description": "Phase is a status name. It is a free string chosen by whoever writes the\nflow: this framework does not know what the work is, so it has no business\nnaming its stages. \"調査\" and \"Planning\" are equally valid.\n\nThree names are the framework's rather than the author's. Two of them are\nanswers it decides — see ReservedPhases — and the third is PhaseFinally,\nwhich is not an answer at all but the name a cleanup run is recorded under.",
        "type": "string"
       },
       "runID": {
@@ -146,7 +146,7 @@
         "type": "string"
        },
        "phase": {
-        "description": "Phase is a status name. It is a free string chosen by whoever writes the\nflow: this framework does not know what the work is, so it has no business\nnaming its stages. \"調査\" and \"Planning\" are equally valid.\n\nTwo names are reserved, because they are the framework's own answers rather\nthan anything in the author's domain — see ReservedPhases.",
+        "description": "Phase is a status name. It is a free string chosen by whoever writes the\nflow: this framework does not know what the work is, so it has no business\nnaming its stages. \"調査\" and \"Planning\" are equally valid.\n\nThree names are the framework's rather than the author's. Two of them are\nanswers it decides — see ReservedPhases — and the third is PhaseFinally,\nwhich is not an answer at all but the name a cleanup run is recorded under.",
         "type": "string"
        },
        "reason": {
@@ -170,7 +170,7 @@
      "type": "array"
     },
     "phase": {
-     "description": "Phase is a status name. It is a free string chosen by whoever writes the\nflow: this framework does not know what the work is, so it has no business\nnaming its stages. \"調査\" and \"Planning\" are equally valid.\n\nTwo names are reserved, because they are the framework's own answers rather\nthan anything in the author's domain — see ReservedPhases.",
+     "description": "Phase is a status name. It is a free string chosen by whoever writes the\nflow: this framework does not know what the work is, so it has no business\nnaming its stages. \"調査\" and \"Planning\" are equally valid.\n\nThree names are the framework's rather than the author's. Two of them are\nanswers it decides — see ReservedPhases — and the third is PhaseFinally,\nwhich is not an answer at all but the name a cleanup run is recorded under.",
      "type": "string"
     },
     "reworkBudget": {

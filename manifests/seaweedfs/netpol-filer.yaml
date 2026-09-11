@@ -60,6 +60,15 @@ spec:
         - ports:
             - port: "8333"
               protocol: TCP
+    # Gateway API の Envoy（s3.infra.tgy.io の HTTPRoute、manifests/infra/seaweedfs-s3-route.yaml）。
+    # L7 ルールは置かない: S3 の PUT はマルチパートで GB 級になり、Cilium の L7 proxy を
+    # もう 1 段挟む理由が無い。
+    - fromEntities:
+        - ingress
+      toPorts:
+        - ports:
+            - port: "8333"
+              protocol: TCP
     - fromEndpoints:
         - matchLabels:
             app.kubernetes.io/name: seaweedfs

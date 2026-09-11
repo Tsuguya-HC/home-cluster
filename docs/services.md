@@ -13,6 +13,7 @@ ArgoCD のみ TLS Passthrough（専用 argocd-gateway、ArgoCD 自身が TLS 終
 | Hubble UI | https://hubble.infra.tgy.io | oauth2-proxy-hubble:4180 (oauth2-proxy) → hubble-ui:8081 | Terminate (main-gateway) |
 | Argo Workflows | https://argo.infra.tgy.io | argo-workflows-server:2746 (argo) | Terminate (main-gateway) |
 | SeaweedFS UI | https://seaweedfs.infra.tgy.io | oauth2-proxy-seaweedfs:4180 (oauth2-proxy) → seaweedfs-filer:8888 | Terminate (main-gateway) |
+| SeaweedFS S3 (LAN 直結、手元の home-trading 用) | https://s3.infra.tgy.io | seaweedfs-s3:8333 (seaweedfs) | Terminate (main-gateway)。pg.infra.tgy.io と同じく公開 DNS にはプライベート IP が載るだけで Tunnel には入れない。認可は S3 identity + バケット権限（trading identity は Read/Write のみ、List 不可） |
 | Nextcloud | https://nc.tgy.io | nextcloud:80 (nextcloud) | Cloudflare Tunnel (cloudflared) |
 | Harbor | https://registry.infra.tgy.io | harbor-nginx:8080 (harbor) | Cloudflare Tunnel (cloudflared) |
 | RSS Reader | https://reader.tgy.io | oauth2-proxy-rss:4180 (oauth2-proxy) → rss-ui:80 / rss-server:80 (/api) | Terminate (main-gateway) + Cloudflare Tunnel (cloudflared) |

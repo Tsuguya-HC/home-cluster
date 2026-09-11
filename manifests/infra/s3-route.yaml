@@ -1,0 +1,31 @@
+# SeaweedFS S3 の LAN 直結経路（手元の home-trading から S3 を読み書きする用）。
+# pg.infra.tgy.io と同じ扱い: external-dns が Cloudflare に A レコード（main-gateway の
+# プライベート IP）を作るので公開 DNS には載るが、Cloudflare Tunnel には入れないので
+# インターネットからは到達しない。認可は S3 の identity（SigV4）とバケット権限が担う。
+# S3 は HTTP なので pg のような専用 Gateway / IP は要らず、既存 listener で TLS 終端する。
+# timeouts は書かない: Cilium は未指定だと MaxStreamDuration 0（無期限）にする。
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: seaweedfs-s3
+  namespace: seaweedfs
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: main-gateway
+      namespace: gateway
+      sectionName: https
+  hostnames:
+    - s3.infra.tgy.io
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: seaweedfs-s3
+          port: 8333
+          weight: 1

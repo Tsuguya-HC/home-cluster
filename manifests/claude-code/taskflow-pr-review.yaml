@@ -94,8 +94,15 @@ spec:
   # Job 生成時に注入する（taskflow #73）。ここで言うのはワークスペースの所在だけ。
   # マウント直下がそのまま語彙で、他には何も置けない（0555、taskflow ADR-0005）。clone や
   # diff のような作業ファイルは /tmp（emptyDir）に置く。
+  # 予約名 flow-workspace = コントローラ提供の per-task PVC（ADR-0002、TaskFlow 側の
+  # `workspace: {}`）。自前の emptyDir は Kata では使えない — Kata は emptyDir を VM 内の
+  # ローカル領域に作りホストと共有せず、subPath も未対応なので、prepare が敷いた
+  # work/<runID>/{ok,findings,escalate} と agent の subPath マウントが別物になり、判定を
+  # 書く先が消えて NoAnswer → Escalated になる（2026-09-12 実測 2 回: fsGroup 有り #869 と
+  # 無し #870 で同じ症状、つまり fsGroup は無関係。Kata の docs/Limitations.md、
+  # kata-containers #1728）。cnp-check / smoke-workspace と同じ形。
   workspace:
-    volume: workspace
+    volume: flow-workspace
     mountPath: /workspace
   jobTemplate:
     template:
@@ -106,21 +113,19 @@ spec:
         restartPolicy: Never
         runtimeClassName: kata
         serviceAccountName: agent-pr-reviewer
+        # TERM 後の sync（NFS 越し）に猶予を残す。taskflow-cnp-check.yaml と同じ。
+        terminationGracePeriodSeconds: 60
         # runAsUser は必須。コントローラはこれと違う uid で /workspace 直下を 0555 に閉じるので、
         # エージェントは宣言ディレクトリにだけ書ける。
         securityContext:
           runAsUser: 65533
-          # fsGroup は付けない。#869 で runAsGroup + fsGroup 65533 を付けたところ、Kata では
-          # agent の workspace（subPath: work/<runID>）が prepare の敷いた宣言ディレクトリと別の
-          # 空ディレクトリ（root:65533、setgid、mtime が agent 起動時刻）になり、判定を書く先が
-          # 消えて NoAnswer → Escalated になった（2026-09-12 実測、fsGroup 無しの同構造は動く）。
-          # App 鍵は下の Secret volume を 0444 にして init だけに読ませる。
+          # fsGroup は付けない。#869 で付けたときも上と同じ症状（workspace が空）が出たが、
+          # 原因は自前 emptyDir で fsGroup の有無は関係なかった（#870 で外しても同じ）。
+          # App 鍵は下の Secret volume を 0444 にして init だけに読ませるので、要らない。
           runAsNonRoot: true
           seccompProfile:
             type: RuntimeDefault
         volumes:
-          - name: workspace
-            emptyDir: {}
           - name: tmp
             emptyDir: {}
           # parts が敷く先。init が書き、agent は読むだけ。
@@ -185,7 +190,8 @@ spec:
                 # 取り込みは決定論の側でやる。エージェントに clone させると「どの ref を
                 # 読んだか」が run ごとに変わり、指摘の再現ができなくなる。
                 ESCALATE=/workspace/escalate
-                give_up() { printf '%s\n' "$1" > "$ESCALATE/report.md"; exit 0; }
+                # sync は Kata + NFS の workspace PVC に要る（taskflow-cnp-check.yaml の同じ箇所）。
+                give_up() { printf '%s\n' "$1" > "$ESCALATE/report.md"; sync; exit 0; }
 
                 REPO=Tsuguya-HC/taskflow
 
@@ -224,7 +230,6 @@ spec:
                 # PR 番号は上で数字だと確かめてある。手順は /parts の skill、常時効く前提は
                 # /parts/CLAUDE.md（parts が claude-md 断片を連結したもの）。--bare は使わない
                 # （OAuth を読まなくなる）。HOME=/tmp で ~/.claude は空、cwd に CLAUDE.md は無い。
-                rc=0
                 claude -p "/pr-review ${REPO} の PR #${PR}" \
                   --plugin-dir /parts \
                   --append-system-prompt-file /parts/CLAUDE.md \
@@ -233,11 +238,29 @@ spec:
                   --dangerously-skip-permissions \
                   --allowedTools "Bash,Read,Write,Grep,Glob" \
                   --model sonnet \
-                  --max-turns 80 || rc=$?
+                  --max-turns 80 < /dev/null &
+                pid=$!
+                # activeDeadlineSeconds の TERM は PID1 に飛ぶ。前面で claude を待っていると
+                # POSIX sh は前面コマンドの終了を待ってから trap を実行するため、猶予期間内に
+                # trap が発火しない。background + wait にして、TERM を受けたら子を落としてから
+                # flush する（taskflow-cnp-check.yaml と同じ）。
+                trap 'kill -TERM $pid 2>/dev/null
+                      i=0
+                      while kill -0 $pid 2>/dev/null && [ $i -lt 10 ]; do sleep 1; i=$((i+1)); done
+                      kill -KILL $pid 2>/dev/null
+                      sync
+                      exit 143' TERM INT
+                rc=0
+                wait $pid || rc=$?
                 echo "claude exited with $rc"
                 # 判定はディレクトリで出る。終了コードはログに残すだけで判定には使わない —
                 # 既に ok/ に書かれていた場合、ここで escalate/ にも書くと「答えが 2 つ」に
                 # なって判定不能になる。ここから先は何もしない（回収は publish サイドカー）。
+                #
+                # sync は Kata + NFS の workspace PVC に要る。書き戻しが残ったまま exit すると
+                # Kata のゲストエージェントが応答を失い、Pod 内の全コンテナが 255 になる
+                # （taskflow-cnp-check.yaml の実測）。書いた本人が flush する。
+                sync
             env:
               - name: HOME
                 value: /tmp
@@ -265,7 +288,7 @@ spec:
               capabilities:
                 drop: [ALL]
             volumeMounts:
-              - name: workspace
+              - name: flow-workspace
                 mountPath: /workspace
               - name: tmp
                 mountPath: /tmp
@@ -290,6 +313,10 @@ metadata:
 spec:
   profile: investigate
   start: レビュー
+  # 中身を書かない = CRD の struct default {RWX, 1Gi} が admission で実体化され、
+  # storageClassName も既定 SC（qnap-nfs）に落ちる。handler の予約名 flow-workspace が
+  # これを指す。Task が消えると PVC も一緒に消える（ADR-0002 / ADR-0003）。
+  workspace: {}
   bindings:
     レビュー:
       handler: pr-reviewer

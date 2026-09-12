@@ -105,7 +105,7 @@
        "type": "integer"
       },
       "jobName": {
-       "description": "JobName is derived deterministically from the task, phase, runID and\nthe count of infrastructure retries, so a controller restart re-creates\nthe same object instead of a second one.",
+       "description": "JobName is derived deterministically from the task, phase, runID and\nthe count of infrastructure retries, so a controller restart re-creates\nthe same object instead of a second one.\n\nEmpty for a run the framework does not start; verdictBox below is what\nsuch a run has instead, and exactly one of the two is set once an\nattempt is under way. Which one says how this run is being driven, and\nthe controller reads it from here rather than from the handler: an\nattempt already in flight is not re-decided by a definition edited\nunderneath it (ADR-0007).\n\n\"Once an attempt\" rather than \"once a run\" on purpose: an infrastructure\nretry (taskstate.RetryInfra) rebuilds this ref with neither field set,\nso the run it carries goes back to having both empty until the next\nreconcile reads the handler again — the same moment ensureJob would\nbuild a fresh Job for it anyway. The invariant is real, but it resets\nat every attempt boundary rather than holding across all of a run's.\n\nThe reset only ever happens to a run with a Job, though: retryInfra is\nreached from driveJobRun's own reading of a Job's pods, and a run with\na verdictBox instead never goes through it — nothing started, so\nnothing can have failed to start. A run being driven by state is fixed\nfor the run's whole life the moment its box is opened; the \"one\nattempt\" this invariant resets at is a distinction that only exists on\nthe Job side.",
        "type": "string"
       },
       "phase": {
@@ -115,6 +115,14 @@
       "runID": {
        "format": "int32",
        "type": "integer"
+      },
+      "verdictBox": {
+       "description": "VerdictBox names the ConfigMap this run's answer appears in, for a run\nthe framework does not start (ADR-0011). Empty for every run that has\na Job.\n\nIt is written down before the object is created, not after. That\nordering is what lets the controller tell its own box from one somebody\nput there first: on the reconcile that first opens a box this field is\nempty, so the create is unconditional and an AlreadyExists means the\nplace was taken before the run began. It is also how whoever is meant\nto answer finds where to write, without being told a naming rule.\n\nThat does not hold on the repair path, where this field is already set\nbut the box it names is not there and this run has never been dated\n(ensureVerdictBox): the create there cannot tell a squatter from its own\nearlier create having landed late, so it is not treated as fencing\nthere — an AlreadyExists is retried, and the next reconcile's Get is\nwhat actually decides whether the box is this run's.\n\nThis is not a pointer to where a run's output went (ADR-0008): the\nframework decided this name, created the object and reads it back. What\nit must not become is a second place to say where results live.",
+       "type": "string"
+      },
+      "verdictBoxUID": {
+       "description": "VerdictBoxUID is the apiserver's own UID for the object VerdictBox\nnames, stamped the moment this run's Create succeeds (ensureVerdictBox)\nand empty until then. The name alone is not enough to say a later Get\nfound the same object: a name can be deleted and recreated, and nothing\nabout the new object need be the same one except its name — least of\nall its ownerReferences, which are free-form metadata their author\nwrote and which IsControlledBy alone cannot tell forged from genuine.\nThis UID is different: the apiserver assigns it, once, to the object\nthis run's own Create actually made, and no later Create under the same\nname can produce it again. Once it is stamped, a Get returning an\nobject with a different UID is refused (ensureVerdictBox) whatever its\nownerReferences claim — IsControlledBy still runs, and is still what\ndecides the one window before this is stamped: the moment right after a\nCreate whose response this process never saw.",
+       "type": "string"
       }
      },
      "required": [
@@ -131,7 +139,6 @@
     },
     "history": {
      "items": {
-      "description": "HistoryEntry records a completed run. This is the audit trail, and it is\nthe whole of what the framework knows: what the run decided and why. Where\nthe run's output ended up is not here, because the controller never learns\nit — it does not touch the workspace or any store (ADR-0008).",
       "properties": {
        "directory": {
         "description": "Directory the handler wrote into, empty when the run produced no single\nanswer.",
@@ -150,13 +157,21 @@
         "type": "string"
        },
        "reason": {
-        "description": "Reason is the one line a human reads next to Outcome: which edge was\nfollowed, or why no answer counted, or what the handler said after\nnaming its directory. The transition never reads it.",
+        "description": "Reason is the one line a human reads next to Outcome: which edge was\nfollowed, or why no answer counted, or what the handler said after\nnaming its directory. The transition never reads it.\nKept in sync with HistoryReasonMaxLength above.",
         "maxLength": 2048,
         "type": "string"
        },
        "runID": {
         "format": "int32",
         "type": "integer"
+       },
+       "runner": {
+        "description": "Runner is how the run was driven. It is here, and not only on the\nhandler, because a run the framework did not start seals nothing: the\nnext run that has a pod lays its directory on the shelf instead\n(ADR-0011 決定7), and by then the handler may say something else or be\ngone. It is also the honest answer to what a human reads this line\nfor — whether anything ran at all.\n\nEmpty reads as Job — but not because Job was ever the only kind a run\ncould have had before this field existed: ADR-0011 決定2〜6 already let\na build drive and settle a State run before 決定7 added this field, so\na task that reached settle in that window has a history line that is\nempty for a run that never had a pod, and reading it as Job is wrong\nfor exactly that line. There is no fixing it after the fact — the\nhandler bound to that phase may have changed since, or be gone — so\nshelfHoles simply does not shelve that run's answer: its number is a\ngap 決定7 cannot close.",
+        "enum": [
+         "Job",
+         "State"
+        ],
+        "type": "string"
        }
       },
       "required": [

@@ -13,10 +13,10 @@
    "type": "object"
   },
   "spec": {
-   "description": "TaskHandlerSpec is the box that fills one phase.\n\nThere is no field here for a prompt, a model, an API key, a store or a\nnotification target, and that absence is the design: the controller's\nvocabulary is phases, Jobs and verdicts, and everything an LLM needs lives\nin the pod spec its author writes. The same shape therefore accepts a\nlinter, a test suite or a shell script — from the controller's side there is\nno difference between those and an agent.",
+   "description": "TaskHandlerSpec is the box that fills one phase.\n\nThere is no field here for a prompt, a model, an API key, a store or a\nnotification target, and that absence is the design: the controller's\nvocabulary is phases, Jobs and verdicts, and everything an LLM needs lives\nin the pod spec its author writes. The same shape therefore accepts a\nlinter, a test suite or a shell script — from the controller's side there is\nno difference between those and an agent.\n\nThe two CEL rules are what runner.type means for the rest of the spec, said\nwhere it is written rather than discovered when a run starts: a State run\nneeds a deadline it cannot get from anywhere else, and it has no pod, so the\nthree fields that only describe one are refused rather than accepted and\nnever read (ADR-0011 決定6).",
    "properties": {
     "jobTemplate": {
-     "description": "JobTemplate is handed to the runner as written. The controller does not\nadd labels, service accounts or images to it: what a pod must carry to\nbe selected by a network policy is a property of the cluster it runs in,\nnot something a framework may decide. What the framework provides is one\nplace to say it — a pod template as CronJob users know it, but with only\ntemplate and no job-level spec (no backoffLimit, no completions, no\nparallelism) — rather than the two locations with differing semantics\nthat a workflow engine's own template would ask for.\n\nRequired when runner.type is Job; ignored when it is External.",
+     "description": "JobTemplate is handed to the runner as written. The controller does not\nadd labels, service accounts or images to it: what a pod must carry to\nbe selected by a network policy is a property of the cluster it runs in,\nnot something a framework may decide. What the framework provides is one\nplace to say it — a pod template as CronJob users know it, but with only\ntemplate and no job-level spec (no backoffLimit, no completions, no\nparallelism) — rather than the two locations with differing semantics\nthat a workflow engine's own template would ask for.\n\nRequired when runner.type is Job, and refused when it is State: a run\nnothing starts has no pod for this to describe.",
      "properties": {
       "template": {
        "description": "PodTemplate is the pod a run consists of.",
@@ -7136,7 +7136,7 @@
      "additionalProperties": false
     },
     "maxInfraRetries": {
-     "description": "MaxInfraRetries bounds retries for failures that are not the handler's\njudgement — an image that would not pull, an evicted pod. A handler that\nran and reached no conclusion is not retried here; it is indeterminate,\nand indeterminate goes to a human.",
+     "description": "MaxInfraRetries bounds retries for failures that are not the handler's\njudgement — an image that would not pull, an evicted pod. A handler that\nran and reached no conclusion is not retried here; it is indeterminate,\nand indeterminate goes to a human.\n\nRefused for a State runner rather than ignored there: nothing is\nstarted, so there is no infrastructure to fail and nothing an\nallowance could ever be spent on. A field that is read by nothing but\naccepted anyway is the shape of every setting that turns out not to\nhave been in effect.",
      "format": "int32",
      "minimum": 0,
      "type": "integer"
@@ -7156,7 +7156,7 @@
        "description": "RunnerType selects how a phase is executed.\n\nA workflow engine is deliberately absent. Multi-step work fits in one pod\nwith shared volumes, so an engine-backed runner would buy only the reuse of\ndefinitions already written for it — not worth the dependency, and a single\npod structurally avoids the class of trap where a volume the steps are meant\nto share turns out to be scoped to one pod.",
        "enum": [
         "Job",
-        "External"
+        "State"
        ],
        "type": "string"
       }
@@ -7168,11 +7168,11 @@
      "additionalProperties": false
     },
     "timeout": {
-     "description": "Timeout is the single source of truth for how long a run may take. The\ncontroller writes it into the Job as well, so the kubelet enforces it\ntoo; setting activeDeadlineSeconds yourself is rejected.",
+     "description": "Timeout is the single source of truth for how long a run may take. The\ncontroller writes it into the Job as well, so the kubelet enforces it\ntoo; setting activeDeadlineSeconds yourself is rejected.\n\nA State runner must declare one (the CEL rule on this spec). Nothing\nis started, so there is no Job to carry the deadline and nothing else\nthat ends the wait: without a timeout, a run nobody ever answers is\nindistinguishable from one still being considered, and a task that\nnever stops reaches neither its TTL nor the metric that counts how\nflows end.",
      "type": "string"
     },
     "workspace": {
-     "description": "Workspace is where the controller's own containers find the run's\ndirectories. The template does not name those containers — they are\nadded when the Job is built, with the framework's image, and a\ntemplate that carries a container under one of their names is\nrefused rather than merged.\n\nRequired when runner.type is Job; ignored when it is External.",
+     "description": "Workspace is where the controller's own containers find the run's\ndirectories. The template does not name those containers — they are\nadded when the Job is built, with the framework's image, and a\ntemplate that carries a container under one of their names is\nrefused rather than merged.\n\nRequired when runner.type is Job, and refused when it is State: there\nare no containers of the controller's to fit into a run that starts\nnone.",
      "properties": {
       "mountPath": {
        "description": "MountPath is where the injected containers mount that volume. The\nhandler's own containers are free to mount the same volume at any\npath — it is the same underlying volume either way — as long as at\nleast one of them mounts it writably. Every such mount that names no\nsubPath of its own shows this run's directory at its root: the\ndeclared directories, directly under the mount point, and nothing\nelse. Their names are what the contract shares, not the path they are\nreached through.",

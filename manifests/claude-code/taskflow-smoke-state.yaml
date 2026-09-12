@@ -1,0 +1,158 @@
+# framework が起こさない run（runner: State、taskflow ADR-0011）の配管を通すスモーク flow。
+# Pod も LLM も要らないフェーズが 1 つと、その棚を読む Job フェーズが 1 つ。
+#
+# 確かめていること:
+#   - State のフェーズで **Job が作られない**。代わりにコントローラが答えの置き場（ConfigMap）を
+#     1 つ作り、`status.currentRun.verdictBox` にその名前と `deadline` が載る
+#   - 置き場が空で作られ、注釈に語彙（`flow.tgy.io/choices`）とフェーズ名が乗る。
+#     ラベルは framework 産の 3 つ（managed-by / task-uid / run-id）
+#   - `data.verdict` に宣言ディレクトリ名を書くと遷移する。`data.reason` は history の reason に出る
+#   - **Pod を持たなかった run の棚が、次の run の prepare に空で敷かれる**（ADR-0011 決定7）。
+#     `results/1/ok/` が存在し、中身が空で、run ディレクトリは封印済み（*555）で、
+#     `.prepared-by` が無い（用意した Pod が無いのだから無いのが正しい）
+#   - history に `runner: State` / `runner: Job` が記録される
+#
+# 投げ方（cron は付けない。手動のスモーク）:
+#   kubectl -n claude-code create -f - <<EOF
+#   apiVersion: flow.tgy.io/v1alpha1
+#   kind: Task
+#   metadata: {generateName: smoke-state-, namespace: claude-code}
+#   spec: {flow: smoke-state}
+#   EOF
+#
+# 答え方（誰が書いたかは framework から見えない。書ける権限＝素の RBAC が決める）:
+#   box=$(kubectl -n claude-code get task <name> -o jsonpath='{.status.currentRun.verdictBox}')
+#   kubectl -n claude-code patch configmap "$box" --type merge -p '{"data":{"verdict":"ok","reason":"手で承認"}}'
+#
+# 期待: Task が 完了 (Success)。history は 2 行で、1 行目が `承認/1/ok/Declared` かつ runner: State、
+# 2 行目が `確認/2/ok/Declared` かつ runner: Job。
+---
+# 何も起動しないフェーズ。jobTemplate も workspace も **書けない**（CEL が拒否する） —
+# 起動するものが無いフェーズに Pod の話を書かせない。timeout だけは必須で、
+# 期限の無い待ちは沈黙と区別が付かないから（ADR-0011 決定6）。
+apiVersion: flow.tgy.io/v1alpha1
+kind: TaskHandler
+metadata:
+  name: smoke-state-gate
+  namespace: claude-code
+spec:
+  phase: 承認
+  runner:
+    type: State
+  # スモークなので人が答えるのを待てる長さ。超えれば NoAnswer → Escalated。
+  timeout: 30m
+---
+# 直前の State run の棚を読む。手元の run（work/<runID>）とは別に、results/ を読み取り専用で見る。
+apiVersion: flow.tgy.io/v1alpha1
+kind: TaskHandler
+metadata:
+  name: smoke-state-checker
+  namespace: claude-code
+spec:
+  phase: 確認
+  runner:
+    type: Job
+  timeout: 3m
+  maxInfraRetries: 1
+  workspace:
+    volume: flow-workspace
+    mountPath: /workspace
+  jobTemplate:
+    template:
+      metadata:
+        labels:
+          # この名前の CNP は無い = 全遮断（policyEnforcementMode: always）。通信は要らない。
+          taskflow-smoke: "true"
+      spec:
+        restartPolicy: Never
+        # 本番の handler と同じランタイム。runc で通っても Kata で通るとは限らない。
+        runtimeClassName: kata
+        # taskflow-smoke.yaml が定義する ServiceAccount を再利用（権限ゼロ）。
+        serviceAccountName: taskflow-smoke
+        automountServiceAccountToken: false
+        securityContext:
+          runAsUser: 65533
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        containers:
+          - name: handler
+            image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:0b658d03cee98b3118622d47d07950b5dc5dd8ef73689bab68ff28c00299f296
+            command: [sh, -c]
+            args:
+              - |
+                set -eu
+                echo "FLOW_DIRECTORIES=$FLOW_DIRECTORIES phase=$FLOW_PHASE"
+                echo "shelf: $(ls /shelf | tr '\n' ' ')"
+                # run 1 は Pod を持たなかった run。その棚を敷いたのは、この run の prepare。
+                test -d /shelf/1 || { echo "run 1 left a hole in the shelf"; exit 1; }
+                # 答えた語だけが並ぶ。中身は空 — Pod が無いのだから書いたものが無い。
+                test -d /shelf/1/ok || { echo "the word run 1 answered is not on the shelf"; exit 1; }
+                if [ -n "$(ls -A /shelf/1/ok)" ]; then
+                  echo "ok/ is not empty: $(ls -A /shelf/1/ok)"
+                  exit 1
+                fi
+                # 封印済みの形は Pod を持った run と同じ（末尾 3 桁だけ見る理由は
+                # taskflow-smoke-workspace.yaml の同じ検査を参照）。
+                mode=$(stat -c %a /shelf/1)
+                case "$mode" in
+                  *555) ;;
+                  *) echo "shelved run 1 is not sealed: mode=$mode (want *555)"; exit 1 ;;
+                esac
+                # 用意した Pod が無いので、Pod の印も無い。
+                if [ -e /shelf/1/.prepared-by ]; then
+                  echo "a run nothing prepared carries a pod's mark"
+                  exit 1
+                fi
+                echo "run 1 is on the shelf, empty and sealed"
+                echo "$FLOW_TASK_UID" > /workspace/ok/report.md
+                # Kata + NFS では書き戻しを残したまま exit するとゲストが落ちる
+                # （taskflow-smoke-workspace.yaml の冒頭を参照）。
+                sync
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities:
+                drop: [ALL]
+            volumeMounts:
+              # 自分の run（subPath 無し → work/<runID> が焼かれる）
+              - name: flow-workspace
+                mountPath: /workspace
+              # 棚（subPath を明示したので pin されない）
+              - name: flow-workspace
+                mountPath: /shelf
+                subPath: results
+                readOnly: true
+            resources:
+              requests:
+                cpu: 10m
+                memory: 16Mi
+              limits:
+                # Kata では memory limit が VM のサイズ。16Mi 級だとゲストが起動しない
+                memory: 512Mi
+---
+apiVersion: flow.tgy.io/v1alpha1
+kind: TaskFlow
+metadata:
+  name: smoke-state
+  namespace: claude-code
+spec:
+  profile: investigate
+  # 棚がある = flow workspace がある、なので既定のまま宣言する（{RWX, 1Gi}, default SC）。
+  workspace: {}
+  start: 承認
+  bindings:
+    承認:
+      handler: smoke-state-gate
+      next:
+        確認: ok
+        # 語彙を 2 つにしておく: 置き場の注釈 choices が宣言から生成されることが
+        # 1 つだけだと確かめられない。こちらを書けば人手に渡って止まる。
+        Escalated: hold
+    確認:
+      handler: smoke-state-checker
+      next:
+        完了: ok
+  terminals:
+    完了: Success
+  reworkBudget: 0

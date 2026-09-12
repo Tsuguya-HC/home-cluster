@@ -2,7 +2,12 @@
 #
 # **handler 固有のプロンプトはここに置かない。** そのプロンプトを使う handler の pod spec が
 # projected volume で参照するパスを名指しするので、プロンプトを handler のファイルから離すと
-# 片方だけ直したときに黙ってズレる（→ pr-review-prompt は taskflow-pr-review.yaml に同居）。
+# 片方だけ直したときに黙ってズレる（→ cnp-check のプロンプトは taskflow-cnp-check.yaml に同居）。
+#
+# **ConfigMap でプロンプトを持つのは移行途中の形。** pr-review は skill / CLAUDE.md 断片を
+# private の parts リポ（Tsuguya-HC/parts）から initContainer の `parts` で引く形に切り替えた。
+# 版は下の parts-ref ConfigMap の 1 キーで全 handler 共通。
+# cnp-check の移行と taskflow-verdict-protocol ConfigMap の撤去は home-cluster #866。
 #
 # **これは実際に起きた。** cnp-check のプロンプトだけは taskflow 以前の慣習で
 # manifests/claude-code/agent-prompts.yaml に離して置いてあり、ADR-0005 で out/ 層を撤去した
@@ -61,3 +66,16 @@ data:
     - **主張と、それを確かめた手順を対にして書く。** 確かめていないものは
       「未確認の推測」と明記する。確かめられるのに確かめていない主張は書かない
     - 対処案は、現状より権限や到達範囲を広げないものに限る
+---
+# parts リポの版。全 handler が同じ SHA を読む（役割ごとに版を割らない）。branch は Renovate が
+# 追う先、sha が handler に渡る値（`parts` はブランチ名を受け付けない）。bump は Renovate の
+# customManager（renovate.jsonc の git-refs）。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: parts-ref
+  namespace: claude-code
+data:
+  # renovate: datasource=git-refs depName=https://github.com/Tsuguya-HC/parts
+  branch: main
+  sha: f3923299268ebf96784fbc5074b3b411c5f5a693

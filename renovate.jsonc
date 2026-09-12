@@ -178,6 +178,22 @@
       "matchStrings": [
         "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s*\\n\\s*-\\s*[^\\s:]+:(?<currentValue>[^@\\s]+)(?:@(?<currentDigest>sha256:[a-f0-9]+))?"
       ]
+    },
+    {
+      "description": [
+        "The parts repository (skills / agents / CLAUDE.md fragments the taskflow",
+        "handlers fetch at run time) is pinned by commit in the parts-ref ConfigMap.",
+        "branch is what Renovate follows, sha is the digest it rewrites; the parts",
+        "command refuses anything but a full sha, so the pin can never drift to a",
+        "moving ref."
+      ],
+      "customType": "regex",
+      "managerFilePatterns": ["/manifests/claude-code/taskflow-common\\.yaml$/"],
+      "matchStrings": [
+        "# renovate: datasource=git-refs depName=(?<depName>\\S+)\\s*\\n\\s*branch: (?<currentValue>\\S+)\\s*\\n\\s*sha: (?<currentDigest>[0-9a-f]{40})"
+      ],
+      "datasourceTemplate": "git-refs",
+      "autoReplaceStringTemplate": "# renovate: datasource=git-refs depName={{{depName}}}\n  branch: {{{newValue}}}\n  sha: {{{newDigest}}}"
     }
   ],
 

@@ -110,14 +110,11 @@ spec:
         # エージェントは宣言ディレクトリにだけ書ける。
         securityContext:
           runAsUser: 65533
-          # Secret volume のファイルは root 所有で、fsGroup が無いと 0440 でも uid 65533 から
-          # 読めない（初回 run で実測。init の parts が鍵ファイルを読めず exit 1、Task は
-          # Escalated）。runAsGroup + fsGroup を読む側の uid に揃えるのは uid 65532 系の
-          # Argo WFT（implement-wft.yaml 等）の慣行で、Secret を volume で読む taskflow handler
-          # はこれが最初。コントローラが注入するサイドカーも pod の runAsGroup を継承するが、
-          # run ディレクトリの閉じ方は owner uid 基準で gid に依らない（taskflow sidecar.go）。
-          runAsGroup: 65533
-          fsGroup: 65533
+          # fsGroup は付けない。#869 で runAsGroup + fsGroup 65533 を付けたところ、Kata では
+          # agent の workspace（subPath: work/<runID>）が prepare の敷いた宣言ディレクトリと別の
+          # 空ディレクトリ（root:65533、setgid、mtime が agent 起動時刻）になり、判定を書く先が
+          # 消えて NoAnswer → Escalated になった（2026-09-12 実測、fsGroup 無しの同構造は動く）。
+          # App 鍵は下の Secret volume を 0444 にして init だけに読ませる。
           runAsNonRoot: true
           seccompProfile:
             type: RuntimeDefault
@@ -134,7 +131,9 @@ spec:
           - name: github-app
             secret:
               secretName: github-app-private-key
-              defaultMode: 0440
+              # Secret volume のファイルは root 所有。fsGroup を使えない（上）ので other-read で
+              # 読ませる。この volume をマウントするのは init の parts だけで、agent には無い。
+              defaultMode: 0444
               items:
                 - key: private-key
                   path: private-key

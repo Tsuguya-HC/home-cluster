@@ -1,72 +1,23 @@
 # taskflow の handler が複数で共有する部品を置く場所。
 #
-# **handler 固有のプロンプトはここに置かない。** そのプロンプトを使う handler の pod spec が
-# projected volume で参照するパスを名指しするので、プロンプトを handler のファイルから離すと
-# 片方だけ直したときに黙ってズレる（→ cnp-check のプロンプトは taskflow-cnp-check.yaml に同居）。
+# **プロンプトは ConfigMap で持たない。** 手順（skill）と常時効く前提（claude-md）は private の
+# parts リポ（Tsuguya-HC/parts）にあり、各 handler の initContainer `parts` が必要な分だけ引く。
+# 版は下の parts-ref ConfigMap の 1 キーで全 handler 共通。かつて ConfigMap で持っていた頃、
+# プロンプトと handler が別ファイルにあって片方だけ直る事故があった（cnp-check、ADR-0005 の
+# out/ 撤去時）。共有の判定プロトコルも parts の claude-md/verdict-protocol に移した（#866）。
 #
-# **ConfigMap でプロンプトを持つのは移行途中の形。** pr-review は skill / CLAUDE.md 断片を
-# private の parts リポ（Tsuguya-HC/parts）から initContainer の `parts` で引く形に切り替えた。
-# 版は下の parts-ref ConfigMap の 1 キーで全 handler 共通。
-# cnp-check の移行と taskflow-verdict-protocol ConfigMap の撤去は home-cluster #866。
-#
-# **これは実際に起きた。** cnp-check のプロンプトだけは taskflow 以前の慣習で
+# **これは実際に起きた（当時の形での話）。** cnp-check のプロンプトだけは taskflow 以前の慣習で
 # manifests/claude-code/agent-prompts.yaml に離して置いてあり、ADR-0005 で out/ 層を撤去した
 # とき（home-cluster #797）に handler 側だけが直り、プロンプトの `/workspace/out/ok/report.md`
 # が取り残された。マウント直下は 0555 なので、エージェントは書けないまま黙って
-# NoAnswer になる。2 フェーズ化（cnp-planner-prompt / cnp-reporter-prompt）と同時に
-# taskflow-cnp-check.yaml へ引き取って、今は全 flow がこの規約に揃っている。
+# NoAnswer になった。当時は ConfigMap を handler と同じファイルに同居させて揃えたが、
+# その形も #866 で終わり、今は全 handler が parts 経由（プロンプトは home-cluster に無い）。
 #
 # **判定を読み直して人間に通知する部品はここに置かない。** 通知は Pod の中の仕事ではなく、
 # framework が終端で出すもの（Warning Event / Ready=False / metric、design.md §5 / §9）から
 # 引くのが正。Step 0 の cnp-check は通知サイドカーが判定を自前でやり直しており、
 # taskflow-cnp-check.yaml には今もそれが残っている — terminals を宣言して Event / 条件 /
 # metric に寄せれば落とせる（taskflow #64 のフォロー）。pr-review はサイドカーを持たない。
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: taskflow-verdict-protocol
-  namespace: claude-code
-data:
-  verdict-protocol.md: |
-    # 判定の出し方（taskflow 共通）
-
-    結論は文章ではなく **置き場所** で表す。回収側はディレクトリしか見ず、
-    あなたの発話は一切読まない。
-
-    **どの置き場所があるかは flow が決める。** `ls /workspace` に出るディレクトリが
-    その回に言えることの全部で、それ以外の語彙は存在しない（作れないのではなく無い）。
-    どの結論をどこに置くかは、この後に続く flow ごとの手順書に書いてある。
-
-    どの flow でも共通なのは 1 つだけ:
-
-    | 結論 | すること |
-    |---|---|
-    | 判定できない・材料が足りない | `escalate/report.md` に**理由**を書く（`escalate/` があれば） |
-
-    ## 規則
-
-    - **書き込み先は `/workspace/` の直下に実際に存在するディレクトリだけ。**
-      `ls /workspace` で確かめられる。新しいディレクトリは作れないし、
-      作れなくても異常ではないので回避しようとしないこと
-    - **書くのはちょうど 1 つのディレクトリだけ。** 2 つ以上に書くと「答えが 2 つ」として
-      判定不能になる（回収側は非空のディレクトリがちょうど 1 つのときしか答えと認めない）
-    - ファイル名は `report.md` 固定。他のファイルを置いてもよいが、回収側は report.md だけを人間に見せる
-    - 「判定できない」は失敗ではない。無理に報告を書くより escalate に降りる方が正しい。
-      **降りるなら黙って終わらず `escalate/report.md` に理由を書くこと** —
-      何が足りなかったのか、どこまでは確かめられたのかが人間の次の一手になる。
-      何も書かずに終わると「途中で死んだ」と区別が付かない
-    - 作業用の一時ファイルは `/tmp` に置く（`/workspace/` 直下には作れない）。宣言ディレクトリの下に置いたものは
-      置いた場所がそのまま結論になる（空でないディレクトリが判定そのもの）
-    - **ターン数は有限。** 手順の材料が揃った時点で、追加の探索より先に report.md を書く。
-      書いた後に余裕があれば追記すればよい。過去に report を書く直前で打ち切られて
-      判定不能になったことがある
-
-    ## 報告に必ず含めるもの
-
-    - **主張と、それを確かめた手順を対にして書く。** 確かめていないものは
-      「未確認の推測」と明記する。確かめられるのに確かめていない主張は書かない
-    - 対処案は、現状より権限や到達範囲を広げないものに限る
----
 # parts リポの版。全 handler が同じ SHA を読む（役割ごとに版を割らない）。branch は Renovate が
 # 追う先、sha が handler に渡る値（`parts` はブランチ名を受け付けない）。bump は Renovate の
 # customManager（renovate.jsonc の git-refs）。
@@ -78,4 +29,4 @@ metadata:
 data:
   # renovate: datasource=git-refs depName=https://github.com/Tsuguya-HC/parts
   branch: main
-  sha: f3923299268ebf96784fbc5074b3b411c5f5a693
+  sha: 19e5cada6c40e216cf61f1908313017b19f84154

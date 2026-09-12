@@ -43,230 +43,12 @@
 # 通知は終端の 報告 にだけ付ける。調査 の Success は「次のフェーズへ進む」であって人間への
 # 知らせではない。
 #
-# taskflow-verdict-protocol ConfigMap（プロンプトの前半）は複数 flow で共有するため
-# manifests/claude-code/taskflow-common.yaml にある。flow 固有のプロンプトは、参照する
-# pod spec と同じファイルに置く（taskflow-common.yaml 冒頭の規約）— 初版は
-# manifests/claude-code/agent-prompts.yaml に離して置いていて、ADR-0005 で out/ を撤去した
-# ときに handler だけ直してプロンプトの `/workspace/out/ok/report.md` が取り残された。
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: cnp-planner-prompt
-  namespace: claude-code
-data:
-  cnp-planner.md: |
-    # CiliumNetworkPolicy カバレッジ点検（調査フェーズ）
-
-    全 namespace の Pod がポリシーに覆われているかを点検し、**裏の取れた材料**を書き出す。
-
-    ここは 2 フェーズの 1 つ目。あなたの report.md は人間ではなく、次の 報告 フェーズが読む。
-    報告 フェーズはクラスタに一切到達できず、あなたが書いたものだけを材料に人間向けの報告を
-    作る。**つまり、あなたが書き落としたことは二度と確かめられない。**
-
-    ## 与えられている権限
-
-    読み取り専用。`pods` / `namespaces` / `ciliumnetworkpolicies` /
-    `ciliumclusterwidenetworkpolicies` の get・list のみ。
-    `kubectl exec` も書き込みもできない。できないことを迂回しようとしないこと。
-
-    ## 実行環境（毎回の探りで無駄にしないために）
-
-    - 使えるのは `kubectl` / `jq` / `node` / `curl`。**`python3` は無い**
-    - `date` は busybox。`date -d '24 hours ago'` は使えない。
-      `NOW=$(date -u +%s); START=$((NOW - 86400))` で epoch を計算する
-    - 一致判定のロジックは最初から `node` で書く（jq → node への乗り換えを繰り返さない）
-    - Discord にも GitHub にも到達できない。通知は次のフェーズの仕事
-
-    ## Cilium の強制セマンティクス（読み違えやすいので必ず踏まえる）
-
-    - このクラスタは **`policyEnforcementMode: always`**。全エンドポイントが、どのポリシーに
-      選択されていなくても **両方向 default deny**。「どのポリシーにも一致しない Pod」は
-      無防備ではなく、全通信が遮断されている（＝そのまま動いているなら通信不要か壊れている）
-    - `ingress` / `ingressDeny` を持つポリシーに選択されていない Pod の ingress は **全 DENY**。
-      到達を受ける必要がある Pod（Service を持つ、probe 以外の受信がある）なら壊れている。
-      受ける必要が無い Job や sensor なら正常。**「ingress 無防備」という判定はこのクラスタでは
-      起きない**（default モード時代の指摘であり、もう当てはまらない）
-    - egress も同様で、`egress` / `egressDeny` を持つポリシーに選択されなければ全 DENY
-      （DNS だけは CCNP `allow-dns` が全 Pod に許可している）
-    - 旧来 sensor 系 CNP にある `ingressDeny: [{fromEntities: [world]}]` は default モード時代に
-      ingress 強制を有効化するためのダミー。always では意味を持たないが害も無い
-    - `ingress: []`（空リスト）は no-op で何も許可しない
-    - kubelet からの probe（`host` エンティティ）は `allow-localhost=auto` により常に許可される。
-      probe 失敗をポリシーのせいにしない
-
-    ## 手順
-
-    1. `kubectl get cnp -A -o json` と `kubectl get ccnp -o json` で全ポリシーを取得
-    2. `kubectl get pods -A -o json` で全 Pod とラベルを取得
-    3. 各 Pod について、**どのポリシーの `endpointSelector` に一致するか**を判定する。
-       一致したポリシーが `ingress` / `ingressDeny` / `egress` / `egressDeny` のどれを持つかを
-       **キーごとに**記録する。`ingress` が空でも `ingressDeny` があれば ingress は強制される
-    4. 直近 24 時間の `POLICY_DENIED` を Loki で確認する
-
-    ## Loki
-
-    ```
-    curl -sG 'http://loki-gateway.monitoring.svc.cluster.local:80/loki/api/v1/query_range' \
-      --data-urlencode 'query={job="hubble"}' \
-      --data-urlencode 'limit=5000' \
-      --data-urlencode "start=${START}000000000"
-    ```
-
-    取得できない場合はその旨を書いて次に進む。**取れなかったこと自体を report.md に書く** —
-    報告 フェーズは Loki に届かないので、あなたが黙ると「調べた結果ゼロ件」と区別が付かない。
-
-    `limit` の上限は 5000 で、24 時間分に届かないことがある。取得できたフローの最古・最新
-    時刻を確認し、実際に見えている範囲を report.md に書く（「24 時間」と言い切らない）。
-
-    ### 既知のノイズ（毎回報告しない）
-
-    - claude-code namespace の Pod → `34.149.66.165:443` の drop は Claude Code CLI の
-      テレメトリ（Datadog）送信で、**遮断が意図どおり**。宛先の正体調査に時間を使わず、
-      ポリシー変更も提案しない。件数だけ一行で触れればよい
-    - ollama namespace の Pod → `34.36.133.15:443` の drop は `ollama.com`（apex）への更新チェック。
-      CNP の `*.ollama.com` は apex に一致しない（matchPattern は 1 ラベル分）。推論に不要なので
-      遮断で正しい。同じく件数だけ
-    - argo の renovate Pod → `169.254.169.254:80` はクラウドメタデータ探査。遮断で正しい
-
-    **Hubble の export は DROPPED しか流していない。** よって「宛先 X のフローが無い」は
-    「誰も X と通信していない」の証拠にならない。許可された通信は記録に残らないので、
-    フローの不在から通信の不在を結論しないこと。
-
-    ## 対象外
-
-    - `hostNetwork: true` の Pod（ポリシーの対象外）
-    - `Completed` / `Succeeded` の Pod
-
-    ## 主張ごとに要求される裏取り
-
-    次のフェーズは、この表を使ってあなたの主張を検査する。**根拠の列が空の主張は落とされる。**
-
-    | 主張 | 併記する根拠 |
-    |---|---|
-    | Pod X は未カバー | X のラベルと、照合したポリシー名（一致が無いなら「一致なし」と明記） |
-    | X は ingress を受ける必要があるのに許可が無い | X の Service / 受信ポートと、X を選択している全ポリシー名、**そのいずれにも該当する `ingress` 許可が無い**こと |
-    | Y が原因で DENIED になっている | Y を実際に確認したコマンドと結果。ラベル不一致を疑うなら**その Pod のラベルを見る** |
-
-    裏が取れなかった主張は、書かないか「未確認の推測」と明記する。
-
-    ## 対処案の制約
-
-    - `toCIDR: 0.0.0.0/0` は使わない。外部 HTTPS は `toFQDNs` でドメイン単位に絞る
-    - 現状より到達範囲を広げる案を出さない
-    - DNS egress は CCNP で全 Pod に共通適用済みなので、個別 CNP には書かない
-
-    ## どこに書くか（出口は 2 つ）
-
-    | あなたの結論 | 置き場所 |
-    |---|---|
-    | 点検を完了し、材料を渡せる | `/workspace/ok/report.md` |
-    | 判定できない・材料が足りない | `/workspace/escalate/report.md` に**理由**を |
-
-    書くのはどちらか一方だけ。共通の規則は `verdict-protocol.md` にある。
-
-    ## report.md の書き方
-
-    **ここでは字数を削らない。** 削るのは 報告 フェーズの仕事で、あなたが落とした根拠は
-    そこでは復元できない。主張と根拠を対にして、全部書く。
-
-    次の順で並べる。
-
-    1. 点検できた範囲（対象 namespace 数・Pod 数、Loki で実際に見えた時間範囲）
-    2. 未カバー Pod（namespace ごと。上の表の根拠を必ず併記）
-    3. `POLICY_DENIED` の送信元・宛先・理由・件数（既知ノイズは 1 行にまとめる）
-    4. 対処案（上の制約の範囲で）
-
-    重要度の判断も添えておくと 報告 フェーズが絞りやすい。ただし、重要でないと判断したものも
-    根拠ごと残すこと — 絞るのは次の工程。
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: cnp-reporter-prompt
-  namespace: claude-code
-data:
-  cnp-reporter.md: |
-    # CiliumNetworkPolicy カバレッジ点検（報告フェーズ）
-
-    前の 調査 フェーズが封印した材料を読み、**人間に届く形へ絞って書き直す**。
-
-    ## あなたに無いもの
-
-    クラスタへの到達手段が無い。apiserver にも Loki にも届かず、`kubectl` は動かない。
-    到達できるのは推論 API だけ。**材料に無いことは、あなたには確かめようがない。**
-
-    これは制約ではなく役割。あなたの仕事は新しく調べることではなく、**調べられたことの
-    裏取りを検査して、確かなものだけを人間に渡すこと**。
-
-    ## 材料の在り処
-
-    `/shelf/<runID>/ok/report.md` に前フェーズの report がある。`<runID>` は数字で、
-    最大のものが直前の run。
-
-    ```
-    latest=$(ls /shelf | sort -n | tail -1)
-    cat "/shelf/$latest/ok/report.md"
-    ```
-
-    `/shelf` は読み取り専用。ここには書けない。
-
-    材料が読めない（`/shelf` が空、`ok/report.md` が無い、中身が空）ときは、自分で
-    調べ直そうとせず `escalate/` に降りる。あなたには調べ直す手段が無い。
-
-    ## 裏取りの検査
-
-    前フェーズには、主張ごとに併記すべき根拠が指示してある。同じ表で読み直す。
-
-    | 主張 | 併記されているべき根拠 |
-    |---|---|
-    | Pod X は未カバー | X のラベルと、照合したポリシー名（一致が無いなら「一致なし」の明記） |
-    | X は ingress を受ける必要があるのに許可が無い | X の Service / 受信ポートと、X を選択している全ポリシー名、そのいずれにも該当する `ingress` 許可が無いこと |
-    | Y が原因で DENIED になっている | Y を実際に確認したコマンドと結果 |
-
-    - 根拠が揃っている主張 → そのまま伝える
-    - 根拠が欠けている主張 → **落とすか、「根拠未確認」と明記して格下げする**。
-      あなたが補うことはできない
-    - 前フェーズ自身が「未確認の推測」と書いたもの → その断りを残したまま伝える
-
-    **落とした主張は末尾に 1 行でまとめて残す**（「根拠不足で落とした指摘: N 件」）。
-    黙って消すと、次に人間が同じ点検を読むとき件数が理由なく変わって見える。
-
-    ## Cilium の強制セマンティクス（読み直すときに踏まえる）
-
-    このクラスタは `policyEnforcementMode: always`。どのポリシーにも選択されない Pod は
-    無防備ではなく全通信が遮断されている。「ingress 無防備」という指摘がもし材料にあれば、
-    それは default モード時代の言い回しなので、そのまま人間に流さず落とす。
-
-    Hubble の export は DROPPED しか流していない。「宛先 X のフローが無い」を
-    「誰も X と通信していない」と読み替えた主張が材料にあれば、それも落とす。
-
-    ## 対処案
-
-    材料にある対処案のうち、**現状より到達範囲を広げるもの**（`toCIDR: 0.0.0.0/0` を含む、
-    ワイルドカードで FQDN を広げる、等）は人間に渡さず落とす。DNS egress は CCNP で
-    全 Pod に共通適用済みなので、個別 CNP に足す案も落とす。
-
-    ## どこに書くか（出口は 2 つ）
-
-    | あなたの結論 | 置き場所 |
-    |---|---|
-    | 報告を書けた | `/workspace/ok/report.md` |
-    | 材料が読めない・検査できない | `/workspace/escalate/report.md` に**理由**を |
-
-    書くのはどちらか一方だけ。共通の規則は `verdict-protocol.md` にある。
-
-    ## レポート
-
-    **これがそのまま Discord に出る。3900 バイトで切られ、後ろに置いた内容は人間に届かない。**
-
-    - 冒頭に結論の箇条書き（3〜5 行）。読んだ人が「今日は何もしなくていい」か
-      「これを見に行く」かを、そこだけで決められること
-    - その後に詳細を重要度順
-    - 末尾に、点検できた範囲（Pod 数・Loki で実際に見えた時間範囲）と、落とした指摘の件数
-
-    字数を `wc` と `Edit` で詰める往復はしない。1 回で書き切り、超えた分は切られるものとして
-    重要度順に並べておけばよい。
+# **プロンプトはここには無い。** 各フェーズの手順は parts リポ（Tsuguya-HC/parts、private）の
+# skill `cnp-planner` / `cnp-reporter`、共通の判定プロトコルは claude-md `verdict-protocol`。
+# initContainer の `parts` が PARTS_REF（taskflow-common.yaml の ConfigMap）で必要な分だけ
+# 引いて /parts に敷き、agent は `/cnp-planner` のように skill を呼ぶ（pr-review と同じ、
+# home-cluster #866）。かつて ConfigMap で持っていた頃は、プロンプトと handler が別ファイルに
+# あって片方だけ直り `/workspace/out/ok/report.md` が取り残された事故があった。
 ---
 # 報告 フェーズの ServiceAccount。apiserver に用が無いので RBAC を与えないだけでなく
 # トークン自体を配らない（読む対象は前フェーズの LLM が書いたテキストで、そこに
@@ -281,7 +63,7 @@ automountServiceAccountToken: false
 # 調査 フェーズ専用 CNP。共有の claude-code=true は GitHub / npm / crates / SeaweedFS /
 # Prometheus / horenso / ArgoCD / Discord まで開くので、CNP と Pod を読んで報告するだけの
 # Pod には過大（設計 §16）。ここが開けるのは apiserver（点検対象の取得）・Loki（DROPPED の
-# 確認）・Anthropic API（推論）だけ。
+# 確認）・Anthropic API（推論）・GitHub（init の parts が部品を引く）だけ。
 #
 # **Discord をここに開けないのは意図的。** 通知サイドカーは終端の 報告 フェーズにしか無く、
 # Cilium の identity は Pod 単位なので、開けた穴はエージェントのコンテナからも使える。
@@ -308,6 +90,11 @@ spec:
               protocol: TCP
     - toFQDNs:
         - matchName: "api.anthropic.com"
+        # github.com / api.github.com は init の parts（部品の sparse checkout と App の
+        # installation token）のため。init と agent は同じ identity なので agent からも
+        # 届くが、GitHub は攻撃者が受信ログを読めない宛先（docs/network-policies.md）。
+        - matchName: "github.com"
+        - matchName: "api.github.com"
       toPorts:
         - ports:
             - port: "443"
@@ -323,8 +110,10 @@ spec:
               protocol: TCP
 ---
 # 報告 フェーズ専用 CNP。材料は PVC 越しに来るので、ネットワークで要るのは推論 API と、
-# notify サイドカーの Discord だけ。apiserver も Loki も開けない — 「材料に無いことは
-# 確かめようがない」をプロンプトの約束ではなく到達可能性で支えるのがこのフェーズの主旨。
+# notify サイドカーの Discord と、init の parts が部品を引く GitHub だけ。apiserver も Loki も
+# 開けない — 「材料に無いことは確かめようがない」をプロンプトの約束ではなく到達可能性で
+# 支えるのがこのフェーズの主旨。GitHub は agent からも届く（残存リスクは
+# docs/network-policies.md）。
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -338,6 +127,9 @@ spec:
     - toFQDNs:
         - matchName: "api.anthropic.com"
         - matchName: "discord.com"
+        # github.com / api.github.com は init の parts のため（上の 調査 側と同じ理由）。
+        - matchName: "github.com"
+        - matchName: "api.github.com"
       toPorts:
         - ports:
             - port: "443"
@@ -384,14 +176,54 @@ spec:
         volumes:
           - name: tmp
             emptyDir: {}
-          - name: prompt
-            projected:
-              sources:
-                # taskflow-common.yaml にある共有 ConfigMap。
-                - configMap:
-                    name: taskflow-verdict-protocol
-                - configMap:
-                    name: cnp-planner-prompt
+          # parts が敷く先。init が書き、agent は読むだけ。
+          - name: parts
+            emptyDir: {}
+          # parts リポは private。clone 用の installation token を作る App の鍵で、init だけが
+          # マウントする（root 所有なので 0444 で other-read。fsGroup は Kata の subPath と
+          # 相性が悪く使わない — taskflow-pr-review.yaml）。
+          - name: github-app
+            secret:
+              secretName: github-app-private-key
+              defaultMode: 0444
+              items:
+                - key: private-key
+                  path: private-key
+        initContainers:
+          - name: parts
+            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:0d986d97428f3c04d1837031418430e49273061500dfad0c7f6ec32046cc781d
+            command: [parts]
+            args: [-s, cnp-planner, -c, verdict-protocol]
+            env:
+              - name: HOME
+                value: /tmp
+              - name: PARTS_REF
+                valueFrom:
+                  configMapKeyRef:
+                    name: parts-ref
+                    key: sha
+              - name: GITHUB_APP_ID
+                value: "2998228"
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities:
+                drop: [ALL]
+            volumeMounts:
+              - name: parts
+                mountPath: /parts
+              - name: tmp
+                mountPath: /tmp
+              - name: github-app
+                mountPath: /github-app
+                readOnly: true
+            resources:
+              requests:
+                cpu: 100m
+                memory: 64Mi
+              limits:
+                cpu: "1"
+                memory: 256Mi
         containers:
           - name: agent
             image: registry.infra.tgy.io/tools/claude-code:latest@sha256:0d986d97428f3c04d1837031418430e49273061500dfad0c7f6ec32046cc781d
@@ -399,15 +231,17 @@ spec:
             command: [sh, -c]
             args:
               - |
-                PROMPT="$(cat /prompt/cnp-planner.md; echo; cat /prompt/verdict-protocol.md)"
-                claude -p \
+                # 手順は /parts の skill、常時効く前提は /parts/CLAUDE.md（parts が claude-md を
+                # 連結したもの）。--bare は OAuth を読まなくなるので使わない。
+                claude -p "/cnp-planner" \
+                  --plugin-dir /parts \
+                  --append-system-prompt-file /parts/CLAUDE.md \
                   --verbose \
                   --output-format stream-json \
                   --dangerously-skip-permissions \
                   --allowedTools "Bash,Read,Write,Grep,Glob" \
                   --model sonnet \
-                  --max-turns 80 \
-                  "$PROMPT" &
+                  --max-turns 80 < /dev/null &
                 pid=$!
                 # activeDeadlineSeconds の TERM は PID1 に飛ぶ。前面で claude を待っていると
                 # POSIX sh は前面コマンドの終了を待ってから trap を実行するため、猶予期間内に
@@ -446,8 +280,8 @@ spec:
                 mountPath: /workspace
               - name: tmp
                 mountPath: /tmp
-              - name: prompt
-                mountPath: /prompt
+              - name: parts
+                mountPath: /parts
                 readOnly: true
             resources:
               requests:
@@ -495,14 +329,54 @@ spec:
         volumes:
           - name: tmp
             emptyDir: {}
-          - name: prompt
-            projected:
-              sources:
-                - configMap:
-                    name: taskflow-verdict-protocol
-                - configMap:
-                    name: cnp-reporter-prompt
+          # parts が敷く先。init が書き、agent は読むだけ。
+          - name: parts
+            emptyDir: {}
+          # parts リポは private。clone 用の installation token を作る App の鍵で、init だけが
+          # マウントする（root 所有なので 0444 で other-read。fsGroup は Kata の subPath と
+          # 相性が悪く使わない — taskflow-pr-review.yaml）。
+          - name: github-app
+            secret:
+              secretName: github-app-private-key
+              defaultMode: 0444
+              items:
+                - key: private-key
+                  path: private-key
         initContainers:
+          - name: parts
+            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:0d986d97428f3c04d1837031418430e49273061500dfad0c7f6ec32046cc781d
+            command: [parts]
+            args: [-s, cnp-reporter, -c, verdict-protocol]
+            env:
+              - name: HOME
+                value: /tmp
+              - name: PARTS_REF
+                valueFrom:
+                  configMapKeyRef:
+                    name: parts-ref
+                    key: sha
+              - name: GITHUB_APP_ID
+                value: "2998228"
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities:
+                drop: [ALL]
+            volumeMounts:
+              - name: parts
+                mountPath: /parts
+              - name: tmp
+                mountPath: /tmp
+              - name: github-app
+                mountPath: /github-app
+                readOnly: true
+            resources:
+              requests:
+                cpu: 100m
+                memory: 64Mi
+              limits:
+                cpu: "1"
+                memory: 256Mi
           # 人間への報告のうち 完了（Success）だけをここで扱う（設計 §7 / §9）。SIGTERM で
           # ok/ が非空かどうかを見る。escalate / ambiguous（ok と escalate 両方が非空）/
           # 沈黙（どちらも空）はいずれも Escalated 終端で、そちらは
@@ -574,17 +448,17 @@ spec:
             command: [sh, -c]
             args:
               - |
-                PROMPT="$(cat /prompt/cnp-reporter.md; echo; cat /prompt/verdict-protocol.md)"
                 # max-turns 40 は過去に report を書く直前で打ち切られて判定不能になった値
-                # （taskflow-common.yaml の verdict-protocol.md 参照）なので避ける。
-                claude -p \
+                # （parts の claude-md/verdict-protocol.md 参照）なので避ける。
+                claude -p "/cnp-reporter" \
+                  --plugin-dir /parts \
+                  --append-system-prompt-file /parts/CLAUDE.md \
                   --verbose \
                   --output-format stream-json \
                   --dangerously-skip-permissions \
                   --allowedTools "Bash,Read,Write,Grep,Glob" \
                   --model sonnet \
-                  --max-turns 60 \
-                  "$PROMPT" &
+                  --max-turns 60 < /dev/null &
                 pid=$!
                 # activeDeadlineSeconds の TERM は PID1 に飛ぶ。前面で claude を待っていると
                 # POSIX sh は前面コマンドの終了を待ってから trap を実行するため、猶予期間内に
@@ -629,8 +503,8 @@ spec:
                 readOnly: true
               - name: tmp
                 mountPath: /tmp
-              - name: prompt
-                mountPath: /prompt
+              - name: parts
+                mountPath: /parts
                 readOnly: true
             resources:
               requests:

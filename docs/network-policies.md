@@ -187,8 +187,8 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 | **claude-code** (claude-code=true) | (deny world) | kube-apiserver, api.anthropic.com + github.com + api.github.com + *.githubusercontent.com + index.crates.io + static.crates.io + registry.npmjs.org + discord.com + gitmcp.io :443, seaweedfs-filer (seaweedfs):8333, loki-gateway (monitoring):8080, prometheus (monitoring):9090, horenso (horenso):3000, task-dispatch-eventsource (argo):12002, argocd-server (argocd):8080 |
 | **task-submitter** (task-submitter=true) | (deny world) | kube-apiserver, discord.com:443, seaweedfs-filer (seaweedfs):8333 |
 | **taskflow-pr-review** (taskflow-pr-review=true) | (書かない = 全 deny) | api.anthropic.com + github.com + api.github.com :443 |
-| **taskflow-cnp-check** (taskflow-cnp-check=true) | (書かない = 全 deny) | kube-apiserver:6443, api.anthropic.com:443, loki-gateway (monitoring):8080 |
-| **taskflow-cnp-report** (taskflow-cnp-report=true) | (書かない = 全 deny) | api.anthropic.com + discord.com :443 |
+| **taskflow-cnp-check** (taskflow-cnp-check=true) | (書かない = 全 deny) | kube-apiserver:6443, api.anthropic.com + github.com + api.github.com :443, loki-gateway (monitoring):8080 |
+| **taskflow-cnp-report** (taskflow-cnp-report=true) | (書かない = 全 deny) | api.anthropic.com + discord.com + github.com + api.github.com :443 |
 
 `task-submitter` は Task を 1 つ作るだけの CronWorkflow の Pod。apiserver のほかに要る 2 つは
 コントローラの workflowDefaults が全 Workflow に注入するもの（archiveLogs の保存先と
@@ -216,6 +216,14 @@ Cilium の identity は Pod 単位なので、通知サイドカーのために�
 - **報告**（`taskflow-cnp-report`）は材料を workspace PVC 越しに受け取るので、
   ネットワークで要るのは推論 API と通知先だけ。**apiserver も Loki も開けない** —
   「材料に無いことは確かめようがない」を、プロンプトの約束ではなく到達可能性で支えている
+- どちらも `github.com` / `api.github.com` を持つ。initContainer の `parts` が private の
+  parts リポから skill / CLAUDE.md 断片を引き、GitHub App の installation token を作るため。
+  init と agent は同じ identity なので agent からも届くが、GitHub は攻撃者が受信ログを
+  読めない宛先（上の taskflow-pr-review と同じ整理）。**残存リスク**: agent 自身は GitHub を
+  使わないのに到達できるので、攻撃者が用意した public な GitHub コンテンツを追加の指示として
+  読み込める経路（fetch 方向）が残る。特に 報告 は前フェーズの LLM 出力＝信頼できない入力を
+  材料にする Pod。これは pr-review で受容済みのパターンの拡張として受け入れる。狭めるなら
+  init と agent の identity を分ける（Pod を分ける）しかなく、今はやらない
 
 1 フェーズだった頃は共有の `claude-code=true` に相乗りしており、1 つの Pod が
 apiserver・Loki・Discord・GitHub・npm・crates・SeaweedFS・Prometheus・horenso・ArgoCD を

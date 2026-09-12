@@ -394,7 +394,7 @@ spec:
                     name: cnp-planner-prompt
         containers:
           - name: agent
-            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:bfa38252816aa6d2e318de8931650c70ede32eb5abccc60f783f44994164e8f5
+            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:0d986d97428f3c04d1837031418430e49273061500dfad0c7f6ec32046cc781d
             workingDir: /tmp
             command: [sh, -c]
             args:
@@ -569,7 +569,7 @@ spec:
                 memory: 128Mi
         containers:
           - name: agent
-            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:bfa38252816aa6d2e318de8931650c70ede32eb5abccc60f783f44994164e8f5
+            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:0d986d97428f3c04d1837031418430e49273061500dfad0c7f6ec32046cc781d
             workingDir: /tmp
             command: [sh, -c]
             args:

@@ -1,0 +1,30 @@
+config:
+  existingSecret: oauth2-proxy-prometheus-oauth
+  cookieName: "_oauth2_proxy_prometheus"
+  configFile: ""
+
+extraArgs:
+  provider: oidc
+  oidc-issuer-url: "https://idm.tgy.io/oauth2/openid/oauth2-proxy-prometheus"
+  redirect-url: "https://prometheus.infra.tgy.io/oauth2/callback"
+  upstream: "http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090"
+  email-domain: "*"
+  skip-provider-button: "true"
+  code-challenge-method: S256
+  reverse-proxy: "true"
+
+service:
+  portNumber: 4180
+
+serviceAccount:
+  automountServiceAccountToken: false
+
+podDisruptionBudget:
+  enabled: false
+
+resources:
+  requests:
+    cpu: 10m
+    memory: 32Mi
+  limits:
+    memory: 128Mi

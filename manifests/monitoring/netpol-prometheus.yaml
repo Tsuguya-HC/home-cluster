@@ -20,6 +20,58 @@ spec:
         - ports:
             - port: "9090"
               protocol: TCP
+    # oauth2-proxy-prometheus は Prometheus Web UI をブラウザ経由で公開する
+    # だけの経路。Prometheus 自体は config-reloader の /-/reload と tempo の
+    # remote-write (/api/v1/write) のために --web.enable-lifecycle と
+    # --web.enable-remote-write-receiver を落とせない（内部利用があるため）。
+    # そのため危険な POST (/-/quit・/-/reload・/api/v1/write・
+    # /api/v1/admin/*) と /debug/pprof/*（メモリダンプ・CPU プロファイル
+    # 取得。無効化する公式フラグが無い）はこの新しい経路だけで絞る。上の
+    # ブロックに混ぜて L7 を足すと tempo の remote-write まで塞いでしまう
+    # ので、専用の ingress ルールに分離している。
+    # 一般指針は docs/network-policies.md の Caveats、この L7 ルールが
+    # 誤って正当なリクエストまで弾いた場合の緊急切り戻し手順（セキュリティ
+    # 低下を伴う一時措置）は docs/known-issues.md 参照。
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/instance: oauth2-proxy-prometheus
+            io.kubernetes.pod.namespace: oauth2-proxy
+      toPorts:
+        - ports:
+            - port: "9090"
+              protocol: TCP
+          rules:
+            http:
+              # GET は /debug 以下（pprof）を除いて全許可。Prometheus
+              # v3.14.0 の web/web.go を確認した限り、Prometheus が登録する
+              # 'd' で始まるルートは /debug/*subpath（GET/POST とも）のみで、
+              # それ以外に 'd' で始まるパスは存在しない。そのため「debug の
+              # 綴りを1文字ずつ分岐させる」必要はなく、先頭が 'd'/'D' で
+              # 始まるパスをまとめて拒否するだけで足りる（program size:
+              # 24。Envoy の RegexMatcher は re2.max_program_size.error_level
+              # の既定値 100 を超えると compile 失敗するため、最初は
+              # debug を1文字ずつ分岐させる式で書いていたが programsize が
+              # 100 ちょうどで余裕が無く書き直した）。(?i) で大文字小文字を
+              # 無視する。将来 Prometheus が 'd' 始まりのルートを増やしたら
+              # その画面だけ 403 になる（サイレントではなく明示的に失敗する
+              # ので、下の POST allowlist と同じく chart 更新時の確認項目）。
+              - method: "GET"
+                path: "(?i)^/([^d].*)?$"
+              # POST は Web UI のクエリ実行系 API のみ許可。/api/v1/write・
+              # /-/reload・/-/quit・/api/v1/admin/* はこの正規表現に一致
+              # しないため拒否される（^...$ で全体一致、部分一致させない）。
+              # Envoy の :path はクエリ文字列込みなので `(\?.*)?` でクエリ
+              # 付きの POST（UI が実際に投げる形）も許可する。大文字小文字は
+              # 区別する（allowlist なので厳密な方が安全、GET 側とは前提が
+              # 異なる）。program size: 74。
+              # このパス一覧は Prometheus v3.14.0 (docs/querying/api.md) を
+              # 見て手書きした allowlist。kube-prometheus-stack の chart を
+              # 更新して Prometheus のメジャー/マイナーが上がったときは、
+              # 新しい HTTP API ドキュメントと突き合わせて更新すること
+              # （ズレても CI は検出できず、UI のクエリ実行だけが 403 になる
+              # 壊れ方をする）。
+              - method: "POST"
+                path: "^/api/v1/(query|query_range|query_exemplars|series|labels|format_query|parse_query)(\\?.*)?$"
     # kube-apiserver service proxy (Freelens/Lens cluster metrics).
     # In tunnel mode the apiserver's traffic is SNATed to cilium_host and
     # arrives as remote-node (same as prometheus-operator webhook).

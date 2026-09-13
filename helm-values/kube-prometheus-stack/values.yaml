@@ -39,6 +39,10 @@ prometheusOperator:
 
 prometheus:
   prometheusSpec:
+    # Alertmanager の通知に載る Source リンクは GeneratorURL =
+    # externalUrl + /graph?g0.expr=... で組まれる。未設定だと
+    # クラスタ内アドレス (svc:9090) になりブラウザから開けない。
+    externalUrl: https://prometheus.infra.tgy.io
     externalLabels:
       cluster: home-cluster
     logFormat: json

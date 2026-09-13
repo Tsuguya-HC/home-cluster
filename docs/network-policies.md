@@ -12,6 +12,10 @@ All policies are CiliumNetworkPolicy (CNP) and CiliumClusterwideNetworkPolicy (C
 **Caveats:**
 - Do NOT add L7 HTTP rules (`rules.http`) to ingress of services using TLS passthrough (TLSRoute). Cilium attempts to parse encrypted traffic as HTTP, breaking the connection.
 - The `cluster` entity in `ingressDeny` includes `host` and `remote-node`. Since deny rules take precedence over allow rules, this blocks kubelet probes. Never use `cluster` in `ingressDeny` — use `world` only. For pods with probes, prefer ingress allow-only policies (implicit default deny) over `ingressDeny`.
+- **L7 method/path allow-list as a stand-in for authorization**: if a backend has no auth/authz of its own, put oauth2-proxy in front for authentication, and use CNP L7 (`rules.http` with a `method` allow-list and a `path` regex anchored with `^...$` for a full match) to cover authorization — restrict which endpoints an authenticated user can reach (example: `manifests/monitoring/netpol-prometheus.yaml`, oauth2-proxy-prometheus ingress). Two things regularly trip people up when writing these:
+  - Cilium's `path`/`method` are matched via Envoy's RE2 engine, which has **no negative lookahead**. "Everything except X" has to be spelled out as an explicit alternation over where the string diverges from X, not `(?!X)`. Keep this alternation as short as possible (see next point) — prefer excluding by a short, verified-unique prefix over spelling out the whole literal one character at a time (see the `/debug` exclusion in netpol-prometheus.yaml, which excludes by the single leading `d` rather than the full word, because that Prometheus version registers no other route starting with `d`).
+  - Envoy's `RegexMatcher` fails to compile once RE2's `programsize` exceeds the default `re2.max_program_size.error_level` of **100**, and Cilium does not raise this limit. There is no admission webhook for this in this cluster, so `kubectl apply --dry-run=server` / kubeconform / CI all pass even when a rule is over the limit — the failure only shows up when cilium-agent turns the CNP into Envoy xDS config, silently leaving the L7 block non-functional. Character-by-character negation alternations (see previous point) blow through this fast; measure `programsize` with the `google-re2` Python binding (`re2.compile(pattern).programsize`) before relying on a hand-written negation, especially before adding `(?i)`, which also costs program size.
+  - Envoy's `:path` is the path **and query string together**. A `path` regex anchored with `$` that doesn't allow for a trailing `?...` will reject every request that carries query parameters — which is most real UI traffic, for both GET and POST.
 
 ## Cluster-Wide Policies (CCNP)
 
@@ -65,6 +69,8 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 | oauth2-proxy-rss (oauth2-proxy) | rss-ui (rss) | 80 | Reverse proxy upstream (static UI) |
 | oauth2-proxy-rss (oauth2-proxy) | rss-server (rss) | 80 | Reverse proxy upstream (/api) |
 | oauth2-proxy-rss (oauth2-proxy) | Kanidm (kanidm) | 8443 | OIDC token exchange |
+| oauth2-proxy-prometheus (oauth2-proxy) | Prometheus (monitoring) | 9090 | Reverse proxy upstream |
+| oauth2-proxy-prometheus (oauth2-proxy) | Kanidm (kanidm) | 8443 | OIDC token exchange |
 | Nextcloud (nextcloud) | shared-pg (database) | 5432 | Database |
 | Nextcloud (nextcloud) | SeaweedFS filer (seaweedfs) | 8333 | S3 object storage |
 | Nextcloud (nextcloud) | Kanidm (kanidm) | 8443 | OIDC token exchange (direct, via CoreDNS rewrite) |
@@ -163,7 +169,7 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 
 | Component | Ingress | Egress |
 |---|---|---|
-| **prometheus** | grafana, tempo, claude-code (claude-code), kube-apiserver/remote-node (service proxy, RBAC services/proxy で制御) → 9090 | kube-apiserver, alertmanager:9093/8080, kube-state-metrics:8080, operator:10250, grafana:3000, smartctl-exporter:9633, argo-workflows-controller (argo):9090, taskflow-controller (taskflow-system):8443, cert-manager controller/webhook/cainjector (cert-manager):9402, tempo:3200 (scrape), coredns (kube-system):9153, tetragon-operator (kube-system):2113, seaweedfs (seaweedfs):9327, trivy-operator (trivy-system):8080, harbor (harbor):8001, host/remote-node:10250/9100/9115/2379/2381/10257/10259/9965/2112 |
+| **prometheus** | grafana, tempo, claude-code (claude-code), kube-apiserver/remote-node (service proxy, RBAC services/proxy で制御) → 9090; oauth2-proxy-prometheus (oauth2-proxy) → 9090 (L7 HTTP: GET は `/debug`（大文字小文字を無視、programsize 24/100）を除いて許可、POST は query/query_range/query_exemplars/series/labels/format_query/parse_query のみ許可の allowlist（クエリ文字列付きも可、programsize 74/100）。他の POST・`/-/reload`・`/-/quit`・`/api/v1/write`・`/api/v1/admin/*`・`/debug/pprof/*` は拒否。allowlist は Prometheus のバージョンに紐づく手書きリストなので chart 更新時に見直すこと。緊急切り戻し手順は known-issues.md 参照) | kube-apiserver, alertmanager:9093/8080, kube-state-metrics:8080, operator:10250, grafana:3000, smartctl-exporter:9633, argo-workflows-controller (argo):9090, taskflow-controller (taskflow-system):8443, cert-manager controller/webhook/cainjector (cert-manager):9402, tempo:3200 (scrape), coredns (kube-system):9153, tetragon-operator (kube-system):2113, seaweedfs (seaweedfs):9327, trivy-operator (trivy-system):8080, harbor (harbor):8001, host/remote-node:10250/9100/9115/2379/2381/10257/10259/9965/2112 |
 | **alertmanager** | prometheus → 9093/8080 | discord.com:443, discordapp.com:443, alertmanager-eventsource (argo):12001 |
 | **grafana** | ingress → 3000 (L7 HTTP); prometheus → 3000 | kube-apiserver, prometheus:9090, loki-gateway:8080, tempo:3200, shared-pg (database):5432, kanidm (kanidm):8443 |
 | **kube-state-metrics** | prometheus → 8080 | kube-apiserver |
@@ -310,15 +316,16 @@ apiserver・Loki・Discord・GitHub・npm・crates・SeaweedFS・Prometheus・ho
 
 | Component | Ingress | Egress |
 |---|---|---|
-| **kanidm** | ingress → 8443 (TLS Passthrough); cloudflared (argocd) → 8443; grafana (monitoring) → 8443; argocd-server (argocd) → 8443; argo-workflows-server (argo) → 8443; oauth2-proxy-hubble (oauth2-proxy) → 8443; oauth2-proxy-seaweedfs (oauth2-proxy) → 8443; oauth2-proxy-rss (oauth2-proxy) → 8443; nextcloud (nextcloud) → 8443; harbor-core (harbor) → 8443; self → 8444 (replication) | self:8444 (replication), kube-apiserver |
+| **kanidm** | ingress → 8443 (TLS Passthrough); cloudflared (argocd) → 8443; grafana (monitoring) → 8443; argocd-server (argocd) → 8443; argo-workflows-server (argo) → 8443; oauth2-proxy-hubble (oauth2-proxy) → 8443; oauth2-proxy-seaweedfs (oauth2-proxy) → 8443; oauth2-proxy-rss (oauth2-proxy) → 8443; oauth2-proxy-prometheus (oauth2-proxy) → 8443; nextcloud (nextcloud) → 8443; harbor-core (harbor) → 8443; self → 8444 (replication) | self:8444 (replication), kube-apiserver |
 
-## oauth2-proxy (3 policies)
+## oauth2-proxy (4 policies)
 
 | Component | Ingress | Egress |
 |---|---|---|
 | **oauth2-proxy-hubble** | ingress → 4180 (L7 HTTP) | hubble-ui (kube-system):8081, kanidm (kanidm):8443 |
 | **oauth2-proxy-seaweedfs** | ingress → 4180 (L7 HTTP) | seaweedfs-filer (seaweedfs):8888, kanidm (kanidm):8443 |
 | **oauth2-proxy-rss** | ingress, cloudflared (argocd) → 4180 (L7 HTTP) | rss-ui (rss):80, rss-server (rss):80, kanidm (kanidm):8443 |
+| **oauth2-proxy-prometheus** | ingress → 4180 (L7 HTTP) | prometheus (monitoring):9090, kanidm (kanidm):8443 |
 
 ## trivy-system (4 policies)
 

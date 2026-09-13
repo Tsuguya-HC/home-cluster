@@ -241,3 +241,15 @@ echo | openssl s_client -connect 192.168.10.193:443 -servername pg.infra.tgy.io 
 **切り分け**: GitHub 側の webhook 配信自体は生きている（`gh api /repos/<owner>/<repo>/hooks/<id>/deliveries` が `status=200` を返す）。配線が生きていることと Sensor が発火することは別で、フィルタの判定は argo-events と同じ gopher-lua ランタイムでスクリプトを単体実行すれば決定論的に再現できる。
 
 **修正**: 認可を可変な login でなく不変の数値 id（`sender.id`）による比較に変更した。
+
+## Prometheus L7 ルールの緊急切り戻し（セキュリティ低下を伴う一時措置。恒久対応ではない）
+
+`manifests/monitoring/netpol-prometheus.yaml` の oauth2-proxy-prometheus 向け ingress ルールは `rules.http`（L7）で GET を `/debug` 以下を除いて許可、POST をクエリ系 API のみに絞っている（詳細・許可パスの一覧は `docs/network-policies.md` の prometheus 行）。この L7 ルールが原因で `prometheus.infra.tgy.io` 経由の正当なリクエストまで 403 になる場合の緊急対応を記す。
+
+**症状**: `prometheus.infra.tgy.io` にアクセスすると Prometheus Web UI が 403 を返す（oauth2-proxy 自体のログイン・OIDC コールバックは通るが、その先の Prometheus への L7 プロキシで弾かれる）。`hubble observe --verdict DROPPED` で `http-request DROPPED` が出る場合はこれ。
+
+**原因として切り分け済みのもの（該当しない）**: CLAUDE.md に記載の Cilium Gateway bug（#41970）は、issue 本文によれば **GAMMA（mesh）HTTPRoute を Service に直接貼った場合限定**の症状。`manifests/infra/prometheus-route.yaml` の `parentRefs` は `kind: Gateway`（`main-gateway`）であり GAMMA ではない。このクラスタに GAMMA 型 HTTPRoute は存在せず、同一構成（Gateway HTTPRoute → oauth2-proxy Service → 別 CNP の L7 ルールでバックエンドへ）の oauth2-proxy-hubble / oauth2-proxy-seaweedfs / oauth2-proxy-rss は本番稼働していて 403 を起こしていない。**#41970 が原因である可能性は排除済み**なので、403 が出た場合は別の原因（正規表現の組み方、Envoy の `:path` がクエリ文字列込みであることの見落とし等）を先に疑うこと。
+
+**緊急切り戻し手順（セキュリティ低下を伴う）**: `manifests/monitoring/netpol-prometheus.yaml` の oauth2-proxy-prometheus 用 ingress ブロックから `rules.http` を丸ごと削除し、`toPorts.ports` だけの L4 ルールに戻す。
+
+**この切り戻しをすると何が起きるか（セキュリティが下がる）**: `rules.http` が抑えている危険なエンドポイント（詳細・許可パスの一覧は `docs/network-policies.md` の prometheus 行を参照）を SSO でログインできる全ユーザーが叩けるようになる。Prometheus 自体のフラグ構成（`--web.enable-lifecycle` / `--web.enable-remote-write-receiver` は config-reloader / tempo の内部利用があり落とせない）は変わらないため、UI 自体は L4 のみでも到達できてしまう。**復旧を確認したら速やかに `rules.http` を戻すこと**（外したまま放置しない）。

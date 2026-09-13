@@ -51,7 +51,7 @@ data:
     # imager を使う initContainer だけを名前順に取る。同じファイルに載っている
     # argo-tools や alpine の digest は入らない——そこが「無関係な変更で焼き直さない」の要。
     SEL='[.status.storedWorkflowTemplateSpec.templates[]? | .initContainers[]?
-          | select(.image | test("ghcr\\.io/tsuguya/imager")) | {name, image, args}]
+          | select(.image | test("ghcr\\.io/tsuguya-hc/imager")) | {name, image, args}]
          | sort_by(.name)'
 
     # `--request-timeout` は付けない。**このフラグは kubectl の in-cluster 設定の解決を
@@ -119,7 +119,7 @@ data:
     INSTALLER_TAR=$(find /build -name '*.tar' | head -1)
     echo "=== Pushing SecureBoot installer: ${INSTALLER_TAR} ==="
     crane auth login ghcr.io -u tsuguya -p "${GHCR_TOKEN}"
-    crane push "${INSTALLER_TAR}" "ghcr.io/tsuguya/installer:${VERSION}"
+    crane push "${INSTALLER_TAR}" "ghcr.io/tsuguya-hc/installer:${VERSION}"
     echo "=== Done ==="
 
   push-iso.sh: |

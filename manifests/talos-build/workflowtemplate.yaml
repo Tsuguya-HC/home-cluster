@@ -302,7 +302,7 @@ spec:
               mountPath: /github-token
               readOnly: true
         - name: build
-          image: "ghcr.io/tsuguya/imager:{{inputs.parameters.version}}"
+          image: "ghcr.io/tsuguya-hc/imager:{{inputs.parameters.version}}"
           command: [/bin/imager]
           args:
             - secureboot-installer
@@ -318,7 +318,7 @@ spec:
             # renovate: datasource=docker depName=ghcr.io/siderolabs/kata-containers
             - ghcr.io/siderolabs/kata-containers:3.32.0@sha256:287e3cee744f3258a98818a5a3370265255d104ecacb4efa0eed38c77de323fa
             - --base-installer-image
-            - "ghcr.io/tsuguya/installer-base:{{inputs.parameters.version}}"
+            - "ghcr.io/tsuguya-hc/installer-base:{{inputs.parameters.version}}"
             - --extra-kernel-arg
             - "-lockdown"
             - --extra-kernel-arg
@@ -440,7 +440,7 @@ spec:
               mountPath: /github-token
               readOnly: true
         - name: build-secureboot-iso
-          image: "ghcr.io/tsuguya/imager:{{inputs.parameters.version}}"
+          image: "ghcr.io/tsuguya-hc/imager:{{inputs.parameters.version}}"
           command: [/bin/imager]
           args:
             - secureboot-iso
@@ -456,7 +456,7 @@ spec:
             # renovate: datasource=docker depName=ghcr.io/siderolabs/kata-containers
             - ghcr.io/siderolabs/kata-containers:3.32.0@sha256:287e3cee744f3258a98818a5a3370265255d104ecacb4efa0eed38c77de323fa
             - --base-installer-image
-            - "ghcr.io/tsuguya/installer-base:{{inputs.parameters.version}}"
+            - "ghcr.io/tsuguya-hc/installer-base:{{inputs.parameters.version}}"
             - --extra-kernel-arg
             - "-lockdown"
             - --extra-kernel-arg
@@ -482,7 +482,7 @@ spec:
             - name: build-sb-iso
               mountPath: /build-sb-iso
         - name: build-iso
-          image: "ghcr.io/tsuguya/imager:{{inputs.parameters.version}}"
+          image: "ghcr.io/tsuguya-hc/imager:{{inputs.parameters.version}}"
           command: [/bin/imager]
           args:
             - iso
@@ -498,7 +498,7 @@ spec:
             # renovate: datasource=docker depName=ghcr.io/siderolabs/kata-containers
             - ghcr.io/siderolabs/kata-containers:3.32.0@sha256:287e3cee744f3258a98818a5a3370265255d104ecacb4efa0eed38c77de323fa
             - --base-installer-image
-            - "ghcr.io/tsuguya/installer-base:{{inputs.parameters.version}}"
+            - "ghcr.io/tsuguya-hc/installer-base:{{inputs.parameters.version}}"
             - --extra-kernel-arg
             - "-lockdown"
             - --extra-kernel-arg

@@ -44,7 +44,7 @@ jobs:
           # First-party registries: their digests are built and signed by our
           # own pipeline, so the "detect an upstream compromise" premise the
           # cooldown exists for does not apply.
-          skip-registries: registry.infra.tgy.io,ghcr.io/tsuguya
+          skip-registries: registry.infra.tgy.io,ghcr.io/tsuguya-hc
           # Gate tag bumps on our clock too, not just pure digest bumps.
           gate-version-bumps: true
           # The self-hosted Renovate runs as our own GitHub App, so its PRs are

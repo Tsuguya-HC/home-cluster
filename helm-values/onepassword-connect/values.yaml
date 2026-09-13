@@ -1,4 +1,10 @@
+# credentials.json をローテーションしたら Connect Server を自動再起動する。
+# Connect Server は起動時にしか credentials を読まないため、Secret を書き換えただけでは古い認証情報を掴み続ける。
+# connect.annotations は Deployment の metadata.annotations（pod template ではない）にレンダリングされる
+# （connect chart 2.4.1 templates/connect-deployment.yaml で実証済み）。
 connect:
+  annotations:
+    secret.reloader.stakater.com/reload: "onepassword-connect"
   credentialsName: onepassword-connect
   credentialsKey: 1password-credentials.json
   api:

@@ -190,7 +190,9 @@ spec:
                 # 取り込みは決定論の側でやる。エージェントに clone させると「どの ref を
                 # 読んだか」が run ごとに変わり、指摘の再現ができなくなる。
                 ESCALATE=/workspace/escalate
-                # sync は Kata + NFS の workspace PVC に要る（taskflow-cnp-check.yaml の同じ箇所）。
+                # sync は Kata + NFS の workspace PVC に要る（下の agent コンテナと同じ理由）。
+                # cnp-check は runc に落としたのでこの罠を踏まない側になった
+                # （taskflow-cnp-check.yaml、sync は保険で残しているだけ）。
                 give_up() { printf '%s\n' "$1" > "$ESCALATE/report.md"; sync; exit 0; }
 
                 REPO=Tsuguya-HC/taskflow

@@ -25,8 +25,14 @@
 #   - publish の rename が qnap-nfs 上で成立し、results/<runID> に現れる
 #   - 閉じた 0555 が rename を越えて棚の上でも保たれる（publish が rename のために一度開けて閉じ直す）
 #   - 後続フェーズが subPath: results で「棚」を読める（自分の run ではなく前の run が見える）
-#   - **Kata + NFS の組み合わせで一周する**（本番の handler は runtimeClassName: kata なので、
-#     runc で通っただけでは「本番でも通る」と言えない）
+#   - **Kata + NFS の組み合わせで一周する**（taskflow が支える runtime のうち壊れやすいのは
+#     kata 側なので、runc で通っただけでは通ると言えない）
+#
+# この smoke が守っているのは taskflow 側の配管の保証（PVC 生成・work/<runID> への pin・
+# 0555 封印・publish の rename・subPath: results での棚読み）であって、本番 handler の
+# 模写ではない。Kata を載せているのは、taskflow が支える runtime のうち壊れやすい側で
+# 配管を通すため（下の exit-sync の罠）— 本番のどの handler が kata かとは独立に決まる。
+# 現状の内訳は pr-review が kata、cnp-check が runc（taskflow-cnp-check.yaml）。
 #
 # Kata を載せているのは飾りではない。Kata のゲストは NFS を virtio-fs 越しに見ており、
 # **書き戻しが残ったままコンテナが exit すると、ゲストエージェントが応答を失って shim が
@@ -35,7 +41,8 @@
 # sync か 1 秒の待ちを挟むと 0）。同じ Pod のサイドカーも巻き添えで 255 になるので、
 # framework の publish サイドカーでは手当てできず、**書いた本人が sync する**しかない。
 # 下の 2 つの handler が末尾で sync しているのはそのため。この smoke が runc のままだと
-# この罠は本番の cnp-check で初めて出る。
+# この罠は本番の pr-review で初めて出る（cnp-check は runc に落としたので、この形を
+# 本番で踏むのは pr-review だけ — taskflow-cnp-check.yaml）。
 #
 # 棚のレイアウトは results/<runID>/<宣言ディレクトリ>/report.md。手元の run と同じ形
 # （/workspace/ok/report.md ↔ /shelf/<runID>/ok/report.md）。初版は間に out/ が挟まっていて
@@ -65,7 +72,8 @@ spec:
           taskflow-smoke: "true"
       spec:
         restartPolicy: Never
-        # 本番の handler と同じランタイム。runc で通っても Kata で通るとは限らない（冒頭参照）。
+        # taskflow が支える runtime のうち壊れやすいのは kata 側（下の exit-sync の罠、冒頭参照）。
+        # runc で通っても通るとは限らないので、ここは kata を外さない。
         runtimeClassName: kata
         # taskflow-smoke.yaml が定義する ServiceAccount を再利用（ここでは定義しない）。
         # 権限ゼロ・automountServiceAccountToken: false が一致しているので使い回して問題ない。
@@ -131,7 +139,8 @@ spec:
           taskflow-smoke: "true"
       spec:
         restartPolicy: Never
-        # 本番の handler と同じランタイム。runc で通っても Kata で通るとは限らない（冒頭参照）。
+        # taskflow が支える runtime のうち壊れやすいのは kata 側（下の exit-sync の罠、冒頭参照）。
+        # runc で通っても通るとは限らないので、ここは kata を外さない。
         runtimeClassName: kata
         # taskflow-smoke.yaml が定義する ServiceAccount を再利用（ここでは定義しない）。
         # 権限ゼロ・automountServiceAccountToken: false が一致しているので使い回して問題ない。

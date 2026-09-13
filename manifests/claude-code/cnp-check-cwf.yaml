@@ -51,20 +51,13 @@ rules:
     resources: [workflowtaskresults]
     verbs: [create, patch]
 ---
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: agent-cnp-reader-executor
-  namespace: claude-code
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: agent-executor
-subjects:
-  - kind: ServiceAccount
-    name: agent-cnp-reader
-    namespace: claude-code
----
+# agent-cnp-reader へのこの Role の RoleBinding は無い。かつて Step 0 の cnp-check が
+# Argo Workflow として動いていた頃、agent-cnp-reader コンテナ自身が Argo executor として
+# workflowtaskresults を書く必要があって与えたものだが、taskflow の Job（cnp-planner /
+# cnp-reporter）にはその経路が無い。agent-cnp-reader を ClusterRole 同様の get/list だけの
+# 読み取り専用にするため撤去した（taskflow-cnp-check.yaml が「守っているのは SA の read-only」
+# と主張する前提）。executor 権限が要るのは今も起票側の task-submitter だけ（下）。
+#
 # 起票用。tasks の create しか持たない（handler の SA とは別に切る: 起票する側が
 # 点検する権限を持つ必要はない）。
 apiVersion: v1

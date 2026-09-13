@@ -161,7 +161,26 @@ spec:
           taskflow-cnp-check: "true"
       spec:
         restartPolicy: Never
-        runtimeClassName: kata
+        # サンドボックス（RuntimeClass kata）は使わない。この flow が読むのはクラスタ自身の
+        # 状態と、自分が前のフェーズで書いた報告だけで、外から持ってきたコードは実行しない。
+        # ここを守っているのは SA の read-only と CNP であって VM ではない。外のコード
+        # （PR の ref）と外の文章（PR 本文）をプロンプトに取り込む pr-review 側は kata のまま
+        # （taskflow-pr-review.yaml）。read-only の裏付けは ClusterRole agent-cnp-reader の
+        # get/list だけ（cnp-check-cwf.yaml）。旧 Argo Workflow 版が持っていた
+        # workflowtaskresults の create/patch（Argo executor 用）は taskflow の Job では
+        # 経路が無いので撤去済み。
+        #
+        # 手放したもの: SA と CNP が絞るのは「注入が成功した後、エージェントが何に到達できるか」
+        # であって、「注入が成功した後、コンテナが host kernel に対して何ができるか」ではない。
+        # kata が提供していたのは後者（VM 境界）で、runc に落とした以上ここは手放している。
+        # 残る守りは cap drop ALL / non-root / seccomp RuntimeDefault / hostPath・hostNetwork・
+        # hostPID なし、それに上の SA read-only と CNP。
+        #
+        # 外部由来の文字列がこの flow に入る唯一の経路は、この 調査 フェーズが Loki から引く
+        # hubble の POLICY_DENIED（外から来た identity / DNS 名）。ここを突かれても、到達
+        # できるのは上の CNP が開けた範囲（apiserver・Loki・Anthropic API）と SA の read-only
+        # 権限までで、API 越しの被害は読み取りに閉じる。それを、kata + NFS の exit-sync 罠
+        # という実在の故障クラス（taskflow-smoke-workspace.yaml 冒頭）と引き換えに受け入れている。
         serviceAccountName: agent-cnp-reader
         # 既定の 30 秒だと、TERM 後の子プロセス停止待ちと NFS 越しの sync で猶予を食い潰しうる
         # （子の停止時間そのものは未実測。安全側のマージンとして確保）。
@@ -180,8 +199,7 @@ spec:
           - name: parts
             emptyDir: {}
           # parts リポは private。clone 用の installation token を作る App の鍵で、init だけが
-          # マウントする（root 所有なので 0444 で other-read。fsGroup は Kata の subPath と
-          # 相性が悪く使わない — taskflow-pr-review.yaml）。
+          # マウントする（root 所有なので 0444 で other-read なので fsGroup は要らない）。
           - name: github-app
             secret:
               secretName: github-app-private-key
@@ -222,7 +240,7 @@ spec:
                 cpu: 100m
                 memory: 64Mi
               limits:
-                cpu: "1"
+                # cpu limit は置かない（agent コンテナと同じ理由、下記参照）。
                 memory: 256Mi
         containers:
           - name: agent
@@ -256,12 +274,11 @@ spec:
                 wait $pid || true
                 # 判定はディレクトリで出る。ここから先は何もしない（回収は publish サイドカー）。
                 #
-                # sync は Kata + NFS の workspace PVC に要る。書き戻しが残ったままコンテナが
-                # exit すると Kata のゲストエージェントが応答を失い、shim が終了コードを
-                # 取れずに 255 を返す（report.md は落ちているのに Pod は Failed）。
-                # 2026-09-05 に wn-03 / kata-containers 3.30.0 で実測: 書いて即 exit は 5/5 で
-                # 255、sync か 1 秒の待ちを挟むと 0。同じ Pod のサイドカーも巻き添えで 255 に
-                # なるため publish サイドカー側では手当てできない — 書いた本人が flush する。
+                # sync は NFS 越しの workspace PVC への書き戻しを exit 前に確定させる保険。
+                # kata で回していたときは必須だった（書き戻しを残して exit すると Pod 内の
+                # 全コンテナが 255 で落ちる。2026-09-05 に wn-03 で 5/5 実測。この形は kata の
+                # ままの taskflow-pr-review.yaml には今も効く）。runc では publish サイドカーが
+                # 同じ mount を見るので close だけで足りるが、安いので残す。
                 sync
             env:
               - name: HOME
@@ -288,9 +305,10 @@ spec:
                 cpu: 500m
                 memory: 512Mi
               limits:
-                # Kata では limit がそのまま VM のサイズ。cpu limit を書かないと 1 vCPU に
-                # なる（[[image-build-kata-cpu-starvation]] の実測）ので必ず書く。
-                cpu: "2"
+                # cpu limit は置かない — CPU はコンプレッシブルリソースで、limit を設定すると
+                # CFS throttling が発生しレイテンシが悪化する（docs/resource-limits.md）。
+                # kata のときは limit が VM のサイズを決めていたので必須だったが、runc に
+                # 落ちた以上その例外は消える。
                 memory: 4Gi
 ---
 apiVersion: flow.tgy.io/v1alpha1
@@ -315,7 +333,16 @@ spec:
           taskflow-cnp-report: "true"
       spec:
         restartPolicy: Never
-        runtimeClassName: kata
+        # サンドボックス（RuntimeClass kata）は使わない。この flow が読むのはクラスタ自身の
+        # 状態と、自分が前のフェーズで書いた報告だけで、外から持ってきたコードは実行しない。
+        # ここを守っているのは SA の read-only と CNP であって VM ではない。外のコード
+        # （PR の ref）と外の文章（PR 本文）をプロンプトに取り込む pr-review 側は kata のまま
+        # （taskflow-pr-review.yaml）。agent-cnp-reporter は RBAC 自体を持たず
+        # automountServiceAccountToken: false（下）なので、read-only よりさらに絞れている。
+        #
+        # 手放したもの・受け入れた理由は 調査 フェーズと同じ（cnp-planner の同じ箇所）。
+        # この 報告 フェーズは apiserver も Loki も持たないので、外部由来の文字列が入る経路は
+        # 前フェーズが既に書いた報告を読むことだけ。
         serviceAccountName: agent-cnp-reporter
         automountServiceAccountToken: false
         # 既定の 30 秒だと、TERM 後の子プロセス停止待ちと NFS 越しの sync で猶予を食い潰しうる
@@ -333,8 +360,7 @@ spec:
           - name: parts
             emptyDir: {}
           # parts リポは private。clone 用の installation token を作る App の鍵で、init だけが
-          # マウントする（root 所有なので 0444 で other-read。fsGroup は Kata の subPath と
-          # 相性が悪く使わない — taskflow-pr-review.yaml）。
+          # マウントする（root 所有なので 0444 で other-read なので fsGroup は要らない）。
           - name: github-app
             secret:
               secretName: github-app-private-key
@@ -375,7 +401,7 @@ spec:
                 cpu: 100m
                 memory: 64Mi
               limits:
-                cpu: "1"
+                # cpu limit は置かない（agent コンテナと同じ理由、下記参照）。
                 memory: 256Mi
           # 人間への報告のうち 完了（Success）だけをここで扱う（設計 §7 / §9）。SIGTERM で
           # ok/ が非空かどうかを見る。escalate / ambiguous（ok と escalate 両方が非空）/
@@ -472,12 +498,11 @@ spec:
                       exit 143' TERM INT
                 wait $pid || true
                 #
-                # sync は Kata + NFS の workspace PVC に要る。書き戻しが残ったままコンテナが
-                # exit すると Kata のゲストエージェントが応答を失い、shim が終了コードを
-                # 取れずに 255 を返す（report.md は落ちているのに Pod は Failed）。
-                # 2026-09-05 に wn-03 / kata-containers 3.30.0 で実測: 書いて即 exit は 5/5 で
-                # 255、sync か 1 秒の待ちを挟むと 0。同じ Pod のサイドカーも巻き添えで 255 に
-                # なるため publish サイドカー側では手当てできない — 書いた本人が flush する。
+                # sync は NFS 越しの workspace PVC への書き戻しを exit 前に確定させる保険。
+                # kata で回していたときは必須だった（書き戻しを残して exit すると Pod 内の
+                # 全コンテナが 255 で落ちる。2026-09-05 に wn-03 で 5/5 実測。この形は kata の
+                # ままの taskflow-pr-review.yaml には今も効く）。runc では publish サイドカーが
+                # 同じ mount を見るので close だけで足りるが、安いので残す。
                 sync
             env:
               - name: HOME
@@ -511,9 +536,10 @@ spec:
                 cpu: 500m
                 memory: 512Mi
               limits:
-                # Kata では limit がそのまま VM のサイズ。cpu limit を書かないと 1 vCPU に
-                # なる（[[image-build-kata-cpu-starvation]] の実測）ので必ず書く。
-                cpu: "2"
+                # cpu limit は置かない — CPU はコンプレッシブルリソースで、limit を設定すると
+                # CFS throttling が発生しレイテンシが悪化する（docs/resource-limits.md）。
+                # kata のときは limit が VM のサイズを決めていたので必須だったが、runc に
+                # 落ちた以上その例外は消える。
                 memory: 4Gi
 ---
 apiVersion: flow.tgy.io/v1alpha1

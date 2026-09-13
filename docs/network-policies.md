@@ -44,6 +44,7 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 | Workflow pods (claude-code) | SeaweedFS filer (seaweedfs) | 8333 | Artifact/log storage |
 | Workflow pods (rss) | SeaweedFS filer (seaweedfs) | 8333 | Artifact/log storage |
 | Workflow pods (claude-code) | Loki gateway (monitoring) | 8080 | Log query (logcli) |
+| taskflow-cnp-check (claude-code) | Loki gateway (monitoring) | 8080 | Log query (cnp-check investigation) |
 | PXE sync pods (argo) | SeaweedFS filer (seaweedfs) | 8333 | Artifact/log storage |
 | Etcd backup (argo) | SeaweedFS filer (seaweedfs) | 8333 | Backup storage |
 | Kanidm backup (argo) | SeaweedFS filer (seaweedfs) | 8333 | Backup storage |

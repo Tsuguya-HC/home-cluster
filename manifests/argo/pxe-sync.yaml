@@ -160,6 +160,15 @@ spec:
       volumes:
         - name: workspace
           emptyDir: {}
+        # talosctl comes from the talos-tools image; the render step itself runs in
+        # argo-tools (yq, git). Neither image has both, so the binary is handed over
+        # through an emptyDir instead of downloading an unpinned release at run time.
+        - name: tools
+          emptyDir: {}
+        - name: talos-secrets
+          secret:
+            secretName: talos-secrets
+            defaultMode: 0440
       initContainers:
         - name: git-clone
           image: alpine/git:v2.54.0@sha256:6f3b5029566da8e90b24945933dcd806be866b64b1e706f51828bf84faccf21b
@@ -172,8 +181,25 @@ spec:
             allowPrivilegeEscalation: false
             capabilities:
               drop: [ALL]
+        - name: talosctl
+          image: registry.infra.tgy.io/tools/talos-tools:latest@sha256:d0a393a948cad4d983172534ed19424ab9bfa5edcce4e8a90fec951a29bb2da8
+          command: [cp, /usr/local/bin/talosctl, /tools/talosctl]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            # limit はコピーする talosctl バイナリのサイズ級（dirty page cache が cgroup memory に乗る）
+            limits:
+              memory: 256Mi
+          volumeMounts:
+            - name: tools
+              mountPath: /tools
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
       container:
-        image: alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
+        image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:0b658d03cee98b3118622d47d07950b5dc5dd8ef73689bab68ff28c00299f296
         resources:
           requests:
             cpu: 10m
@@ -184,65 +210,41 @@ spec:
         args:
           - |
             set -euo pipefail
-
-            # renovate: datasource=github-releases depName=budimanjojo/talhelper
-            TALHELPER_VERSION="v3.1.17"
-            # renovate: datasource=github-releases depName=getsops/sops
-            SOPS_VERSION="v3.13.3"
-
-            echo "=== Installing talhelper ${TALHELPER_VERSION} ==="
-            wget -qO- "https://github.com/budimanjojo/talhelper/releases/download/${TALHELPER_VERSION}/talhelper_linux_amd64.tar.gz" | tar xz -C /tmp
-            chmod +x /tmp/talhelper
-
-            echo "=== Installing sops ${SOPS_VERSION} ==="
-            wget -qO /tmp/sops "https://github.com/getsops/sops/releases/download/${SOPS_VERSION}/sops-${SOPS_VERSION}.linux.amd64"
-            chmod +x /tmp/sops
-
-            export PATH="/tmp:${PATH}"
-
+            export PATH="/tools:${PATH}"
             cd /workspace
 
-            echo "=== Running talhelper genconfig ==="
-            talhelper genconfig --no-gitignore
+            echo "=== Rendering machine configs (home-infra scripts/genconfig.sh) ==="
+            # The talos-tools talosctl is newer than cluster.yaml's version contract and
+            # warns about fields the contract still uses; validation stays non-strict here
+            # (home-infra's CI runs the strict pass with the pinned client).
+            TALOS_SECRETS=/secrets/secrets.yaml TALOS_VALIDATE_ARGS="" sh scripts/genconfig.sh
 
-            echo "=== Mapping configs to MAC addresses ==="
+            echo "=== Mapping configs to MAC addresses (nodes.yaml) ==="
             CONFIG_DIR=/pxe/config
-            CLUSTER_DIR=/workspace/clusterconfig
-
-            map_config() {
-              mac="$1"
-              hostname="$2"
-              src="${CLUSTER_DIR}/home-cluster-${hostname}.yaml"
+            yq -r '.nodes[] | select(.mac != null) | .host + " " + .mac' nodes.yaml \
+            | while read -r host mac; do
+              src="clusterconfig/${host}.yaml"
               dst="${CONFIG_DIR}/${mac}.yaml"
               if [ -f "$src" ]; then
                 cp "$src" "$dst"
-                # talhelper は 0600 で書くが PXE の nginx ワーカーが読めず 403 になる。
+                # genconfig.sh は 0600 で書くが PXE の nginx ワーカーが読めず 403 になる。
                 # nginx は group users で動かすので group 読みだけ許可する
                 chmod 640 "$dst"
-                echo "Synced: ${hostname} -> ${mac}.yaml"
+                echo "Synced: ${host} -> ${mac}.yaml"
               else
                 echo "WARNING: $src not found" >&2
               fi
-            }
-
-            # CP は Gen2 (AOOSTAR/TianBei N1 Pro)。MAC は enp3s0 側 (I226-V ×2 のうち LAN を挿す方)
-            map_config "c8-ff-bf-05-ec-b7" "cp-11.cluster.internal"
-            map_config "c8-ff-bf-05-ea-9b" "cp-12.cluster.internal"
-            map_config "c8-ff-bf-05-e9-8f" "cp-13.cluster.internal"
-            map_config "7c-83-34-be-c0-b4" "wn-01.cluster.internal"
-            map_config "68-1d-ef-36-c6-e3" "wn-02.cluster.internal"
-            map_config "58-47-ca-73-ce-2a" "wn-03.cluster.internal"
+            done
 
             echo "=== Done ==="
             ls -lh "${CONFIG_DIR}/"
-        env:
-          - name: SOPS_AGE_KEY
-            valueFrom:
-              secretKeyRef:
-                name: sops-age-key
-                key: credential
         volumeMounts:
           - name: workspace
             mountPath: /workspace
+          - name: tools
+            mountPath: /tools
+          - name: talos-secrets
+            mountPath: /secrets
+            readOnly: true
           - name: pxe
             mountPath: /pxe

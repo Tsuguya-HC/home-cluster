@@ -36,7 +36,7 @@ data:
     log-dhcp
 
   nginx.conf: |
-    # machine config は talhelper が 0600 で書き、pxe-sync が 0640 に落とす。
+    # machine config は home-infra の genconfig.sh が 0600 で書き、pxe-sync が 0640 に落とす。
     # ワーカーを group users で動かすことで、0644 にせず配信できるようにする
     user nginx users;
     events {}

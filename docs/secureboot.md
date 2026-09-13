@@ -107,14 +107,14 @@ upstream `e4afe22` ("fix: iscsi-tools and multipath-tools", 2026-03-15) で `con
 
 ### 前提
 
-- `ghcr.io/tsuguya/installer:vX.Y.Z` に SecureBoot 署名済み installer が存在
+- `ghcr.io/tsuguya-hc/installer:vX.Y.Z` に SecureBoot 署名済み installer が存在
 - USB に .auth ファイル（PK.auth, KEK.auth, db.auth）をコピー済み
 
 ### 方法 A: UEFI Key Management（TRIGKEY G4 / NiPoGi AK2Plus）
 
 1. **installer アップグレード**
    ```bash
-   talosctl upgrade --image ghcr.io/tsuguya/installer:vX.Y.Z -n <NODE_IP>
+   talosctl upgrade --image ghcr.io/tsuguya-hc/installer:vX.Y.Z -n <NODE_IP>
    ```
 
 2. **UEFI キー登録**（物理アクセス必要）
@@ -137,7 +137,7 @@ UEFI Shell で .auth ファイルを ESP に配置し、systemd-boot の自動�
 
 1. **SecureBoot installer にアップグレード**
    ```bash
-   talosctl upgrade --image ghcr.io/tsuguya/installer:vX.Y.Z -n <NODE_IP>
+   talosctl upgrade --image ghcr.io/tsuguya-hc/installer:vX.Y.Z -n <NODE_IP>
    ```
 
 2. **UEFI 設定変更**（物理アクセス必要）

@@ -12,6 +12,7 @@ kubeEtcd:
   endpoints:
     - 192.168.10.230
     - 192.168.10.231
+    - 192.168.10.232
 
 nodeExporter:
   operatingSystems:

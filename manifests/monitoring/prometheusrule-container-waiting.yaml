@@ -18,7 +18,7 @@ spec:
         #
         # 2026-09-12 に claude-code の taskflow Task 2 件がこの形で発火した。
         # Task は当日中に NoAnswer で決着していて、Job は設計上 Task の TTL
-        # （7 日）まで残る（taskflow ADR-0004）。同じ 14 日間に trading の
+        # （7 日）まで残る（taskflow design.md §10「掃除」）。同じ 14 日間に trading の
         # CronJob Pod 3 件も同じ形で 21 時間ずつ発火していた。
         #
         # 決着した Pod（Failed / Succeeded）の中のコンテナは「待っている」わけでは

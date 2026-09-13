@@ -22,13 +22,25 @@ spec:
         # namespace ラベルは scrape 元の argo に潰されるため、実際に
         # ワークフローが動いた namespace は exported_namespace に入る
         # （ServiceMonitor が honorLabels: false のため）。
+        #
+        # increase() は窓の端を線形外挿するため、実増分と表示件数は
+        # ずれる。外挿係数は常に 1 以上なので、floor で切り捨てても
+        # 実増分 1 が 0 に落ちて検知を取りこぼすことはない。round は
+        # 外挿分の蓄積で繰り上がりうるため使わない。
+        #
+        # $value は概数。workflow-controller の再起動直後など窓
+        # (10m) 内のサンプルが少ない期間は外挿係数が大きく振れ、
+        # 実増分 1 件が floor でも 2 件と表示されうる。正確な件数は
+        # リンク先の Argo UI で確認すること。
         - alert: ArgoWorkflowFailed
           expr: |
-            sum by (exported_namespace, phase) (
-              increase(argo_workflows_total_count{phase=~"Failed|Error"}[10m])
+            floor(
+              sum by (exported_namespace, phase) (
+                increase(argo_workflows_total_count{phase=~"Failed|Error"}[10m])
+              )
             ) > 0
           labels:
             severity: warning
           annotations:
             summary: "ワークフローが {{ $labels.phase }} で終了 ({{ $labels.exported_namespace }})"
-            description: "{{ $labels.exported_namespace }} で直近 10 分に {{ $value | humanize }} 件のワークフローが {{ $labels.phase }} になった。Failed はステップ自体の失敗、Error は executor やインフラ側の異常。https://argo.infra.tgy.io/workflows/{{ $labels.exported_namespace }}"
+            description: "{{ $labels.exported_namespace }} で直近 10 分に {{ $value }} 件のワークフローが {{ $labels.phase }} になった。Failed はステップ自体の失敗、Error は executor やインフラ側の異常。https://argo.infra.tgy.io/workflows/{{ $labels.exported_namespace }}"

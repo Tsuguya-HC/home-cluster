@@ -20,3 +20,8 @@ certController:
       memory: 32Mi
     limits:
       memory: 128Mi
+
+# 1Password Connect のトークン / credentials をローテーションしたら ESO を自動再起動する。
+# ESO は provider クライアントを保持するため、Secret を書き換えただけでは古い認証情報を掴み続ける。
+deploymentAnnotations:
+  secret.reloader.stakater.com/reload: "onepassword-connect"

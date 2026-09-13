@@ -55,3 +55,4 @@ manual/        # Manual bootstrap steps
 - [災害復旧](docs/disaster-recovery.md) — PostgreSQL, etcd, Kanidm の復旧手順
 - [IPv6](docs/ipv6.md) — 委任プレフィックス構成・変更時の手順・監視
 - [既知の問題](docs/known-issues.md) — 初回構築時の注意点など
+- [Secret ローテーション](docs/secrets-rotation.md) — 1Password Connect credentials/token の定常運用手順

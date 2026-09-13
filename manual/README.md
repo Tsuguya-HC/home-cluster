@@ -75,6 +75,8 @@ ESO が起動すると、ClusterSecretStore 経由でクラスタ内の Connect 
 `manifests/secrets/` の ExternalSecret から各 namespace に Secret を自動生成する。
 ExternalSecret は専用の `secrets` ArgoCD Application で管理され、他 app の reconcile から隔離する。
 
+credentials / token のローテーション（定常運用）は `docs/secrets-rotation.md` を参照。
+
 ## 以降は自動
 
 上記 4 ステップ完了後、ArgoCD が app-of-apps 経由で全サービスを自動デプロイする:

@@ -1,3 +1,10 @@
+# KubeContainerWaiting は Failed / Succeeded で決着した Pod の中の「起動されなかった
+# コンテナ」も waiting として数えるので、chart 同梱版を止めて
+# manifests/monitoring/prometheusrule-container-waiting.yaml で置き換えている。
+defaultRules:
+  disabled:
+    KubeContainerWaiting: true
+
 kubeProxy:
   enabled: false
 

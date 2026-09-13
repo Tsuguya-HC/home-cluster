@@ -1,0 +1,37 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: container-waiting
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: container-waiting
+      rules:
+        # chart 同梱の KubeContainerWaiting の置き換え（values で disabled にしている）。
+        #
+        # init container が失敗した Pod では、メインコンテナは一度も起動されず
+        # waiting / PodInitializing のまま固定される。Pod 自体は Failed で決着して
+        # いるのに、kube_pod_container_status_waiting_reason は 1 を出し続けるので、
+        # 同梱版（CrashLoopBackOff だけ除外）は Pod が GC されるまで鳴り続ける。
+        #
+        # 2026-09-12 に claude-code の taskflow Task 2 件がこの形で発火した。
+        # Task は当日中に NoAnswer で決着していて、Job は設計上 Task の TTL
+        # （7 日）まで残る（taskflow ADR-0004）。同じ 14 日間に trading の
+        # CronJob Pod 3 件も同じ形で 21 時間ずつ発火していた。
+        #
+        # 決着した Pod（Failed / Succeeded）の中のコンテナは「待っている」わけでは
+        # ないので除外する。Task の失敗そのものは taskflow 側の alert が知らせる。
+        - alert: KubeContainerWaiting
+          expr: |
+            kube_pod_container_status_waiting_reason{job="kube-state-metrics", reason!="CrashLoopBackOff"} > 0
+            unless on (namespace, pod)
+            kube_pod_status_phase{job="kube-state-metrics", phase=~"Failed|Succeeded"} == 1
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Pod container waiting longer than 1 hour"
+            description: "pod/{{ $labels.pod }} in namespace {{ $labels.namespace }} on container {{ $labels.container }} has been in waiting state for longer than 1 hour. (reason: \"{{ $labels.reason }}\")"
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubecontainerwaiting

@@ -209,7 +209,7 @@ spec:
                   path: private-key
         initContainers:
           - name: parts
-            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:0d986d97428f3c04d1837031418430e49273061500dfad0c7f6ec32046cc781d
+            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:02188babb47bbdf6e9f35ec135059019cc5eeaad5c448e5c77059daaef61531f
             command: [parts]
             args: [-s, cnp-planner, -c, verdict-protocol]
             env:
@@ -244,7 +244,7 @@ spec:
                 memory: 256Mi
         containers:
           - name: agent
-            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:0d986d97428f3c04d1837031418430e49273061500dfad0c7f6ec32046cc781d
+            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:02188babb47bbdf6e9f35ec135059019cc5eeaad5c448e5c77059daaef61531f
             workingDir: /tmp
             command: [sh, -c]
             args:
@@ -370,7 +370,7 @@ spec:
                   path: private-key
         initContainers:
           - name: parts
-            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:0d986d97428f3c04d1837031418430e49273061500dfad0c7f6ec32046cc781d
+            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:02188babb47bbdf6e9f35ec135059019cc5eeaad5c448e5c77059daaef61531f
             command: [parts]
             args: [-s, cnp-reporter, -c, verdict-protocol]
             env:
@@ -469,7 +469,7 @@ spec:
                 memory: 128Mi
         containers:
           - name: agent
-            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:0d986d97428f3c04d1837031418430e49273061500dfad0c7f6ec32046cc781d
+            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:02188babb47bbdf6e9f35ec135059019cc5eeaad5c448e5c77059daaef61531f
             workingDir: /tmp
             command: [sh, -c]
             args:

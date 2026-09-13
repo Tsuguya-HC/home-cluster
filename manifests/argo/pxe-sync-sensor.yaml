@@ -37,10 +37,16 @@ spec:
           if event.body.commits == nil then
             return false
           end
+          -- Anything scripts/genconfig.sh reads: cluster.yaml, nodes.yaml, patches/**
+          -- and the script itself. The secrets bundle is in 1Password, not in git,
+          -- so rotating it alone does not trigger this Sensor. After a secrets
+          -- rotation, run manually:
+          --   argo -n argo submit --from workflowtemplate/pxe-sync -p mode=sync-configs
           for _, c in ipairs(event.body.commits) do
-            for _, list in ipairs({c.added or {}, c.modified or {}}) do
+            for _, list in ipairs({c.added or {}, c.modified or {}, c.removed or {}}) do
               for _, f in ipairs(list) do
-                if f == "talconfig.yaml" or f == "talsecret.sops.yaml" then
+                if f == "cluster.yaml" or f == "nodes.yaml" or f == "scripts/genconfig.sh"
+                    or string.sub(f, 1, 8) == "patches/" then
                   return true
                 end
               end

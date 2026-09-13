@@ -173,14 +173,16 @@ spec:
               exit 1
             fi
 
-            echo "=== Fetching talconfig.yaml at ${AFTER} ==="
-            TALCONFIG=$(curl -fsSL "https://api.github.com/repos/Tsuguya-HC/home-infra/contents/talconfig.yaml?ref=${AFTER}" \
+            echo "=== Fetching cluster.yaml / nodes.yaml at ${AFTER} ==="
+            CLUSTER=$(curl -fsSL "https://api.github.com/repos/Tsuguya-HC/home-infra/contents/cluster.yaml?ref=${AFTER}" \
+              | jq -r '.content' | base64 -d)
+            NODES=$(curl -fsSL "https://api.github.com/repos/Tsuguya-HC/home-infra/contents/nodes.yaml?ref=${AFTER}" \
               | jq -r '.content' | base64 -d)
 
-            TALOS_VER=$(echo "$TALCONFIG" | yq '.talosVersion')
+            TALOS_VER=$(echo "$CLUSTER" | yq '.talosVersion')
             echo "Talos version: ${TALOS_VER}"
 
-            NODES_JSON=$(echo "$TALCONFIG" | yq -o=json '[.nodes[] | {"hostname": .hostname, "ip": .ipAddress, "controlPlane": .controlPlane}]')
+            NODES_JSON=$(echo "$NODES" | yq -o=json '[.nodes[] | {"hostname": .host, "ip": .ip, "controlPlane": (.role == "controlplane")}]')
             echo "Nodes: ${NODES_JSON}"
 
             CP_IPS=$(echo "$NODES_JSON" | jq -r '[.[] | select(.controlPlane == true) | .ip] | join(",")')

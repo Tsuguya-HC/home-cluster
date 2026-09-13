@@ -12,7 +12,7 @@ data:
     # manifests/talos-build/ が変われば起きるので、argo-tools の digest bump のように
     # イメージの中身と何の関係も無い変更でも、16 分×2 のビルドが丸ごと走り直して
     # installer:<version> が同じタグに上書きされていた。上書きするとイメージの created が
-    # 動き、talconfig.yaml の talosVersion を追う Renovate は minimumReleaseAge をそこから
+    # 動き、home-infra の cluster.yaml の talosVersion を追う Renovate は minimumReleaseAge をそこから
     # 測るので、無関係な変更が 3 日より短い間隔で入る限り Talos の更新 PR が出てこない。
     #
     # 判定材料は「前回成功した run 自身」から取る。Argo は run ごとに参照先 WorkflowTemplate

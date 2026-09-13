@@ -38,7 +38,7 @@ All namespaces also have `warn: restricted` and `audit: restricted` (except kube
 
 ## Default Configuration
 
-Talos `admissionControl` patch in `home-infra/talconfig.yaml`:
+Talos `admissionControl` patch in `home-infra/patches/controlplane/30-admission-and-args.yaml`:
 
 ```yaml
 cluster:

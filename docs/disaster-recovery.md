@@ -199,9 +199,10 @@ talosctl -n 192.168.10.230 health \
 #### 1. 設定変更
 
 ```bash
-# home-infra: talconfig.yaml の全ノード IP, VIP, gateway, nameservers を変更
+# home-infra: 全ノードの IP / gateway / nameservers は patches/node/<host>.yaml、
+# VIP は同ファイルの Layer2VIPConfig と cluster.yaml の endpoint、nodes.yaml の ip も揃える
 cd home-infra
-vim talconfig.yaml
+vim cluster.yaml nodes.yaml patches/node/*.yaml
 make genconfig
 ```
 
@@ -213,7 +214,7 @@ make genconfig
 for entry in cp-11:<旧IP> cp-12:<旧IP> cp-13:<旧IP> wn-01:<旧IP> wn-02:<旧IP> wn-03:<旧IP>; do
   name="${entry%%:*}"; ip="${entry##*:}"
   talosctl apply-config --mode=staged \
-    -f clusterconfig/home-cluster-${name}.cluster.internal.yaml \
+    -f clusterconfig/${name}.cluster.internal.yaml \
     -n "$ip" -e "$ip"
 done
 ```
@@ -244,7 +245,7 @@ talosctl -n <cp-13新IP> -e <cp-13新IP> service etcd
 
 ```bash
 talosctl apply-config \
-  -f clusterconfig/home-cluster-cp-13.cluster.internal.yaml \
+  -f clusterconfig/cp-13.cluster.internal.yaml \
   -n <cp-13新IP> -e <cp-13新IP>
 ```
 
@@ -289,7 +290,7 @@ kubectl rollout restart deployment coredns -n kube-system
 
 | リポジトリ | ファイル | 内容 |
 |-----------|---------|------|
-| home-infra | talconfig.yaml | ノード IP, VIP, gateway, nameservers |
+| home-infra | cluster.yaml / nodes.yaml / patches/node/*.yaml | endpoint、ノード IP, VIP, gateway, nameservers |
 | home-infra | pxe/dnsmasq.conf | PXE サブネット |
 | home-cluster | manifests/infra/ip-pool.yaml | Cilium LB IP プール |
 | home-cluster | helm-values/kube-prometheus-stack/values.yaml | etcd endpoints |

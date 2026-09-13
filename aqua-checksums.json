@@ -16,8 +16,8 @@
       "algorithm": "sha256"
     },
     {
-      "id": "http/get.helm.sh/helm-v4.2.4-linux-amd64.tar.gz",
-      "checksum": "C306B46F719B0A4DA32D0F78EE21BF90CE8D602F15B22AB753F0674D1670A7F3",
+      "id": "http/get.helm.sh/helm-v4.3.0-linux-amd64.tar.gz",
+      "checksum": "86584A54DEF73570558F66F5111CC53DFED56689637AE32C1201205D494F54FB",
       "algorithm": "sha256"
     },
     {

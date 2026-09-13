@@ -71,6 +71,22 @@ spec:
         # *.githubusercontent.com / このホストの 3 つだけで、rekor と fulcio
         # には接続しない（bundle に必要な材料が入っているため）。
         - matchName: "tuf-repo-cdn.sigstore.dev"
+        # helm/helm は、この CNP が扱う5リポの aqua.yaml に現在 pin されている
+        # パッケージの中では、レジストリのエントリが GitHub Releases ではなく
+        # Helm 自身の CDN を指す唯一の例で、記録される id も
+        # `http/get.helm.sh/helm-vX.Y.Z-linux-amd64.tar.gz` になる。pin が増えて
+        # 別の CDN を指すパッケージが入るたびに、このリストは追従が要る設計。
+        #
+        # ここが無いと helm だけが落ち、その版を上げる PR の checksum が永久に
+        # 埋まらない。2026-09-13 の branch=renovate/helm-helm-4.x は 03:01〜14:20
+        # の11件全て Failed（Succeeded 0）で、ログは:
+        #
+        #   ERR request failed url=https://get.helm.sh/helm-v4.3.0-linux-amd64.tar.gz.sha256sum
+        #     error="dial tcp 150.171.110.131:443: i/o timeout" (×5 attempts)
+        #   ERR aqua failed error="it failed to update some packages' checksums"
+        #
+        # 同じ update-checksum をローカルで回すと通るので、差は経路だけ。
+        - matchName: "get.helm.sh"
       toPorts:
         - ports:
             - port: "443"

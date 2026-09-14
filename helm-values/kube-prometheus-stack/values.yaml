@@ -72,6 +72,60 @@ kube-state-metrics:
       memory: 32Mi
     limits:
       memory: 128Mi
+  rbac:
+    extraRules:
+      - apiGroups: ["gateway.networking.k8s.io"]
+        resources: ["httproutes"]
+        verbs: ["list", "watch"]
+  # HTTPRoute の status を出す。Gateway API のコントローラ（cilium-operator
+  # 内）は起動に失敗しても通常運転に入り、既存の HTTPRoute は Envoy 設定が
+  # 残っているので流れ続ける。壊れるのは新規に作った HTTPRoute だけで、
+  # status が空になるだけでエラーは出ない。2026-09-14 はこれで 21 時間
+  # 気づけなかった（docs/known-issues.md）。
+  #
+  # status.parents は配列だが、CustomResourceState のパスは [key=value] で
+  # 要素を選べるので controllerName で引く（添字 "0" だと parentRef が
+  # 増えたときに別のものを見る）。
+  customResourceState:
+    enabled: true
+    config:
+      spec:
+        resources:
+          - groupVersionKind:
+              group: gateway.networking.k8s.io
+              version: v1
+              kind: HTTPRoute
+            metricNamePrefix: gatewayapi_httproute
+            labelsFromPath:
+              namespace: [metadata, namespace]
+              httproute: [metadata, name]
+            metrics:
+              # オブジェクトの存在。status の有無に関わらず必ず出るので、
+              # 下の status_condition が「出ない」ことを検出する土台になる。
+              #
+              # KSM (v2.20.0) は type: Info でも labelsFromPath がリソース
+              # レベルではなく each.info 側にないと eachValue を1件も返さない
+              # （空の Labels map を len() != 0 で弾く実装のため）。resources
+              # レベルの namespace/httproute は返った値に後付けされるだけなので、
+              # ここが空だと httproute 名を使っても意味がない。namespace/httproute
+              # と重複しない uid を使う。
+              - name: info
+                help: "HTTPRoute object exists"
+                each:
+                  type: Info
+                  info:
+                    path: [metadata]
+                    labelsFromPath:
+                      uid: [uid]
+              - name: status_condition
+                help: "HTTPRoute status conditions reported by the Cilium gateway controller"
+                each:
+                  type: Gauge
+                  gauge:
+                    path: [status, parents, "[controllerName=io.cilium/gateway-controller]", conditions]
+                    labelsFromPath:
+                      type: ["type"]
+                    valueFrom: ["status"]
 
 prometheus-node-exporter:
   resources:

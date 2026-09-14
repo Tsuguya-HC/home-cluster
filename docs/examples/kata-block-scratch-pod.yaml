@@ -1,0 +1,78 @@
+# Kata + virtio-blk スクラッチの動く最小例（docs/kata-storage.md の型そのもの）。
+#
+# ArgoCD の管理下ではない。手で流して確かめるためのもの:
+#   kubectl apply -f docs/examples/kata-block-scratch-pod.yaml
+#   kubectl -n image-build logs -f kata-block-scratch
+#   kubectl -n image-build delete pod kata-block-scratch   # PVC は ephemeral なので一緒に消える
+#
+# image-build namespace なのは PSA が privileged だから。claude-code は baseline で SYS_ADMIN が
+# 通らない（docs/pod-security.md）。handler に入れるときはその判断が別途要る。
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kata-block-scratch
+  namespace: image-build
+spec:
+  restartPolicy: Never
+  runtimeClassName: kata
+  nodeSelector:
+    kata-containers: "true"
+  containers:
+    - name: agent
+      image: ubuntu:24.04
+      securityContext:
+        # VM の中の特権。Kata は containerd 側が privileged_without_host_devices = true なので
+        # ホストのデバイスは渡らず、守っているのは VM 境界であって capability ではない。
+        # ゲスト内で caps を絞っても PSA から見れば同じく baseline 超えで、置ける namespace は
+        # 変わらない（docs/kata-storage.md）。
+        privileged: true
+        runAsUser: 0
+      resources:
+        requests: {cpu: "1", memory: 1Gi}
+        # Kata では limits.cpu が VM の vCPU 数を決める（memory も VM のサイズ）。
+        # 書かないと 1 vCPU の VM になる（default_vcpus = 1）。
+        limits: {cpu: "2", memory: 2Gi}
+      volumeDevices:
+        - name: scratch
+          devicePath: /dev/scratch
+      command: [bash, -c]
+      args:
+        - |
+          set -eu
+
+          # 生のブロックデバイスが virtio-blk でゲストに挿さっている。中身は未初期化なので
+          # 毎回ここで作る（10GiB で 0.86 秒）。lazy_*_init=0 は初期化を後回しにしない指定で、
+          # 作業中に遅延コストが紛れ込まないようにするため。
+          # root_owner で所有者を焼いておけば、あとで chown しなくていい。
+          mkfs.ext4 -q -F \
+            -E lazy_itable_init=0,lazy_journal_init=0,root_owner=65533:65533 \
+            /dev/scratch
+
+          mkdir -p /scratch
+          mount -o noatime /dev/scratch /scratch
+
+          # 作業本体を 65533 で回すのは taskflow の配線の要件（workspace 直下が 0555、ADR-0005）で、
+          # ホストを守るためではない。実際の handler はこの先で clone / build / test を
+          # /scratch の中でやる。
+          exec setpriv --reuid 65533 --regid 65533 --clear-groups \
+                       --inh-caps=-all --no-new-privs -- bash -c '
+            id
+            df -h /scratch | tail -1
+            mkdir -p /scratch/work && cd /scratch/work
+            dd if=/dev/zero of=probe bs=1M count=64 conv=fsync status=none
+            echo "wrote $(du -sh probe | cut -f1) to virtio-blk scratch as uid $(id -u)"
+          '
+  volumes:
+    - name: scratch
+      # ephemeral = Pod と同じ寿命。Pod が消えると PVC ごと消える。
+      # ファイルシステムはゲスト内にあるので、ホストからも他コンテナからも読めない
+      # （= フェーズ間の引き渡しには使えない。渡すものは flow-workspace 側へ）。
+      ephemeral:
+        volumeClaimTemplate:
+          spec:
+            accessModes: [ReadWriteOnce]
+            storageClassName: qnap-iscsi
+            volumeMode: Block
+            resources:
+              requests:
+                storage: 10Gi

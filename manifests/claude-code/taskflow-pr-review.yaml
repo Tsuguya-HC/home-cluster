@@ -195,7 +195,18 @@ spec:
                 # （taskflow-cnp-check.yaml、sync は保険で残しているだけ）。
                 give_up() { printf '%s\n' "$1" > "$ESCALATE/report.md"; sync; exit 0; }
 
-                REPO=Tsuguya-HC/taskflow
+                # repo も Task を作った側が指定できる（既定は taskflow）。org を固定して
+                # 形も確かめてからしか使わない — この値は clone の URL と API の URL、そして
+                # プロンプトにも入るので、他所を指されるとレビュー対象がすり替わる。
+                REPO=$(printf '%s' "${FLOW_INPUT:-}" | jq -r '.repo // empty' 2>/dev/null || true)
+                [ -n "$REPO" ] || REPO=Tsuguya-HC/taskflow
+                case "$REPO" in
+                  Tsuguya-HC/*[!-A-Za-z0-9._]* | Tsuguya-HC/ | Tsuguya-HC/*/*)
+                    give_up "spec.input.repo の形が不正: レビューは行っていない。" ;;
+                  Tsuguya-HC/?*) ;;
+                  *)
+                    give_up "spec.input.repo は Tsuguya-HC 配下だけを指定できる。レビューは行っていない。" ;;
+                esac
 
                 # FLOW_INPUT は Task を作った側が書いたもの。数字であることを先に確かめてから
                 # しか使わない（URL にもプロンプトにも入るため）。

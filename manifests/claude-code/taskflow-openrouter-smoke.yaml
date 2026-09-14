@@ -1,0 +1,175 @@
+# OpenRouter 経由で claude が動くかだけを確かめるスモーク flow。
+#
+# 確かめるのは配管であってモデルの質ではない: ExternalSecret が生えているか、CNP が
+# openrouter.ai を通すか、env 3 つで Anthropic 以外のモデルに解決されるか、そして judgment が
+# 宣言ディレクトリに落ちるか。pr-review と同じ形（Kata + flow-workspace + trap/sync）にして
+# あるので、ここが緑なら実行系 handler は --model と env を差し替えるだけで載る。
+#
+# OpenRouter は Anthropic 互換の口（Anthropic Skin）を持つので翻訳プロキシは要らない。
+# 3 つの env がすべて要る: BASE_URL だけでは既存の OAuth トークンが優先され、
+# ANTHROPIC_API_KEY を空にしないと衝突する。
+#
+# 投げ方:
+#   kubectl -n claude-code create -f - <<EOF
+#   apiVersion: flow.tgy.io/v1alpha1
+#   kind: Task
+#   metadata: {generateName: openrouter-smoke-, namespace: claude-code}
+#   spec: {flow: openrouter-smoke}
+#   EOF
+---
+# kube API は要らない（workspace に書くだけ）。
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: agent-openrouter-smoke
+  namespace: claude-code
+automountServiceAccountToken: false
+---
+# 出口は openrouter.ai だけ。api.anthropic.com を**書かない**のがこの CNP の主眼で、
+# 万一 env が効いていなければ Anthropic 直行が drop されて失敗する = 取り違えが緑で通らない。
+# DNS は CCNP allow-dns で全 Pod に共通適用済み。ingress は書かないので全 deny。
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: taskflow-openrouter-smoke
+  namespace: claude-code
+spec:
+  endpointSelector:
+    matchLabels:
+      taskflow-openrouter-smoke: "true"
+  egress:
+    - toFQDNs:
+        - matchName: "openrouter.ai"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+---
+apiVersion: flow.tgy.io/v1alpha1
+kind: TaskHandler
+metadata:
+  name: openrouter-smoke
+  namespace: claude-code
+spec:
+  phase: 確認
+  runner:
+    type: Job
+  # 1 往復しかしないが、OpenRouter 側のキュー待ちが読めないので pr-review より短くだけ取る。
+  timeout: 10m
+  maxInfraRetries: 1
+  # Kata では自前 emptyDir を workspace にできない（VM 内に作られ subPath も効かないので
+  # 宣言ディレクトリが別物になる）。予約名 flow-workspace = コントローラ提供の per-task PVC。
+  workspace:
+    volume: flow-workspace
+    mountPath: /workspace
+  jobTemplate:
+    template:
+      metadata:
+        labels:
+          taskflow-openrouter-smoke: "true"
+      spec:
+        restartPolicy: Never
+        runtimeClassName: kata
+        serviceAccountName: agent-openrouter-smoke
+        automountServiceAccountToken: false
+        # TERM 後の sync（NFS 越し）に猶予を残す。pr-review と同じ。
+        terminationGracePeriodSeconds: 60
+        securityContext:
+          runAsUser: 65533
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        volumes:
+          - name: tmp
+            emptyDir: {}
+        containers:
+          - name: agent
+            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:02188babb47bbdf6e9f35ec135059019cc5eeaad5c448e5c77059daaef61531f
+            workingDir: /workspace
+            command: [sh, -c]
+            args:
+              - |
+                set -eu
+
+                # activeDeadlineSeconds の TERM は PID1 に飛ぶ。前面で待つと POSIX sh は
+                # 前面コマンドの終了まで trap を実行しないので、background + wait にする。
+                claude -p "/workspace/ok/report.md に、いま応答しているモデル名だけを 1 行で書いて終了してください。他のファイルは作らないこと。" \
+                  --verbose \
+                  --output-format stream-json \
+                  --dangerously-skip-permissions \
+                  --allowedTools "Write" \
+                  --model "$OPENROUTER_MODEL" \
+                  --max-turns 5 < /dev/null &
+                pid=$!
+                trap 'kill -TERM $pid 2>/dev/null
+                      i=0
+                      while kill -0 $pid 2>/dev/null && [ $i -lt 10 ]; do sleep 1; i=$((i+1)); done
+                      kill -KILL $pid 2>/dev/null
+                      sync
+                      exit 143' TERM INT
+                rc=0
+                wait $pid || rc=$?
+                echo "claude exited with $rc"
+                # 判定はディレクトリで出る。終了コードはログに残すだけ（OpenRouter の 402 でも
+                # stream-json の result は subtype=success を返すので、rc も result も判定には
+                # 使えない。書かれていなければ NoAnswer で正しく落ちる）。
+                sync
+            env:
+              - name: HOME
+                value: /tmp
+              - name: ANTHROPIC_BASE_URL
+                value: https://openrouter.ai/api
+              - name: ANTHROPIC_AUTH_TOKEN
+                valueFrom:
+                  secretKeyRef:
+                    name: openrouter-token
+                    key: credential
+              # 空にしないと OAuth 側が優先されて Anthropic に飛ぶ。
+              - name: ANTHROPIC_API_KEY
+                value: ""
+              - name: OPENROUTER_MODEL
+                value: z-ai/glm-5.3-flash
+              # サブエージェントは親のモデルを継がない。固定しないと既定（sonnet）に落ちて
+              # OpenRouter 上の Claude に解決され、Anthropic 価格で課金される（2026-09-14 実測、
+              # 意図しない 1 本が他の全部の 3 倍）。このスモークは Agent を許可していないが、
+              # 実行系 handler にそのまま持っていける形にしておく。
+              - name: CLAUDE_CODE_SUBAGENT_MODEL
+                value: z-ai/glm-5.3-flash
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop: [ALL]
+            volumeMounts:
+              - name: flow-workspace
+                mountPath: /workspace
+              - name: tmp
+                mountPath: /tmp
+            resources:
+              requests:
+                cpu: 200m
+                memory: 256Mi
+              limits:
+                # Kata では limit がそのまま VM のサイズ。cpu limit を書かないと 1 vCPU になる。
+                cpu: "1"
+                memory: 1Gi
+---
+apiVersion: flow.tgy.io/v1alpha1
+kind: TaskFlow
+metadata:
+  name: openrouter-smoke
+  namespace: claude-code
+spec:
+  profile: investigate
+  start: 確認
+  workspace: {}
+  bindings:
+    確認:
+      handler: openrouter-smoke
+      next:
+        完了: ok
+        # 届かなかった / モデルが答えられなかったことを書いて表明する出口。何も書かなければ
+        # NoAnswer になり、途中で死んだのと区別が付かない。
+        Escalated: escalate
+  terminals:
+    完了: Success
+  reworkBudget: 0

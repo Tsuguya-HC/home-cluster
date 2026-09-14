@@ -14,6 +14,7 @@
 | Harbor | CONFIG_OVERWRITE_JSON (OIDC) | Kanidm (コンフィデンシャル) | harbor-kanidm-oauth (harbor) | `helm-values/harbor/values.yaml` |
 | Nextcloud | user_oidc app (OIDC) | Kanidm (コンフィデンシャル) | nextcloud-kanidm-oauth (nextcloud) | `helm-values/nextcloud/values.yaml` |
 | RSS Reader | oauth2-proxy (OIDC) | Kanidm (コンフィデンシャル) | oauth2-proxy-rss-oauth (oauth2-proxy) | `helm-values/oauth2-proxy-rss/values.yaml` |
+| Prometheus | oauth2-proxy (OIDC) | Kanidm (コンフィデンシャル) | oauth2-proxy-prometheus-oauth (oauth2-proxy) | `helm-values/oauth2-proxy-prometheus/values.yaml` |
 
 ArgoCD は Kanidm パブリッククライアント (PKCE S256) を使用するため、clientSecret 不要。
 
@@ -106,6 +107,29 @@ kanidm system oauth2 show-basic-secret oauth2-proxy-hubble --url https://idm.tgy
 
 oauth2-proxy 経由で認証。clientSecret + cookieSecret を 1Password (oauth2-proxy-hubble-oauth) に保存。
 
+### Prometheus (oauth2-proxy, コンフィデンシャルクライアント)
+
+```bash
+kanidm system oauth2 create oauth2-proxy-prometheus "Prometheus" https://prometheus.infra.tgy.io --url https://idm.tgy.io
+
+kanidm system oauth2 add-redirect-url oauth2-proxy-prometheus https://prometheus.infra.tgy.io/oauth2/callback --url https://idm.tgy.io
+
+kanidm group create prometheus_users --url https://idm.tgy.io
+kanidm group add-members prometheus_users tsuguya --url https://idm.tgy.io
+
+kanidm system oauth2 update-scope-map oauth2-proxy-prometheus prometheus_users openid profile email --url https://idm.tgy.io
+
+kanidm system oauth2 prefer-short-username oauth2-proxy-prometheus --url https://idm.tgy.io
+
+kanidm system oauth2 show-basic-secret oauth2-proxy-prometheus --url https://idm.tgy.io
+```
+
+oauth2-proxy 経由で認証。clientSecret + cookieSecret を 1Password (oauth2-proxy-prometheus-oauth) に保存。
+
+Prometheus 自体は認証を持たないので、公開しているのは oauth2-proxy の 4180 だけ。
+`prometheusSpec.externalUrl` をこのホスト名にしてあり、Alertmanager 通知の Source
+リンク (GeneratorURL) がブラウザから開ける。
+
 ### SeaweedFS UI (oauth2-proxy, コンフィデンシャルクライアント)
 
 ```bash
@@ -196,6 +220,7 @@ oauth2-proxy 経由で認証。clientSecret + cookieSecret を 1Password (oauth2
 | kanidm-argo-workflows-oauth | kanidm-argo-workflows-oauth | argo | clientID, clientSecret |
 | oauth2-proxy-hubble-oauth | oauth2-proxy-hubble-oauth | oauth2-proxy | client-id, client-secret, cookie-secret |
 | oauth2-proxy-seaweedfs-oauth | oauth2-proxy-seaweedfs-oauth | oauth2-proxy | client-id, client-secret, cookie-secret |
+| oauth2-proxy-prometheus-oauth | oauth2-proxy-prometheus-oauth | oauth2-proxy | client-id, client-secret, cookie-secret |
 | harbor-kanidm-oauth | harbor-kanidm-oauth | harbor | clientID, clientSecret |
 | nextcloud-kanidm-oauth | nextcloud-kanidm-oauth | nextcloud | password |
 | oauth2-proxy-rss-oauth | oauth2-proxy-rss-oauth | oauth2-proxy | client-id, client-secret, cookie-secret |
@@ -262,5 +287,5 @@ kanidm system oauth2 show-basic-secret <client_name> --url https://idm.tgy.io
 - Kanidm は PKCE S256 を要求する。ArgoCD は PKCE + clientSecret の同時使用に問題がある ([#23773](https://github.com/argoproj/argo-cd/issues/23773)) ためパブリッククライアントを使用
 - Argo Workflows は PKCE 未サポート（`golang.org/x/oauth2` の標準 `AuthCodeURL` を PKCE オプションなしで使用）のためコンフィデンシャルクライアント + `warning-insecure-client-disable-pkce` が必要
 - Kanidm の `prefer-short-username` でユーザー名を短縮形にする（RBAC マッチに影響）
-- Cilium Gateway bug ([#41970](https://github.com/cilium/cilium/issues/41970)) により、クロスネームスペース HTTP が L7 proxy で 403 になる場合がある。Kanidm は CoreDNS rewrite で Service に直接接続する構成が安定する
+- Cilium Gateway bug ([#41970](https://github.com/cilium/cilium/issues/41970)) は GAMMA（mesh）HTTPRoute（`parentRefs.kind: Service`）を Service に直接貼った場合限定の症状で、`kind: Gateway` 経由（このクラスタの HTTPRoute は全てこちら）は該当しない。Kanidm を CoreDNS rewrite で Service に直接接続する構成自体は変更しないが、その根拠が #41970 であったかは別途再確認が必要（TLS passthrough 由来など別の理由で成立している可能性がある）
 - OAuth プロバイダを切り替える場合、Grafana は一時的に `oauth_allow_insecure_email_lookup: true` が必要（既存ユーザーの auth_id 再紐付け）

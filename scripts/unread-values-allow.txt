@@ -35,6 +35,7 @@ helm-values/seaweedfs/values.yaml::filer.secretExtraEnvironmentVars.WEED_POSTGRE
 helm-values/oauth2-proxy-hubble/values.yaml::podDisruptionBudget.enabled
 helm-values/oauth2-proxy-rss/values.yaml::podDisruptionBudget.enabled
 helm-values/oauth2-proxy-seaweedfs/values.yaml::podDisruptionBudget.enabled
+helm-values/oauth2-proxy-prometheus/values.yaml::podDisruptionBudget.enabled
 
 # registry は S3 (SeaweedFS) 、jobLog は jobLoggers に "file" を含めていないため、
 # どちらも PVC が作られない。storageClass: "-" は PVC を作らせないための保険で、

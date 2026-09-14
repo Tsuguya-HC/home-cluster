@@ -253,3 +253,54 @@ echo | openssl s_client -connect 192.168.10.193:443 -servername pg.infra.tgy.io 
 **緊急切り戻し手順（セキュリティ低下を伴う）**: `manifests/monitoring/netpol-prometheus.yaml` の oauth2-proxy-prometheus 用 ingress ブロックから `rules.http` を丸ごと削除し、`toPorts.ports` だけの L4 ルールに戻す。
 
 **この切り戻しをすると何が起きるか（セキュリティが下がる）**: `rules.http` が抑えている危険なエンドポイント（詳細・許可パスの一覧は `docs/network-policies.md` の prometheus 行を参照）を SSO でログインできる全ユーザーが叩けるようになる。Prometheus 自体のフラグ構成（`--web.enable-lifecycle` / `--web.enable-remote-write-receiver` は config-reloader / tempo の内部利用があり落とせない）は変わらないため、UI 自体は L4 のみでも到達できてしまう。**復旧を確認したら速やかに `rules.http` を戻すこと**（外したまま放置しない）。
+
+## Gateway API コントローラが起動に失敗したまま通常運転に入る（新規 HTTPRoute だけが reconcile されない）
+
+**2026-09-14 に 21 時間気づかなかった。**
+
+Gateway API のコントローラは cilium-operator の中で動き、起動時に必須 GVK の存在チェックをする。ここで失敗すると **コントローラを起動しないまま operator は通常運転に入る**。
+
+**症状の出方（外からは健全に見える）**:
+
+- `Gateway` は `Accepted=True` / `Programmed=True` のまま
+- **既存の HTTPRoute はトラフィックが流れ続ける**（Envoy 設定がプログラム済みのため）。古い `status` もそのまま残る
+- **新規に作った HTTPRoute だけ** `status` が空のまま。エラーも出ず、`kubectl get httproute` の表示も正常に見える
+- Gateway の該当リスナーの `attachedRoutes` が増えない
+- 接続すると TLS ハンドシェイクで `Connection reset by peer`（ルートが Envoy に載っていないため）
+
+**引き金は CRD の欠落とは限らない**。2026-09-14 の実例は CRD が全て揃っていたのに、存在チェックが apiserver プロキシへの接続で `EOF` を受け、それを「必須リソースが無い」と解釈していた:
+
+```
+level=error msg="Required GatewayAPI resources are not found, please refer to docs for installation instructions"
+  module=operator.operator-controlplane.leader-lifecycle.gateway-api
+  error="Get \"https://localhost:7445/apis/apiextensions.k8s.io/v1/customresourcedefinitions/gatewayclasses...\": EOF"
+```
+
+CRD 欠落の場合は `does not have version v1` のようなメッセージになる（Cilium 1.20 への更新時に踏んだ実例が `docs/sso.md` と過去の PR にある）。**`EOF` かバージョン不足かで引き金を切り分ける。**
+
+**切り分け手順**:
+
+```bash
+# status が空の HTTPRoute を探す（1本だけ空なら、それが作られた時点より前から止まっている）
+kubectl get httproute -A -o json | jq -r '.items[] | "\(.metadata.namespace)/\(.metadata.name) \(if .status.parents then "HAS-STATUS" else "NO-STATUS" end)"'
+
+# operator の起動時ログ
+kubectl -n kube-system logs -l io.cilium/app=operator | grep -E "Required GatewayAPI|initGatewayAPIController"
+```
+
+**正常時と失敗時はログの所要時間で見分けられる**。正常時は `initGatewayAPIController` が 100〜150ms で `Invoked` に到達する。失敗時は存在チェックのリトライで 24〜26 秒かけてから error になる。
+
+**復旧**:
+
+```bash
+kubectl -n kube-system rollout restart deploy/cilium-operator
+```
+
+再起動後、`initGatewayAPIController` が短時間で完了していることと、詰まっていた HTTPRoute に `Accepted=True` が付くことを確認する。
+
+**監視**: `manifests/monitoring/prometheusrule-gateway-api.yaml` に2本のアラートがある。メトリクスは kube-state-metrics の CustomResourceState（`helm-values/kube-prometheus-stack/values.yaml`）で出している。
+
+- `HTTPRouteNotAccepted` — HTTPRoute に `Accepted=True` の status が 15 分以上付いていない状態を検知する。status が空のケースと `Accepted=False` のケースの両方が引っかかる
+- `HTTPRouteInfoMissing` — 上の入力である `gatewayapi_httproute_info` メトリクス自体が来ていない状態を検知する番犬。`HTTPRouteNotAccepted` は差分を取る式（`count(info) unless on(...) count(status_condition)`）なので、**`info` が1件も無いと左辺が空ベクタになり、恒久的に発火しないまま沈黙する**
+
+番犬が本体アラートと別建てで要る理由は実例で判明した: この監視を作った当初、CustomResourceState の `info` メトリクス定義（`type: Info`）に `each.info.labelsFromPath` が無く、KSM がラベル無しの値を1件も返さない実装だったため、**`gatewayapi_httproute_info` が実在する HTTPRoute 11本のうち1本も出力されない状態のまま `helm template` / `unread-values.py` / `kubectl apply --dry-run=server` / kubeconform が全部通っていた**。レンダリングや静的検証が緑でも、実クラスタで `/metrics` を採取するまで気づけなかった。**この監視を入れるまでは、新しい HTTPRoute を作らない限り誰も気づけなかった。**

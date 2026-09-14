@@ -1,0 +1,63 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: gateway-api
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: gateway-api
+      rules:
+        # Gateway API のコントローラは cilium-operator の中で動いていて、
+        # 起動時に必須 GVK の存在チェックをする。ここで失敗しても operator は
+        # 通常運転に入るため、外からは健全に見える:
+        #
+        #   - Gateway は Accepted=True / Programmed=True のまま
+        #   - 既存の HTTPRoute は Envoy 設定が残っているので流れ続ける
+        #   - 新規に作った HTTPRoute だけが status 空のまま放置される
+        #   - エラーは operator の起動時ログにしか出ない
+        #
+        # 2026-09-14 に 21 時間この状態だった（引き金は CRD 欠落ではなく、
+        # 存在チェックが apiserver プロキシから EOF を受けたこと）。新しい
+        # HTTPRoute を作るまで誰も気づけなかったので、状態として監視する。
+        # 詳細と復旧手順は docs/known-issues.md。
+        #
+        # info は status の有無に関わらず出るので、それに対して
+        # Accepted=True の条件が「無い」ことを引き算で見る。status が空の
+        # ケースと Accepted=False のケースの両方が引っかかる。
+        - alert: HTTPRouteNotAccepted
+          expr: |
+            count by (namespace, httproute) (
+              gatewayapi_httproute_info
+            )
+            unless on (namespace, httproute)
+            count by (namespace, httproute) (
+              gatewayapi_httproute_status_condition{type="Accepted"} == 1
+            )
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "HTTPRoute が Gateway に受理されていない ({{ $labels.namespace }}/{{ $labels.httproute }})"
+            description: "{{ $labels.namespace }}/{{ $labels.httproute }} に Accepted=True の status が 15 分以上付いていない。status が空なら Gateway API コントローラ（cilium-operator）が起動に失敗している疑いがある。既存のルートは流れ続けるため他の経路では気づけない。復旧は docs/known-issues.md を参照。"
+
+        # 上の HTTPRouteNotAccepted は gatewayapi_httproute_info が入力。
+        # KSM の CustomResourceState 設定が壊れる・バージョンアップで仕様が
+        # 変わる等で httproutes の収集自体が止まると、この info が丸ごと消えて
+        # 上のアラートは「差分なし」のまま永遠に沈黙する（KSM プロセス自体は
+        # 生きているので TargetDown は拾わない）。入力が無いことを別建てで見る。
+        - alert: HTTPRouteInfoMissing
+          expr: |
+            absent(gatewayapi_httproute_info)
+          for: 15m
+          labels:
+            severity: warning
+            namespace: monitoring
+          annotations:
+            summary: "HTTPRoute のメトリクスが来ていない"
+            description: >-
+              gatewayapi_httproute_info が存在しない。kube-state-metrics の
+              CustomResourceState 設定（httproutes）が壊れているか収集が
+              止まっている。この状態では HTTPRouteNotAccepted が発火せず
+              Gateway API コントローラの障害を検知できない。

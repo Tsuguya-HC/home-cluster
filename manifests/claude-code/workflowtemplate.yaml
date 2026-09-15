@@ -183,7 +183,7 @@ spec:
             limits:
               memory: 256Mi
       container:
-        image: registry.infra.tgy.io/tools/claude-code:latest@sha256:a6ee7dc7aba204ae91f85b721e7e31edf5496073d0eb85e7449f71186da4c95e
+        image: registry.infra.tgy.io/tools/claude-code:latest@sha256:f4bf69bfa990c3ebfbcc23fe666005a56377b5dc2a2ee1919dca5e54e31f174e
         command: [sh, -c]
         args:
           - |

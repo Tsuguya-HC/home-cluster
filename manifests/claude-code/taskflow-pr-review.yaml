@@ -144,7 +144,7 @@ spec:
                   path: private-key
         initContainers:
           - name: parts
-            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:a6ee7dc7aba204ae91f85b721e7e31edf5496073d0eb85e7449f71186da4c95e
+            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:f4bf69bfa990c3ebfbcc23fe666005a56377b5dc2a2ee1919dca5e54e31f174e
             command: [parts]
             # 部品の選択がこの handler の宣言。skill が入口、claude-md は常時効く前提。
             args: [-s, pr-review, -c, verdict-protocol, -c, untrusted-input, -c, sandbox-limits]
@@ -180,7 +180,7 @@ spec:
                 memory: 256Mi
         containers:
           - name: agent
-            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:a6ee7dc7aba204ae91f85b721e7e31edf5496073d0eb85e7449f71186da4c95e
+            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:f4bf69bfa990c3ebfbcc23fe666005a56377b5dc2a2ee1919dca5e54e31f174e
             workingDir: /workspace
             command: [sh, -c]
             args:

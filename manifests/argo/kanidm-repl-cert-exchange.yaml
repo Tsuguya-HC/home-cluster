@@ -33,7 +33,7 @@ spec:
         labels:
           kanidm-repl-exchange: "true"
       container:
-        image: registry.suse.com/suse/kubectl:1.37@sha256:d91d898c24093152a8070c405ce15b94f093e9f0f332a5d82967c879a877b2b9
+        image: registry.suse.com/suse/kubectl:1.37@sha256:76c2419d6aa1ac86b3ab1911ce9d65f9963ce888ef56db0b35980faf5f6e0d8c
         resources:
           requests:
             cpu: 10m

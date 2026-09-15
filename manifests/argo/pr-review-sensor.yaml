@@ -1,0 +1,160 @@
+# PR が開いた/更新されたら、クラスタ側の pr-review flow に Task を作る。
+#
+# GitHub Actions の ai-review（claude-code-action）の置き換え。あちらは全 PR で自動に走り、
+# 対話セッションと同じ週次枠を食っていたうえ、OAuth トークンをリポジトリ secret に置く必要が
+# あった。こちらは枠の使い方を taskflow 側に寄せ、トークンは 1Password → ESO の 1 経路だけになる。
+#
+# 判定は Task の終端（完了 / 要修正 / Escalated）に出る。通知は PrometheusRule から Discord
+# （manifests/monitoring/prometheusrule-taskflow.yaml）で、この sensor は関与しない。
+#
+# **draft PR は起こさない。** 実装 flow が出す PR は draft で始まり、人が ready にするまでは
+# 中身が動いている。ready_for_review で拾う。
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pr-review-dispatch
+  namespace: argo
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pr-review-dispatch
+  namespace: claude-code
+rules:
+  - apiGroups: ["flow.tgy.io"]
+    resources: ["tasks"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pr-review-dispatch
+  namespace: claude-code
+subjects:
+  - kind: ServiceAccount
+    name: pr-review-dispatch
+    namespace: argo
+roleRef:
+  kind: Role
+  name: pr-review-dispatch
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Sensor
+metadata:
+  name: pr-review-dispatch
+  namespace: argo
+spec:
+  template:
+    serviceAccountName: pr-review-dispatch
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000
+      seccompProfile:
+        type: RuntimeDefault
+    container:
+      resources:
+        requests:
+          cpu: 10m
+          memory: 32Mi
+        limits:
+          memory: 64Mi
+      securityContext:
+        readOnlyRootFilesystem: true
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: [ALL]
+  dependencies:
+    # home-cluster の PR は renovate-home-cluster のエンドポイントに届く（1 リポジトリ 1
+    # webhook で、名前は最初の用途が残っているだけ）。イベント種別は body で見分ける。
+    - name: home-cluster-pr
+      eventSourceName: github-webhook
+      eventName: renovate-home-cluster
+      filters:
+        script: |-
+          -- push / issues も同じエンドポイントに届くので、まず pull_request だけに絞る。
+          local pr = event.body ~= nil and event.body.pull_request or nil
+          if pr == nil or event.body.action == nil then
+            return false
+          end
+          -- draft のうちは走らせない。ready_for_review で初めて拾う。
+          if pr.draft == true then
+            return false
+          end
+          local a = event.body.action
+          return a == "opened" or a == "synchronize" or a == "ready_for_review"
+    - name: memory-pr
+      eventSourceName: github-webhook
+      eventName: memory
+      filters:
+        script: |-
+          -- push / issues も同じエンドポイントに届くので、まず pull_request だけに絞る。
+          local pr = event.body ~= nil and event.body.pull_request or nil
+          if pr == nil or event.body.action == nil then
+            return false
+          end
+          -- draft のうちは走らせない。ready_for_review で初めて拾う。
+          if pr.draft == true then
+            return false
+          end
+          local a = event.body.action
+          return a == "opened" or a == "synchronize" or a == "ready_for_review"
+  triggers:
+    - template:
+        name: home-cluster
+        conditions: home-cluster-pr
+        k8s:
+          operation: create
+          source:
+            resource:
+              apiVersion: flow.tgy.io/v1alpha1
+              kind: Task
+              metadata:
+                generateName: pr-review-
+                namespace: claude-code
+              spec:
+                flow: pr-review
+                # parameters が上書きする。ここの値は使わないが、dest の指す場所が
+                # 無いと sensor は黙って何も入れないので、形だけ先に置いておく。
+                input:
+                  repo: Tsuguya-HC/home-cluster
+                  pr: "0"
+          parameters:
+            - src:
+                dependencyName: home-cluster-pr
+                dataKey: body.repository.full_name
+              dest: spec.input.repo
+            - src:
+                dependencyName: home-cluster-pr
+                dataKey: body.pull_request.number
+              dest: spec.input.pr
+    - template:
+        name: memory
+        conditions: memory-pr
+        k8s:
+          operation: create
+          source:
+            resource:
+              apiVersion: flow.tgy.io/v1alpha1
+              kind: Task
+              metadata:
+                generateName: pr-review-
+                namespace: claude-code
+              spec:
+                flow: pr-review
+                # parameters が上書きする。ここの値は使わないが、dest の指す場所が
+                # 無いと sensor は黙って何も入れないので、形だけ先に置いておく。
+                input:
+                  repo: Tsuguya-HC/memory
+                  pr: "0"
+          parameters:
+            - src:
+                dependencyName: memory-pr
+                dataKey: body.repository.full_name
+              dest: spec.input.repo
+            - src:
+                dependencyName: memory-pr
+                dataKey: body.pull_request.number
+              dest: spec.input.pr

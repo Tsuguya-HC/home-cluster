@@ -257,11 +257,15 @@ spec:
                 # POSIX sh は前面コマンドの終了を待ってから trap を実行するため、猶予期間内に
                 # trap が発火しない。background + wait にして、TERM を受けたら子を落としてから
                 # flush する（taskflow-cnp-check.yaml と同じ）。
-                trap 'kill -TERM $pid 2>/dev/null
+                # `|| true` は省けない。このスクリプトは `set -e` で走り、trap の中も同じ。
+                # claude が既に終わっていると kill は 1 を返し、そこで trap が打ち切られて
+                # sync に届かず、終了コードも 143 でなく 1 になる（taskflow-cnp-check.yaml の
+                # 同じ trap は set -e が無いので裸のまま）。
+                trap 'kill -TERM $pid 2>/dev/null || true
                       i=0
                       while kill -0 $pid 2>/dev/null && [ $i -lt 10 ]; do sleep 1; i=$((i+1)); done
-                      kill -KILL $pid 2>/dev/null
-                      sync
+                      kill -KILL $pid 2>/dev/null || true
+                      sync || true
                       exit 143' TERM INT
                 rc=0
                 wait $pid || rc=$?

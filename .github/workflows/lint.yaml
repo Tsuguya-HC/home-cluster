@@ -17,8 +17,6 @@ name: Lint
 # push トリガーは持たない。main は ruleset で直 push を禁じており PR 経由で
 # しか更新されない（= マージ時点で CI Gate 通過済み）ため push CI は冗長。
 #
-# workflow_run で `Lint` の完了を待つ claude-fix-ci.yml があるので、この
-# ワークフローの `name` は変えないこと。
 on:
   pull_request:
     branches: [main]
@@ -45,10 +43,9 @@ on:
 # new job added below starts with no permissions rather than inheriting write
 # access.
 #
-# The Claude reviewer and CI fixer used to live in this file. They now sit in
-# claude-review.yml / claude-fix-ci.yml, because claude-code-action validates
-# its entry-point workflow against main and a PR that edits this file would
-# otherwise be unreviewable.
+# レビューは Actions から離れ、クラスタ側の pr-review flow が PR の webhook で
+# 起きる（manifests/argo/pr-review-sensor.yaml）。ここに Claude を呼ぶジョブは
+# もう無く、この repo に OAuth トークンの secret も置かない。
 permissions: {}
 
 concurrency:
@@ -81,7 +78,6 @@ jobs:
       unread: ${{ steps.filter.outputs.unread }}
       images: ${{ steps.filter.outputs.images }}
       argo: ${{ steps.filter.outputs.argo }}
-      mcp: ${{ steps.filter.outputs.mcp }}
       cmscripts: ${{ steps.filter.outputs.cmscripts }}
       workflows: ${{ steps.filter.outputs.workflows }}
       renovate: ${{ steps.filter.outputs.renovate }}
@@ -132,9 +128,6 @@ jobs:
               - '.github/workflows/_argo-lint.yml'
               - 'aqua.yaml'
               - 'aqua-checksums.json'
-            mcp:
-              - '.github/mcp/**'
-              - '.github/workflows/_mcp.yml'
             cmscripts:
               - 'manifests/**'
               - 'kustomize/**'
@@ -195,13 +188,6 @@ jobs:
     permissions:
       contents: read
 
-  mcp:
-    needs: detect
-    if: ${{ needs.detect.outputs.mcp == 'true' }}
-    uses: ./.github/workflows/_mcp.yml # zizmor: ignore[self-repository]
-    permissions:
-      contents: read
-
   configmap-scripts:
     needs: detect
     if: ${{ needs.detect.outputs.cmscripts == 'true' }}
@@ -257,7 +243,6 @@ jobs:
       - helm-template
       - unread-values
       - image-existence
-      - mcp
       - argo-lint
       - configmap-scripts
       - lint-workflows

@@ -73,17 +73,10 @@
     "labels": ["security"]
   },
 
+  // The only npm tree in this repo was .github/mcp/pr-review, and it left with
+  // the Actions reviewer. Nothing here has a lock file to refresh any more.
   "lockFileMaintenance": {
-    "description": [
-      "Almost every open alert here is a transitive dependency in",
-      ".github/mcp/pr-review/package-lock.json, which no direct-dependency bump will",
-      "ever fix. Automerged because the refresh is age-gated at resolution time by",
-      "min-release-age in that directory's .npmrc, and the mcp CI job installs from",
-      "the refreshed lock file and type-checks against it."
-    ],
-    "enabled": true,
-    "schedule": ["before 6am on monday"],
-    "automerge": true
+    "enabled": false
   },
 
   // apps/ holds one ArgoCD Application per service; nothing else in the tree is one.
@@ -355,25 +348,6 @@
       "matchPackageNames": [
         "/^ghcr.io/siderolabs/(iscsi-tools|spin|kata-containers)$/"
       ]
-    },
-    {
-      "description": "Pin claude-code-action until anthropics/claude-code-action#1260 lands (Issue #1242)",
-      "matchManagers": ["github-actions"],
-      "matchDepNames": ["anthropics/claude-code-action"],
-      "allowedVersions": "<=1.0.99"
-    },
-    {
-      "description": [
-        "Leave the reusable-workflow ref in claude-review.yml alone. It points at",
-        "@main deliberately: claude-code-action validates its entry-point workflow",
-        "against the default branch, so any PR that edits that caller cannot be",
-        "reviewed. Pinning it to a SHA would put it back in this bot's path on every",
-        "change to the reusable body — exactly the failure the split removes.",
-        "helpers:pinGitHubActionDigests would otherwise do just that."
-      ],
-      "matchManagers": ["github-actions"],
-      "matchDepNames": ["Tsuguya-HC/home-cluster"],
-      "enabled": false
     },
     {
       "description": [

@@ -341,10 +341,17 @@ spec:
                 }
                 # 複数行を書くときは stdin から。YAML のリテラルブロックの中では、行頭に戻る
                 # 継続行がブロックそのものを終わらせてしまうため、埋め込みではなくパイプで渡す。
-                give_up_stdin() {
+                # **パイプラインの右側はサブシェルで走る。** 関数をパイプの右に置くと、
+                # 中の `exit 0` はサブシェルを抜けるだけで、呼び出し元のスクリプトは
+                # そのまま次の行へ進む。2026-09-15 の初回実投入で、緑の確認が失敗して
+                # escalate を書いたのに PR 作成まで走り、「PR は作っていない」と書かれた PR が
+                # 出た（Task は done/ だけが残って 完了 になった）。
+                # 呼び出し側はファイルに書いてから give_up_file を呼ぶ形にして、
+                # 関数を現在のシェルで実行する。
+                give_up_file() {
                   DONE=$(cat /workspace/done/report.md 2>/dev/null || true)
                   find /workspace/done -mindepth 1 -delete 2>/dev/null || true
-                  { cat
+                  { cat "$1"
                     if [ -n "$DONE" ]; then
                       printf '\n## 実装 handler がここまでに書いていたこと\n\n%s\n' "$DONE"
                     fi
@@ -434,7 +441,12 @@ spec:
 
                 # --- テストの回し方はリポの形から決める（入力からは受け取らない） ----
                 if [ -f /scratch/src/Cargo.toml ]; then
-                  TEST_CMD="cargo test --workspace"
+                  # .cargo/config.toml が build.target を wasm32-wasip1 等に固定していると、
+                  # 素の cargo test はテストバイナリをホストで実行できず
+                  # Exec format error（os error 8）で落ちる。home-rss がまさにそれで、
+                  # CI 側も --target を明示している。rustc が名乗るホストトリプルを使う。
+                  HOST_TRIPLE=$(rustc -vV | awk '/^host:/{print $2}')
+                  TEST_CMD="cargo test --workspace --target ${HOST_TRIPLE}"
                 elif [ -f /scratch/src/package.json ]; then
                   TEST_CMD="pnpm test"
                 else
@@ -538,7 +550,8 @@ spec:
                     { echo "pnpm install --frozen-lockfile に失敗した。実装は行っていない。"
                       echo
                       tail -30 /tmp/pnpm-install.log
-                    } | give_up_stdin
+                    } > /tmp/giveup.txt
+                  give_up_file /tmp/giveup.txt
                   fi
                 fi
 
@@ -547,7 +560,8 @@ spec:
                   { echo "変更前の $TEST_CMD が通らない。前提が壊れているので実装に進んでいない。"
                     echo
                     tail -30 /tmp/baseline.log
-                  } | give_up_stdin
+                  } > /tmp/giveup.txt
+                  give_up_file /tmp/giveup.txt
                 fi
 
                 # --- 2. テストだけ書かせる ----------------------------------------
@@ -577,7 +591,8 @@ spec:
                     echo
                     echo "stream-json の末尾:"
                     tail -20 /tmp/claude-tests.log
-                  } | give_up_stdin
+                  } > /tmp/giveup.txt
+                  give_up_file /tmp/giveup.txt
                 elif [ "$CLAUDE_RC" -ne 0 ]; then
                   { echo "テストの回の claude が失敗した（exit ${CLAUDE_RC}）。実装には進んでいない。"
                     # 137 は run_agent 内の timeout が -k で KILL した場合と OOMKill の
@@ -588,14 +603,16 @@ spec:
                     echo
                     echo "stream-json の末尾:"
                     tail -20 /tmp/claude-tests.log
-                  } | give_up_stdin
+                  } > /tmp/giveup.txt
+                  give_up_file /tmp/giveup.txt
                 fi
 
                 if [ -f /scratch/out/no-test.md ]; then
                   { echo "テストで赤を作れない要求だと判断された。実装には進んでいない。"
                     echo
                     cat /scratch/out/no-test.md
-                  } | give_up_stdin
+                  } > /tmp/giveup.txt
+                  give_up_file /tmp/giveup.txt
                 fi
                 if [ -z "$(git -C /scratch/src status --porcelain)" ]; then
                   give_up "テストが 1 行も書かれなかった。実装には進んでいない。"
@@ -611,7 +628,8 @@ spec:
                     echo
                     echo "書かれた差分:"
                     head -100 /tmp/tests.diff
-                  } | give_up_stdin
+                  } > /tmp/giveup.txt
+                  give_up_file /tmp/giveup.txt
                 fi
                 cp /scratch/out/tests-report.md /tmp/tests-report.md 2>/dev/null || echo '(報告なし)' > /tmp/tests-report.md
                 chmod 0644 /tmp/tests-report.md
@@ -639,7 +657,8 @@ spec:
                     echo
                     echo "stream-json の末尾:"
                     tail -20 /tmp/claude-implement.log
-                  } | give_up_stdin
+                  } > /tmp/giveup.txt
+                  give_up_file /tmp/giveup.txt
                 elif [ "$CLAUDE_RC" -ne 0 ]; then
                   { echo "実装の回の claude が失敗した（exit ${CLAUDE_RC}）。PR は作っていない。"
                     # 137 は run_agent 内の timeout が -k で KILL した場合と OOMKill の
@@ -650,7 +669,8 @@ spec:
                     echo
                     echo "stream-json の末尾:"
                     tail -20 /tmp/claude-implement.log
-                  } | give_up_stdin
+                  } > /tmp/giveup.txt
+                  give_up_file /tmp/giveup.txt
                 fi
 
                 # --- 5. 緑の確認 --------------------------------------------------
@@ -661,7 +681,8 @@ spec:
                     echo
                     echo "テストの回で書かれたもの:"
                     cat /tmp/tests-report.md
-                  } | give_up_stdin
+                  } > /tmp/giveup.txt
+                  give_up_file /tmp/giveup.txt
                 fi
 
                 # --- 6. PR（handler が作る。エージェントには触らせない） ------------

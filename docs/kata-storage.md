@@ -99,7 +99,9 @@ spec:
   capability の追加は `NET_BIND_SERVICE` だけ）。実証は `image-build`（PSA `privileged`）で行った。
   handler を置くなら namespace を分ける — taskflow のコントローラは `taskflow-system` にいて
   ClusterRole + ClusterRoleBinding なので、別 namespace の TaskHandler / TaskFlow / Task も扱える。
-  `claude-code` の enforce を下げると Block を使わない他の handler まで巻き添えになる（`docs/pod-security.md`）
+  `claude-code` の enforce を下げると Block を使わない他の handler まで巻き添えになる（`docs/pod-security.md`）。
+  この分離は実際に `claude-code-build`（PSA `privileged`）として作ってあり、`implementer` handler
+  （`manifests/claude-code-build/taskflow-implement.yaml`）がこの型を使っている
 - RWO なので Pod と 1 対 1。`ephemeral` にしておけば Pod の寿命と一致する
 
 ## やらないこと

@@ -21,6 +21,8 @@ spec:
       namespace: image-build
     - server: https://kubernetes.default.svc
       namespace: claude-code
+    - server: https://kubernetes.default.svc
+      namespace: claude-code-build
   clusterResourceWhitelist:
     - group: '*'
       kind: CustomResourceDefinition

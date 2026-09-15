@@ -237,6 +237,25 @@ Cilium の identity は Pod 単位なので、通知サイドカーのために�
 apiserver・Loki・Discord・GitHub・npm・crates・SeaweedFS・Prometheus・horenso・ArgoCD を
 まとめて持っていた。
 
+## claude-code-build (1 policy)
+
+| Component | Ingress | Egress |
+|---|---|---|
+| **taskflow-implement** (taskflow-implement=true) | (書かない = 全 deny) | openrouter.ai + github.com + api.github.com + *.githubusercontent.com + index.crates.io + static.crates.io + registry.npmjs.org :443 |
+
+`claude-code` とは別 namespace（PSA が `privileged`。Kata ゲスト内で `volumeMode: Block` を
+mkfs するため、docs/pod-security.md）にしてあるので CNP も分けて持つ。推論は Anthropic ではなく
+OpenRouter で、**`api.anthropic.com` は開けていない** — env が効かず Anthropic へ落ちる取り違えを
+緑で通さないため（`taskflow-openrouter-smoke.yaml` と同じ考え方）。`index.crates.io` /
+`static.crates.io` / `registry.npmjs.org` は依存の取得用で、対応する言語を足すときはここも
+足す必要がある（宛先が無いと失敗ではなくハングする）。
+
+実際に openrouter.ai へ喋るのは `openrouter-broker` サイドカーだけで、`agent` コンテナは
+127.0.0.1:8787 しか知らない設計（`manifests/claude-code-build/taskflow-implement.yaml`）。
+それでも openrouter.ai の egress を agent 用に別途絞ることはできない — **CNP は Pod 単位
+（同一 identity）で、同じ Pod 内のコンテナを分離できない**ため。将来「なぜ agent にまだ
+openrouter.ai への直接到達があるのか」を漏れと誤診しないための記録。
+
 ## image-build (2 policies)
 
 | Component | Ingress | Egress |

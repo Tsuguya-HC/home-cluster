@@ -9,7 +9,7 @@ ArgoCD AppProject でアプリケーションをドメインごとに分離し�
 | platform | コアプラットフォーム (ArgoCD, Cilium, Tetragon, Spin Operator, Reloader) | argocd, kube-system, cilium-secrets, spin-operator | 8 |
 | networking | ネットワーク (cert-manager, external-dns, Gateway) | `*` | 4 |
 | monitoring | Observability (Prometheus, Loki, Alloy, Tempo) | monitoring, kube-system | 5 |
-| argo | Argo エコシステム (Events, Workflows, CI/CD パイプライン) | argo, default, talos-build, image-build, claude-code | 7 |
+| argo | Argo エコシステム (Events, Workflows, CI/CD パイプライン) | argo, default, talos-build, image-build, claude-code, claude-code-build | 7 |
 | security | Secret 管理・セキュリティ (ESO, OAuth2 Proxy, Kanidm, Trivy, Kyverno) | `*` | 10 |
 | apps | ユーザー向けアプリケーション (Nextcloud, Harbor) | nextcloud, harbor | 2 |
 | storage | ストレージ (SeaweedFS, CNPG, QNAP CSI, NFS) | cnpg-system, database, nfs-provisioner, seaweedfs, trident | 6 |

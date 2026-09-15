@@ -1,0 +1,750 @@
+# issue を受けて実装し、draft PR を出す flow。実装は OpenRouter の安いモデル、レビューは
+# 別 flow の Claude、という分担の実装側（docs/kata-storage.md / manifests/claude-code/）。
+#
+# TDD を約束ではなく事実で進める。claude を 2 回呼び、その間でスクリプトがテストを走らせる:
+#
+#   1. baseline  変更前に全部通ることを確認     … 通らなければ前提が壊れている → escalate
+#   2. claude #1 テストだけ書かせる（/implement-tests）
+#   3. red       新しいテストが落ちることを確認 … 落ちなければ何も検証していない → escalate
+#   4. claude #2 実装させる（/implement）
+#   5. green     全部通ることを確認             … 通らなければ → escalate
+#   6. PR        ref を作り、署名コミットして draft PR
+#
+# 3 が本体。モデルは「TDD でやった」と報告することはできても、赤を観測させることはできない。
+#
+# 投げ方:
+#   kubectl -n claude-code-build create -f - <<EOF
+#   apiVersion: flow.tgy.io/v1alpha1
+#   kind: Task
+#   metadata: {generateName: implement-, namespace: claude-code-build}
+#   spec:
+#     flow: implement
+#     input: {repo: Tsuguya-HC/home-rss, issue: 106}
+#   EOF
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: agent-implementer
+  namespace: claude-code-build
+automountServiceAccountToken: false
+---
+# 出口は OpenRouter・GitHub・依存の取得先だけ。**api.anthropic.com は書かない** —
+# env が効かずに Anthropic へ落ちる取り違えを、緑で通さないため（manifests/claude-code/
+# taskflow-openrouter-smoke.yaml と同じ考え方）。
+# DNS は CCNP allow-dns で全 Pod に共通適用済み。ingress は書かないので全 deny。
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: taskflow-implement
+  namespace: claude-code-build
+spec:
+  endpointSelector:
+    matchLabels:
+      taskflow-implement: "true"
+  egress:
+    - toFQDNs:
+        - matchName: "openrouter.ai"
+        - matchName: "github.com"
+        - matchName: "api.github.com"
+        - matchPattern: "*.githubusercontent.com"
+        # 依存の取得。ここに無い宛先は失敗ではなくハングするので、対応する言語を
+        # 足すときはここも足す（claude-md/build-sandbox.md にその前提を書いてある）
+        - matchName: "index.crates.io"
+        - matchName: "static.crates.io"
+        - matchName: "registry.npmjs.org"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+---
+apiVersion: flow.tgy.io/v1alpha1
+kind: TaskHandler
+metadata:
+  name: implementer
+  namespace: claude-code-build
+spec:
+  phase: 実装
+  runner:
+    type: Job
+  # claude 2 回 + テスト 3 回 + 依存の取得。Rust のフルビルドは実測 19〜22 分だったので、
+  # pr-review の 30m では足りない。
+  timeout: 60m
+  maxInfraRetries: 1
+  # 判定（done / escalate）の置き場。Block スクラッチには置けない — FS がゲスト内にあるので
+  # publish サイドカーから読めない（docs/kata-storage.md）。重い作業は Block、渡すものは workspace。
+  workspace:
+    volume: flow-workspace
+    mountPath: /workspace
+  jobTemplate:
+    template:
+      metadata:
+        labels:
+          taskflow-implement: "true"
+      spec:
+        restartPolicy: Never
+        runtimeClassName: kata
+        serviceAccountName: agent-implementer
+        automountServiceAccountToken: false
+        # TERM 後の sync（NFS 越し）に猶予を残す。
+        terminationGracePeriodSeconds: 60
+        # runAsUser は必須（taskflow のコントローラが Job 構築時に checkUID で見る。無いと
+        # ErrWorkspace）。agent は root で起動する設計（下の containers[0].securityContext で
+        # runAsUser: 0 に上書き）なので、Pod レベルもそれに合わせる。
+        securityContext:
+          runAsUser: 0
+          seccompProfile:
+            type: RuntimeDefault
+        # LLM バッチ Pod が名乗る workload-class=cpu-saturating から逃げる（同居回避の衛生策。
+        # manifests/image-build/workflowtemplate.yaml と同じ形）。cargo のフルビルドは
+        # limits.cpu 4・60 分で、wn-01/wn-02（4 コア）に同居すると身動きが取れなくなる
+        # （wn-03 は 16 コア）。preferred なので同居がなければ一番速いノードを使える。
+        affinity:
+          podAntiAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+              - weight: 100
+                podAffinityTerm:
+                  labelSelector:
+                    matchLabels:
+                      workload-class: cpu-saturating
+                  namespaceSelector: {}
+                  topologyKey: kubernetes.io/hostname
+              # 複数 Task が同時に走ると、この handler 同士（limits.cpu 4 の Kata VM）が
+              # wn-01/wn-02（4 コア）に 2 本乗ってノードのコアを使い切る。同じラベルの
+              # Pod からも逃げる。required にはしない — Worker 3 台構成で埋まっていると
+              # Pending 固定になるリスクがあるため。
+              - weight: 100
+                podAffinityTerm:
+                  labelSelector:
+                    matchLabels:
+                      taskflow-implement: "true"
+                  namespaceSelector: {}
+                  topologyKey: kubernetes.io/hostname
+        volumes:
+          - name: tmp
+            emptyDir: {}
+          # ブローカー専用。agent と tmp を共有すると「エージェントから読めない環境」という
+          # 設計前提と矛盾する（今はトークンをファイルに書かないので実害は無いが、共有点を残さない）。
+          - name: broker-tmp
+            emptyDir: {}
+          - name: parts
+            emptyDir: {}
+          - name: github-token
+            emptyDir: {}
+          # github-signed-commit.sh は argo-tools イメージにしか無い。作業ツリーの中に置くと
+          # git add -A が拾って PR に混入するので、専用ボリュームで渡す。
+          - name: helpers
+            emptyDir: {}
+          # Block スクラッチ。virtiofs を通らない唯一の経路で、FS はゲスト内にある。
+          # Pod と同じ寿命（消えるときに PVC ごと消える）。QNAP が転けてもホスト kernel の
+          # XFS を巻き込まない（docs/kata-storage.md）。
+          - name: scratch
+            ephemeral:
+              volumeClaimTemplate:
+                spec:
+                  accessModes: [ReadWriteOnce]
+                  storageClassName: qnap-iscsi
+                  volumeMode: Block
+                  resources:
+                    requests:
+                      storage: 20Gi
+          - name: github-app
+            secret:
+              secretName: github-app-private-key
+              defaultMode: 0444
+              items:
+                - key: private-key
+                  path: private-key
+        initContainers:
+          # private な parts リポを引くための installation token を作る。App の鍵は
+          # この init と下の github-auth だけが見る（agent には渡さない）。
+          - name: parts
+            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:f4bf69bfa990c3ebfbcc23fe666005a56377b5dc2a2ee1919dca5e54e31f174e
+            command: [parts]
+            args: [-s, implement-tests, -s, implement, -c, verdict-protocol, -c, untrusted-input, -c, build-sandbox]
+            env:
+              - name: HOME
+                value: /tmp
+              - name: PARTS_REF
+                valueFrom:
+                  configMapKeyRef:
+                    name: parts-ref
+                    key: sha
+              - name: GITHUB_APP_ID
+                value: "2998228"
+            securityContext:
+              runAsUser: 65532
+              runAsNonRoot: true
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities: {drop: [ALL]}
+            volumeMounts:
+              - {name: parts, mountPath: /parts}
+              - {name: tmp, mountPath: /tmp}
+              - {name: github-app, mountPath: /github-app, readOnly: true}
+            resources:
+              requests: {cpu: 50m, memory: 64Mi}
+              # Kata では全コンテナに limits.cpu が無いと Pod レベルの cgroup quota が
+              # 確定せず、agent の cpu: "4" が VM サイジングに伝わらない（native sidecar は
+              # 通常 init と違い max ではなく合算）。taskflow-pr-review.yaml と同じ形で全部に書く。
+              limits: {cpu: 500m, memory: 256Mi}
+          # 対象リポ用の installation token。ファイルで渡し、agent 側の入口で消す。
+          - name: github-auth
+            image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:0b658d03cee98b3118622d47d07950b5dc5dd8ef73689bab68ff28c00299f296
+            command: [sh, -c]
+            args:
+              - |
+                set -eu
+                # FLOW_INPUT が空なら既定リポ。空でないのに .repo が取れない（JSON が壊れて
+                # いる等）場合は、空指定と区別せず home-rss へ黙って流さない。
+                if [ -z "${FLOW_INPUT:-}" ]; then
+                  REPO=Tsuguya-HC/home-rss
+                else
+                  REPO=$(printf '%s' "$FLOW_INPUT" | jq -r '.repo // empty' 2>/dev/null || true)
+                  [ -n "$REPO" ] || { echo "FLOW_INPUT が JSON として読めないか .repo を持たない" >&2; exit 1; }
+                fi
+                case "$REPO" in
+                  Tsuguya-HC/*[!-A-Za-z0-9._]* | Tsuguya-HC/ | Tsuguya-HC/*/*)
+                    echo "repo の形が不正" >&2; exit 1 ;;
+                  Tsuguya-HC/?*) ;;
+                  *) echo "repo は Tsuguya-HC 配下だけ" >&2; exit 1 ;;
+                esac
+                GITHUB_REPO="$REPO" github-auth.sh
+            env:
+              - name: GITHUB_APP_ID
+                value: "2998228"
+              - name: HOME
+                value: /tmp
+            securityContext:
+              runAsUser: 65532
+              runAsNonRoot: true
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities: {drop: [ALL]}
+            volumeMounts:
+              - {name: github-app, mountPath: /github-app, readOnly: true}
+              - {name: github-token, mountPath: /github-token}
+              - {name: tmp, mountPath: /tmp}
+            resources:
+              requests: {cpu: 10m, memory: 32Mi}
+              limits: {cpu: 100m, memory: 64Mi}
+          # github-signed-commit.sh を argo-tools から借りる。claude-code イメージには無い。
+          - name: helpers
+            image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:0b658d03cee98b3118622d47d07950b5dc5dd8ef73689bab68ff28c00299f296
+            command: [sh, -c]
+            args: ["cp /usr/local/bin/github-signed-commit.sh /helpers/"]
+            securityContext:
+              runAsUser: 65532
+              runAsNonRoot: true
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities: {drop: [ALL]}
+            volumeMounts:
+              - {name: helpers, mountPath: /helpers}
+            resources:
+              requests: {cpu: 10m, memory: 16Mi}
+              limits: {cpu: 100m, memory: 64Mi}
+          # OpenRouter の API キーをエージェントの届かない場所に置くためのサイドカー。
+          #
+          # エージェントは信頼できない入力（issue 本文）を読んで Bash を実行する。キーが
+          # その環境変数にあると、読み出して作業ツリーや report に書けてしまい、それが
+          # draft PR として PUBLIC リポジトリに出る（CNP は PR を塞げない。正規の経路なので）。
+          # 実値をこのコンテナにだけ置けば、難読化しようが分割しようがエージェントの側に
+          # 元の値が無い。agent は 127.0.0.1 の口だけを知る。
+          #
+          # restartPolicy: Always = native sidecar。ここを付けないと agent が終わっても
+          # Job が完了しない。taskflow が注入する publish も同じ形（job.go:782）。
+          # PID 名前空間は共有しない（shareProcessNamespace を書かない）ので、agent 側の
+          # root からこのプロセスの environ は読めない。
+          - name: openrouter-broker
+            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:f4bf69bfa990c3ebfbcc23fe666005a56377b5dc2a2ee1919dca5e54e31f174e
+            restartPolicy: Always
+            command: [node, /usr/local/bin/openrouter-broker.js]
+            env:
+              - name: OPENROUTER_TOKEN
+                valueFrom:
+                  secretKeyRef:
+                    name: openrouter-token
+                    key: credential
+              - name: BROKER_PORT
+                value: "8787"
+              - name: HOME
+                value: /tmp
+            securityContext:
+              # agent（65533）とも init（65532）とも別に見えるが、ここで重要なのは
+              # コンテナが分かれていること自体。uid は非 root であればよい。
+              runAsUser: 65532
+              runAsNonRoot: true
+              readOnlyRootFilesystem: true
+              allowPrivilegeEscalation: false
+              capabilities: {drop: [ALL]}
+            volumeMounts:
+              - {name: broker-tmp, mountPath: /tmp}
+            # native sidecar は「プロセスが起動した」だけで次へ進んでよいと判定され、port を
+            # listen したかは見ない。agent が claude を呼ぶまでに mkfs/mount/clone/issue 取得を
+            # 挟むので実害は出ていないが、それは偶然の遅延に依存しているだけなので保証を足す。
+            # ブローカーに health エンドポイントは無く HTTP GET は許可リストで 403 になるため TCP。
+            startupProbe:
+              tcpSocket:
+                port: 8787
+              periodSeconds: 1
+              failureThreshold: 10
+            resources:
+              requests: {cpu: 50m, memory: 64Mi}
+              limits: {cpu: 500m, memory: 256Mi}
+        containers:
+          - name: agent
+            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:f4bf69bfa990c3ebfbcc23fe666005a56377b5dc2a2ee1919dca5e54e31f174e
+            workingDir: /workspace
+            securityContext:
+              # VM の中の特権。ホストには及ばない（containerd が
+              # privileged_without_host_devices = true）。mkfs と mount に要る。
+              # capability を絞っても PSA から見れば同じく baseline 超えで、置ける namespace は
+              # 変わらない（docs/kata-storage.md）。作業本体は下で 65533 に降りる。
+              privileged: true
+              runAsUser: 0
+            volumeDevices:
+              - name: scratch
+                devicePath: /dev/scratch
+            volumeMounts:
+              - {name: flow-workspace, mountPath: /workspace}
+              - {name: tmp, mountPath: /tmp}
+              - {name: parts, mountPath: /parts, readOnly: true}
+              - {name: github-token, mountPath: /github-token}
+              - {name: helpers, mountPath: /helpers, readOnly: true}
+            command: [bash, -c]
+            args:
+              - |
+                set -eu
+                ESCALATE=/workspace/escalate
+                # done と escalate の両方が非空だと判定不能（NoAnswer）になる。implement skill が
+                # 自分で done/report.md を書いた後にこの handler が escalate に倒れることがあるので、
+                # escalate する側が先に done を空にして「答えは 1 つ」に保つ。ただし中身は捨てず、
+                # escalate の報告に畳み込む（緑失敗時に実装報告が消えて手がかりが無くなるのを防ぐ）。
+                # rm -f report.md だけだと、report.md 以外の置き土産が残ってディレクトリが空に
+                # ならず結局 NoAnswer に落ちるので、中身ごと空にする。
+                give_up() {
+                  DONE=$(cat /workspace/done/report.md 2>/dev/null || true)
+                  find /workspace/done -mindepth 1 -delete 2>/dev/null || true
+                  { printf '%s\n' "$1"
+                    if [ -n "$DONE" ]; then
+                      printf '\n## 実装 handler がここまでに書いていたこと\n\n%s\n' "$DONE"
+                    fi
+                  } > "$ESCALATE/report.md"
+                  sync; exit 0
+                }
+                # 複数行を書くときは stdin から。YAML のリテラルブロックの中では、行頭に戻る
+                # 継続行がブロックそのものを終わらせてしまうため、埋め込みではなくパイプで渡す。
+                give_up_stdin() {
+                  DONE=$(cat /workspace/done/report.md 2>/dev/null || true)
+                  find /workspace/done -mindepth 1 -delete 2>/dev/null || true
+                  { cat
+                    if [ -n "$DONE" ]; then
+                      printf '\n## 実装 handler がここまでに書いていたこと\n\n%s\n' "$DONE"
+                    fi
+                  } > "$ESCALATE/report.md"
+                  sync; exit 0
+                }
+
+                # --- 入力の検証（この値は URL にもプロンプトにも入る） -------------
+                # FLOW_INPUT が空なら既定リポ。空でないのに .repo が取れない（JSON が壊れて
+                # いる等）場合は、空指定と区別せず home-rss へ黙って流さない。
+                if [ -z "${FLOW_INPUT:-}" ]; then
+                  REPO=Tsuguya-HC/home-rss
+                else
+                  REPO=$(printf '%s' "$FLOW_INPUT" | jq -r '.repo // empty' 2>/dev/null || true)
+                  [ -n "$REPO" ] || give_up "spec.input が JSON として読めないか .repo を持たない。実装は行っていない。"
+                fi
+                case "$REPO" in
+                  Tsuguya-HC/*[!-A-Za-z0-9._]* | Tsuguya-HC/ | Tsuguya-HC/*/*)
+                    give_up "spec.input.repo の形が不正。実装は行っていない。" ;;
+                  Tsuguya-HC/?*) ;;
+                  *) give_up "spec.input.repo は Tsuguya-HC 配下だけを指定できる。実装は行っていない。" ;;
+                esac
+                ISSUE=$(printf '%s' "${FLOW_INPUT:-}" | jq -r '.issue // empty' 2>/dev/null || true)
+                case "$ISSUE" in
+                  '' | *[!0-9]*) give_up "spec.input.issue が数字ではない。実装は行っていない。" ;;
+                esac
+
+                # --- token はファイルから読んで即座に消す ---------------------------
+                # export しないので claude の環境には入らない。ファイルも消すので、
+                # プロンプトインジェクションでエージェントが読み出す経路を残さない。
+                GH_TOKEN=$(cat /github-token/token)
+                rm -f /github-token/token
+
+                # --- Block スクラッチ（virtiofs を通らない唯一の経路） --------------
+                # ここだけ素通しだと、失敗時に理由を書かずに即死し（set -eu 任せ）、
+                # maxInfraRetries を診断情報ゼロで消費する。他の外部呼び出しと同じく
+                # give_up で捕まえる。
+                mkfs.ext4 -q -F -E lazy_itable_init=0,lazy_journal_init=0,root_owner=65533:65533 /dev/scratch \
+                  || give_up "Block スクラッチの mkfs に失敗した。実装は行っていない。"
+                mkdir -p /scratch \
+                  || give_up "/scratch の作成に失敗した。実装は行っていない。"
+                mount -o noatime /dev/scratch /scratch \
+                  || give_up "Block スクラッチの mount に失敗した。実装は行っていない。"
+                mkdir -p /scratch/out \
+                  || give_up "/scratch/out の作成に失敗した。実装は行っていない。"
+                chown 65533:65533 /scratch /scratch/out \
+                  || give_up "/scratch の所有者変更に失敗した。実装は行っていない。"
+                # CARGO_HOME・pnpm store も Block スクラッチに寄せる。イメージの既定
+                # CARGO_HOME（/usr/local/cargo、root:root 0755）は 65533 から書けず、
+                # cargo test が必ず Permission denied で落ちる（変更前の baseline から失敗する）。
+                mkdir -p /scratch/cargo /scratch/xdg-data \
+                  || give_up "/scratch/cargo・/scratch/xdg-data の作成に失敗した。実装は行っていない。"
+                chown 65533:65533 /scratch/cargo /scratch/xdg-data \
+                  || give_up "/scratch/cargo・/scratch/xdg-data の所有者変更に失敗した。実装は行っていない。"
+                # 宣言ディレクトリは prepare が敷く。この Pod は root で起動して作業だけ
+                # 65533 に降りるので、降りた先から書けるように所有者を渡しておく
+                # （/workspace 直下は 0555 のままで、新しいディレクトリは作れない）。
+                for d in /workspace/*/; do chown 65533:65533 "$d" 2>/dev/null || true; done
+
+                # --- clone。token は URL にも .git/config にも書かない ----------------
+                # extraheader は clone/fetch のその1回のプロセスにだけ渡す（GIT_CONFIG_COUNT
+                # は export せず、コマンドの先頭に置いた単発の代入で済ませる）。images/claude-code
+                # の parts コマンドと同じ形（そちらは private な parts リポの clone に使う）。
+                AUTH_HEADER="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | openssl base64 -e -A)"
+                GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0="http.https://github.com/.extraheader" GIT_CONFIG_VALUE_0="$AUTH_HEADER" \
+                  git clone --quiet "https://github.com/${REPO}.git" /scratch/src \
+                  || give_up "${REPO} を clone できなかった。実装は行っていない。"
+                BASE_SHA=$(git -C /scratch/src rev-parse HEAD)
+                # dubious ownership の safe.directory はここで通す（chown 直後）。この後は
+                # root がこのリポで git status / diff / add / commit を全部叩くので、PR 作成
+                # 直前まで待つと「テストを書いたか」の判定そのものが git の fatal で握り潰される
+                # （fatal は stdout に出ないので "$(git status --porcelain)" が空文字になり、
+                # claude が何もしなかったのと区別が付かなくなる）。
+                chown -R 65533:65533 /scratch/src
+                git config --global --add safe.directory /scratch/src
+                # エージェント（65533）は /scratch/src に書き放題なので、.git/hooks/pre-commit
+                # 経由で root（このあと GH_TOKEN 付きで署名コミットのスクリプトを叩く）を
+                # 乗っ取れる。コストゼロで塞ぐ。
+                git -C /scratch/src config core.hooksPath /dev/null
+
+                curl -sfL -H "Authorization: Bearer ${GH_TOKEN}" -H 'Accept: application/vnd.github+json' \
+                     -o /tmp/issue-raw.json "https://api.github.com/repos/${REPO}/issues/${ISSUE}" \
+                  || give_up "issue #${ISSUE} を取得できなかった。実装は行っていない。"
+                jq '{title, body}' < /tmp/issue-raw.json > /tmp/issue.json 2>/dev/null \
+                  || give_up "issue #${ISSUE} の本文を読めなかった。実装は行っていない。"
+                chmod 0644 /tmp/issue.json
+
+                # --- テストの回し方はリポの形から決める（入力からは受け取らない） ----
+                if [ -f /scratch/src/Cargo.toml ]; then
+                  TEST_CMD="cargo test --workspace"
+                elif [ -f /scratch/src/package.json ]; then
+                  TEST_CMD="pnpm test"
+                else
+                  give_up "テストの回し方が分からないリポジトリ（Cargo.toml も package.json も無い）。実装は行っていない。"
+                fi
+
+                as_agent() {
+                  setpriv --reuid 65533 --regid 65533 --clear-groups --inh-caps=-all --no-new-privs -- \
+                    env HOME=/tmp \
+                        ANTHROPIC_BASE_URL="$ANTHROPIC_BASE_URL" \
+                        ANTHROPIC_AUTH_TOKEN="$ANTHROPIC_AUTH_TOKEN" \
+                        ANTHROPIC_API_KEY= \
+                        CLAUDE_CODE_SUBAGENT_MODEL="$OPENROUTER_MODEL" \
+                        CARGO_HOME=/scratch/cargo \
+                        XDG_DATA_HOME=/scratch/xdg-data \
+                        "$@"
+                }
+                # setpriv が（イメージの入れ替わり等で）黙って降格に失敗すると、この後の
+                # claude・テストは全部 root で動くか即失敗するかのどちらかになり、症状が
+                # 「変更前のテストが通らない」に化けて原因が見えなくなる。使う前に実際に
+                # 65533 へ降りているか確かめる。
+                ACTUAL_UID=$(as_agent id -u 2>&1) || true
+                if [ "$ACTUAL_UID" != "65533" ]; then
+                  give_up "65533 への降格に失敗した（setpriv が返した uid: ${ACTUAL_UID}）。エージェントは起動していない。"
+                fi
+                # activeDeadlineSeconds の TERM は PID1 に飛ぶ。前面で子プロセスを待っていると
+                # POSIX sh は前面コマンドの終了を待ってから trap を実行するため、猶予期間内に
+                # trap が発火しない。background + wait にして、TERM を受けたら子を落としてから
+                # flush する（taskflow-pr-review.yaml と同じ形）。claude 2 回・テスト 3 回は
+                # 全部これを通す。
+                #
+                # pr-review と違い、ここで背景化する先は as_agent という**関数呼び出し**。
+                # 関数は fork せず今のプロセスの中で走るので、"$@" & が作るのはその関数を
+                # 動かす1枚のプロセスで、setpriv/env/claude(または cargo)本体はさらにその
+                # 子として生成される。つまり $! は本体ではなく中間層を指す — kill $pid は
+                # 中間層だけを殺し、本体を孤児化させて生かしたまま走らせ続ける（実測）。
+                # ジョブ制御を有効にして背景ジョブを専用プロセスグループに乗せ、グループ
+                # 単位（負の PID）で kill することで本体まで届かせる。
+                supervise() {
+                  had_m=1
+                  case $- in *m*) ;; *) set -m; had_m=0 ;; esac
+                  "$@" &
+                  pid=$!
+                  # set -eu の下では、trap 本体の中でも errexit は生きている。対象が既に
+                  # 死んでいて kill が非ゼロを返すと、そこで trap 自体が打ち切られ、
+                  # 一番大事な timeout 到達時に sync も exit 143 も飛ばされる（実測）。
+                  # kill 系はすべて || true で errexit の対象から外す。
+                  trap 'kill -TERM -$pid 2>/dev/null || true
+                        i=0
+                        while kill -0 $pid 2>/dev/null && [ $i -lt 10 ]; do sleep 1; i=$((i+1)); done
+                        kill -KILL -$pid 2>/dev/null || true
+                        sync
+                        exit 143' TERM INT
+                  rc=0
+                  wait $pid || rc=$?
+                  trap - TERM INT
+                  # supervise の外にジョブ制御を漏らさない（スクリプト全体の挙動を変えない）。
+                  [ "$had_m" -eq 0 ] && set +m
+                  return $rc
+                }
+                run_tests() {
+                  supervise as_agent sh -c "cd /scratch/src && $TEST_CMD" > "$1" 2>&1
+                }
+                # claude は作業ツリー（/scratch/src）ではなく workingDir の /workspace で
+                # 起動してしまうので、run_tests と同じく sh -c 越しに cd する。
+                #
+                # timeout はブローカーが 1 回落ちて claude CLI が長時間ブロックしたときに、
+                # Job 全体の timeout: 60m を丸ごと・maxInfraRetries を診断情報ゼロで消費するのを
+                # 防ぐための下限。exec するので timeout の終了コードがそのまま run_agent の
+                # 戻り値になり、claude 自身の非ゼロ終了と呼び出し側で区別できる。
+                #
+                # イメージの timeout は GNU coreutils ではなく BusyBox の applet で、打ち切り時
+                # の終了コードは 124 ではなく **143**（SIGTERM）・KILL まで行けば 137（実測）。
+                # 143 は supervise() の trap が Job の TERM（activeDeadlineSeconds 到達）を
+                # 受けたときの exit コードでもあるが、その経路では trap が直接 exit するので
+                # このあと CLAUDE_RC を読む行に到達すること自体がない。つまり CLAUDE_RC の
+                # 比較まで来ている時点で 143 なら、それは run_agent 内の timeout が出したもの
+                # と確定できる（実測で「その行に到達しない」ことを確認済み）。
+                run_agent() {
+                  log="$1"; timeout_dur="$2"; shift 2
+                  supervise as_agent sh -c "cd /scratch/src && exec timeout -k 10 '$timeout_dur' claude \"\$@\"" claude "$@" < /dev/null > "$log" 2>&1
+                }
+                # ブローカーのポートに繋がらない（起動前・クラッシュ中・再起動中）と、claude は
+                # upstream の 5xx とは違って error_status:null/"unknown" のまま延々リトライし続け、
+                # run_agent の timeout（15m/30m）に達するまで気付けない（実測）。claude を呼ぶ前に
+                # 生死だけ先に見て、繋がらないなら呼ばずに確定した報告を残す。
+                # GET / は許可リストで 403 を返す — これは「繋がっている」ことの確認であって異常
+                # ではない（--fail を付けないので curl は 403 でも exit 0）。exit 7=接続不可、
+                # 28=タイムアウトの場合だけ異常とする。upstream 側の 5xx は claude 自身のリトライと
+                # CLAUDE_RC の捕捉で十分な診断が出るので、ここでは見ない。
+                check_broker() {
+                  curl -s --max-time 2 -o /dev/null "http://127.0.0.1:8787/"
+                }
+
+                # --- 0. 依存の取得 --------------------------------------------------
+                # cargo は $TEST_CMD 自体が必要な crate を取得するのでここでは何もしない。
+                # pnpm は fresh clone に node_modules が無いと `pnpm test` がテストランナーを
+                # 見つけられず baseline から必ず落ちるので、先に install しておく。
+                if [ "$TEST_CMD" = "pnpm test" ]; then
+                  if ! supervise as_agent sh -c "cd /scratch/src && pnpm install --frozen-lockfile" > /tmp/pnpm-install.log 2>&1; then
+                    { echo "pnpm install --frozen-lockfile に失敗した。実装は行っていない。"
+                      echo
+                      tail -30 /tmp/pnpm-install.log
+                    } | give_up_stdin
+                  fi
+                fi
+
+                # --- 1. baseline --------------------------------------------------
+                if ! run_tests /tmp/baseline.log; then
+                  { echo "変更前の $TEST_CMD が通らない。前提が壊れているので実装に進んでいない。"
+                    echo
+                    tail -30 /tmp/baseline.log
+                  } | give_up_stdin
+                fi
+
+                # --- 2. テストだけ書かせる ----------------------------------------
+                check_broker \
+                  || give_up "openrouter-broker（127.0.0.1:8787）に接続できない。実装は行っていない。サイドカーの状態は kubectl describe pod で確認すること。"
+                # set -eu の下では、if/&&/|| に囲まれていない単純コマンドが非ゼロで
+                # 終わった瞬間にスクリプトごと落ちる。次の行で $? を読む形は、その1行に
+                # 到達すること自体がない（done も escalate も書かれず NoAnswer になる）。
+                # || で括って set -e の対象から外す。
+                CLAUDE_RC=0
+                run_agent /tmp/claude-tests.log 15m \
+                  -p "/implement-tests ${REPO} の issue #${ISSUE}" \
+                  --plugin-dir /parts \
+                  --append-system-prompt-file /parts/CLAUDE.md \
+                  --verbose --output-format stream-json \
+                  --dangerously-skip-permissions \
+                  --allowedTools "Bash,Read,Write,Edit,Glob,Grep" \
+                  --model "$OPENROUTER_MODEL" \
+                  --max-turns 60 || CLAUDE_RC=$?
+                # 終了コードを握り潰すと、モデル slug 無効・認証失敗・クレジット切れが
+                # 全部「テストが 1 行も書かれなかった」に化ける。実態を先に報告する。
+                # 124/143 は run_agent 内の timeout 由来（打ち切り。BusyBox の timeout は 124
+                # ではなく SIGTERM の 143、KILL まで行けば 137 を返す）で、claude 自身の失敗
+                # ではない。
+                if [ "$CLAUDE_RC" -eq 124 ] || [ "$CLAUDE_RC" -eq 143 ]; then
+                  { echo "テストの回の claude が 15m で打ち切られた（timeout の exit ${CLAUDE_RC}。claude 自身の失敗ではない）。ブローカー（127.0.0.1:8787）の疎通を確認すること。実装には進んでいない。"
+                    echo
+                    echo "stream-json の末尾:"
+                    tail -20 /tmp/claude-tests.log
+                  } | give_up_stdin
+                elif [ "$CLAUDE_RC" -ne 0 ]; then
+                  { echo "テストの回の claude が失敗した（exit ${CLAUDE_RC}）。実装には進んでいない。"
+                    # 137 は run_agent 内の timeout が -k で KILL した場合と OOMKill の
+                    # どちらでも出る値で、この情報だけでは決まらない。決めたと嘘をつかない。
+                    if [ "$CLAUDE_RC" -eq 137 ]; then
+                      echo "（137 は timeout の -k による KILL か OOMKill のどちらか。kubectl describe pod で OOMKilled を確認すること）"
+                    fi
+                    echo
+                    echo "stream-json の末尾:"
+                    tail -20 /tmp/claude-tests.log
+                  } | give_up_stdin
+                fi
+
+                if [ -f /scratch/out/no-test.md ]; then
+                  { echo "テストで赤を作れない要求だと判断された。実装には進んでいない。"
+                    echo
+                    cat /scratch/out/no-test.md
+                  } | give_up_stdin
+                fi
+                if [ -z "$(git -C /scratch/src status --porcelain)" ]; then
+                  give_up "テストが 1 行も書かれなかった。実装には進んでいない。"
+                fi
+
+                # --- 3. 赤の観測（この handler の本体） ---------------------------
+                if run_tests /tmp/red.log; then
+                  git -C /scratch/src diff > /tmp/tests.diff || true
+                  { echo "書かれたテストが最初から通ってしまう。要求を検証していないので実装に進んでいない。"
+                    echo
+                    echo "$TEST_CMD の結果:"
+                    tail -20 /tmp/red.log
+                    echo
+                    echo "書かれた差分:"
+                    head -100 /tmp/tests.diff
+                  } | give_up_stdin
+                fi
+                cp /scratch/out/tests-report.md /tmp/tests-report.md 2>/dev/null || echo '(報告なし)' > /tmp/tests-report.md
+                chmod 0644 /tmp/tests-report.md
+
+                # --- 4. 実装させる ------------------------------------------------
+                # 1 回目（/implement-tests）のモデルが /workspace/done に report.md を残して
+                # いると、2 回目の PR 本文の「## 実装の回」にテストの回の文章が載る。prepare が
+                # 敷いた宣言ディレクトリなので、消してもこの handler 自身が困ることはない。
+                find /workspace/done -mindepth 1 -delete 2>/dev/null || true
+                check_broker \
+                  || give_up "openrouter-broker（127.0.0.1:8787）に接続できない。PR は作っていない。サイドカーの状態は kubectl describe pod で確認すること。"
+                CLAUDE_RC=0
+                run_agent /tmp/claude-implement.log 30m \
+                  -p "/implement ${REPO} の issue #${ISSUE}" \
+                  --plugin-dir /parts \
+                  --append-system-prompt-file /parts/CLAUDE.md \
+                  --verbose --output-format stream-json \
+                  --dangerously-skip-permissions \
+                  --allowedTools "Bash,Read,Write,Edit,Glob,Grep" \
+                  --model "$OPENROUTER_MODEL" \
+                  --max-turns 120 || CLAUDE_RC=$?
+                # 124/143 は run_agent 内の timeout 由来（打ち切り）。上のテストの回と同じ理由。
+                if [ "$CLAUDE_RC" -eq 124 ] || [ "$CLAUDE_RC" -eq 143 ]; then
+                  { echo "実装の回の claude が 30m で打ち切られた（timeout の exit ${CLAUDE_RC}。claude 自身の失敗ではない）。ブローカー（127.0.0.1:8787）の疎通を確認すること。PR は作っていない。"
+                    echo
+                    echo "stream-json の末尾:"
+                    tail -20 /tmp/claude-implement.log
+                  } | give_up_stdin
+                elif [ "$CLAUDE_RC" -ne 0 ]; then
+                  { echo "実装の回の claude が失敗した（exit ${CLAUDE_RC}）。PR は作っていない。"
+                    # 137 は run_agent 内の timeout が -k で KILL した場合と OOMKill の
+                    # どちらでも出る値で、この情報だけでは決まらない。決めたと嘘をつかない。
+                    if [ "$CLAUDE_RC" -eq 137 ]; then
+                      echo "（137 は timeout の -k による KILL か OOMKill のどちらか。kubectl describe pod で OOMKilled を確認すること）"
+                    fi
+                    echo
+                    echo "stream-json の末尾:"
+                    tail -20 /tmp/claude-implement.log
+                  } | give_up_stdin
+                fi
+
+                # --- 5. 緑の確認 --------------------------------------------------
+                if ! run_tests /tmp/green.log; then
+                  { echo "実装後も $TEST_CMD が通らない。PR は作っていない。"
+                    echo
+                    tail -40 /tmp/green.log
+                    echo
+                    echo "テストの回で書かれたもの:"
+                    cat /tmp/tests-report.md
+                  } | give_up_stdin
+                fi
+
+                # --- 6. PR（handler が作る。エージェントには触らせない） ------------
+                BRANCH="agent/issue-${ISSUE}-${FLOW_TASK_UID%%-*}"
+                cd /scratch/src
+                git config user.name "tgy-cluster-bot[bot]"
+                git config user.email "tgy-cluster-bot[bot]@users.noreply.github.com"
+                git add -A
+
+                # BRANCH は FLOW_TASK_UID から決定論的に決まるので、同じ Task の infra retry
+                # では前回と同じ名前になる。前回がここまで来ていたかをまず確かめる —
+                # 確かめずに ref 作成へ進むと、前回がコミットや PR まで到達していた場合に
+                # ただの 422 になり、実際に進んでいた分の状況が escalate から消える。
+                if GH_TOKEN="$GH_TOKEN" gh api "repos/${REPO}/git/refs/heads/${BRANCH}" >/dev/null 2>&1; then
+                  give_up "ブランチ ${BRANCH} は前回の試行（infra retry）で既に作成済み。コミットや PR 作成まで進んでいたかはここからは分からない。人が repos/${REPO}/git/refs/heads/${BRANCH} と既存 PR を確認すること。"
+                fi
+                GH_TOKEN="$GH_TOKEN" gh api "repos/${REPO}/git/refs" \
+                  -f ref="refs/heads/${BRANCH}" -f sha="$BASE_SHA" >/dev/null \
+                  || give_up "ブランチ ${BRANCH} を作れなかった（直前の存在チェックでは無かった）。GitHub 側に何か残っているかは確認できていない。実装はこの Pod の Block スクラッチ（ゲスト内 ext4、Pod の GC で失われる）の中にある。回収するには Pod が消える前に同じ PVC を別の kata Pod でマウントし直す必要があり、通常は困難。"
+                # github-signed-commit.sh 自身も末尾で git fetch/reset する。clone のときと
+                # 同じ extraheader を渡す（remote に token を埋めていないので、渡さないと
+                # ここで認証エラーになり、コミットは API 経由で成功しているのに「作れなかった」
+                # と誤診する）。
+                GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0="http.https://github.com/.extraheader" GIT_CONFIG_VALUE_0="$AUTH_HEADER" \
+                  GH_TOKEN="$GH_TOKEN" /helpers/github-signed-commit.sh \
+                  -r "$REPO" -b "$BRANCH" -m "Implement #${ISSUE}" \
+                  || give_up "署名コミットを作れなかった。ブランチ ${BRANCH} は GitHub に作成済み（base の HEAD のまま、まだコミットは載っていない）。実装差分自体はこの Pod の Block スクラッチにしかなく、Pod が GC されると失われる。"
+
+                # implement skill が「テストは間違っている」と判断して escalate/ に理由を
+                # 書いて降りた後でも、緑判定が通れば PR まで進んでしまう。捨てずに PR 本文へ
+                # 畳み込む（下で escalate ディレクトリを空にする前に読む）。
+                ESCALATE_NOTE=$(cat /workspace/escalate/report.md 2>/dev/null || true)
+                PR_BODY=$(printf 'closes #%s\n\n実装 handler（%s）が TDD で書いた。テストを先に書き、赤を観測してから実装している。\n\n## テストの回\n\n%s\n\n## 実装の回\n\n%s\n' \
+                    "$ISSUE" "$OPENROUTER_MODEL" "$(cat /tmp/tests-report.md)" "$(cat /workspace/done/report.md 2>/dev/null || echo '(報告なし)')")
+                if [ -n "$ESCALATE_NOTE" ]; then
+                  PR_BODY=$(printf '%s\n\n## エージェントが escalate に書いていたこと（テストは緑だったため PR は作成）\n\n%s\n' "$PR_BODY" "$ESCALATE_NOTE")
+                fi
+                PR_URL=$(GH_TOKEN="$GH_TOKEN" gh pr create --repo "$REPO" --head "$BRANCH" --base main --draft \
+                  --title "Implement #${ISSUE}" \
+                  --body "$PR_BODY") \
+                  || give_up "PR を作れなかった。実装はブランチ ${BRANCH} として GitHub 側に push 済みで残っている。"
+
+                # done と escalate の両方が非空だと判定不能になる。ここまで来た時点で成功が
+                # 確定するので、implement skill が途中で escalate に倒れていた場合に備えて空に
+                # する（中身は上で PR 本文に畳み込み済み）。rm -f report.md だけだと report.md
+                # 以外の置き土産が残ってディレクトリが空にならないので、中身ごと空にする。
+                find /workspace/escalate -mindepth 1 -delete 2>/dev/null || true
+                printf '%s\n' "$PR_URL" >> /workspace/done/report.md
+                sync
+            env:
+              # ブローカー宛。実キーはこのコンテナには無い（openrouter-broker が持つ）。
+              - name: ANTHROPIC_BASE_URL
+                value: http://127.0.0.1:8787/api
+              # claude は値が空だと起動しないので置くが、**これは資格情報ではない**。
+              # ブローカーがクライアントの名乗る Authorization を捨てて付け直すので、
+              # ここに何が入っていても OpenRouter には届かない。
+              - name: ANTHROPIC_AUTH_TOKEN
+                value: handled-by-openrouter-broker
+              - name: OPENROUTER_MODEL
+                value: meta/muse-spark-1.3-contributor
+              - name: GOPROXY
+                value: "off"
+              - name: GOTOOLCHAIN
+                value: local
+            resources:
+              requests:
+                cpu: "1"
+                memory: 2Gi
+              limits:
+                # Kata では limits がそのまま VM のサイズ。cpu を書かないと 1 vCPU になり、
+                # cargo のビルドだけで timeout する（image-build で実測済み）。
+                cpu: "4"
+                memory: 8Gi
+---
+apiVersion: flow.tgy.io/v1alpha1
+kind: TaskFlow
+metadata:
+  name: implement
+  namespace: claude-code-build
+spec:
+  profile: investigate
+  start: 実装
+  workspace: {}
+  bindings:
+    実装:
+      handler: implementer
+      next:
+        完了: done
+        Escalated: escalate
+  terminals:
+    完了: Success
+  reworkBudget: 0

@@ -24,6 +24,7 @@ Cluster-wide default is **restricted enforce** (configured in Talos `admissionCo
 | oauth2-proxy | restricted | |
 | seaweedfs | restricted | |
 | claude-code | baseline | Argo Workflows コンテナ要件 |
+| claude-code-build | privileged | Kata ゲスト内で volumeMode: Block を mkfs するため privileged |
 | harbor | baseline | Harbor コンテナが restricted 非対応 |
 | image-build | privileged | BuildKit が privileged 必須（Kata VM 内で実行） |
 | nextcloud | baseline | Nextcloud コンテナが restricted 非対応 |

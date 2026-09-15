@@ -6,7 +6,9 @@
 #   kubectl -n image-build delete pod kata-block-scratch   # PVC は ephemeral なので一緒に消える
 #
 # image-build namespace なのは PSA が privileged だから。claude-code は baseline で SYS_ADMIN が
-# 通らない（docs/pod-security.md）。handler に入れるときはその判断が別途要る。
+# 通らない（docs/pod-security.md）。handler に入れるときは PSA privileged な専用 namespace が
+# 別途要る — 実物は `claude-code-build`（`manifests/claude-code-build/`）で、`implementer`
+# handler がこの型そのものを使っている。
 apiVersion: v1
 kind: Pod
 metadata:

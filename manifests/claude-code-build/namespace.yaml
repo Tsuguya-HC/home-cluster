@@ -1,0 +1,15 @@
+# 実装 handler の置き場。claude-code（PSA baseline）と分けてあるのは、ここの Pod が
+# volumeMode: Block のスクラッチをゲスト内で mkfs するため privileged が要るから
+# （docs/kata-storage.md）。baseline は capability の追加を NET_BIND_SERVICE しか許さず、
+# claude-code の enforce を下げると Block を使わない 13 個の handler まで巻き添えになる。
+#
+# ここに置く Pod は必ず runtimeClassName: kata であること。privileged はゲスト VM の中の話で
+# ホストには及ばない（containerd が privileged_without_host_devices = true）が、
+# **runtimeClass を書き忘れた Pod は runc で本物のホスト特権を取る**。namespace は runtime の
+# 境界ではないので、これは PSA では止められない。
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: claude-code-build
+  labels:
+    pod-security.kubernetes.io/enforce: privileged

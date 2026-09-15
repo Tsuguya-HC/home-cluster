@@ -47,6 +47,8 @@ spec:
             sensor-name: renovate-webhook
         - matchLabels:
             sensor-name: aqua-checksum
+        - matchLabels:
+            sensor-name: pr-review-dispatch
       toPorts:
         - ports:
             - port: "4222"

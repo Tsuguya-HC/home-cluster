@@ -24,6 +24,16 @@ spec:
         - ports:
             - port: "5432"
               protocol: TCP
+    # フィード追加時の即時取得（home-rss #106）。server が外へ出るのはこの経路だけで、
+    # 宛先はユーザーが登録したフィードの URL なので rss-fetcher と同じく world:443。
+    # **これが無いと失敗ではなくハングする** — spin.toml の allowed_outbound_hosts を
+    # 開けても CNP が閉じていれば SYN が黙って落ち、タイムアウトまで待つことになる。
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
 ---
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy

@@ -1,0 +1,56 @@
+# privileged コンテナが runc で起動すると、その特権は**ホストの**特権になる。
+# claude-code-build / image-build を PSA privileged にしてあるのは「ゲスト VM の中で
+# 特権を持ちたい」からで（Block ボリュームの mkfs、BuildKit）、成立条件は
+# runtimeClassName: kata が付いていること。**namespace は runtime の境界ではないので、
+# 書き忘れた Pod は PSA を通り抜けて runc で本物のホスト特権を取る。**
+#
+# 対象を「privileged を要求している Pod」に絞ってある。namespace 全体に kata を強制すると、
+# Argo が全 workflow に付ける discord-notify の exit hook Pod（curl するだけ、kata 不要）まで
+# 弾いてしまう。守りたいのは特権の置き場所であって、namespace の均質性ではない。
+#
+# kube-system / monitoring / trivy-system も PSA privileged だが対象に入れない。あちらは
+# ホストのデバイスとカーネルを見に行く本物のノードエージェントで、kata の中では機能しない。
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-kata-runtime
+  annotations:
+    policies.kyverno.io/description: >-
+      A privileged container in the build namespaces must run under the kata
+      RuntimeClass. Those namespaces are PSA-privileged so a container can hold
+      privileges inside the guest VM; without runtimeClassName the very same pod
+      spec is admitted and scheduled on runc, where those privileges are the
+      host's. PSA cannot express this — it validates the security context, not
+      the runtime the pod lands on.
+spec:
+  admission: true
+  background: true
+  emitWarning: false
+  validationFailureAction: Enforce
+  rules:
+    - name: privileged-requires-kata
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - claude-code-build
+                - image-build
+      preconditions:
+        all:
+          # 3 つのリストを 1 本に畳んでから絞る。**`[][?...]` と続けて書くと常に空になる**
+          # ので、フラット化とフィルタの間にパイプを入れること（JMESPath で実測）。
+          # initContainers / ephemeralContainers が無い Pod では multiselect にその位置の
+          # null が残るが、フィルタが落とすので 0 になる。
+          - key: "{{ length(request.object.spec.[containers, initContainers, ephemeralContainers][] | [?securityContext.privileged == `true`]) }}"
+            operator: GreaterThan
+            value: 0
+      validate:
+        message: >-
+          A privileged container here must run under kata — set
+          spec.runtimeClassName: kata. This namespace is PSA-privileged, so on
+          runc these privileges would be the host's.
+        pattern:
+          spec:
+            runtimeClassName: kata

@@ -446,7 +446,14 @@ spec:
                     --post-data="$PAYLOAD" "$DISCORD_WEBHOOK_URL" || echo "discord post failed"
                 }
                 trap 'notify; exit 0' TERM INT
-                while :; do sleep 1; done
+                # POSIX sh は前面コマンドが終わるまで trap を実行しないので待機は必要だが、
+                # `while :; do sleep 1; done` は 1 秒ごとに exec するため Tetragon の
+                # privileges-raise が 145 件/日（2026-09-15 実測）鳴っていた。background +
+                # wait なら trap は同じく即座に効いて exec は 1 回で済む。sleep 単体だと
+                # TERM/INT 以外で死んだ場合に wait が trap を経由せず抜けてしまうので、
+                # while で包んで sleep が落ちても notify に必ず到達させる。
+                # busybox sleep が 2147483647 を受けることは当該イメージ内で確認済み。
+                while :; do sleep 2147483647 & wait; done
             env:
               - name: DISCORD_WEBHOOK_URL
                 valueFrom:

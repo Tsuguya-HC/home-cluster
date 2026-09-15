@@ -316,3 +316,13 @@ kubectl -n kube-system rollout restart deploy/cilium-operator
 **見逃した理由**: Grafana ダッシュボード（`manifests/monitoring/dashboard-tetragon.yaml`）は `tetragon_policy_events_total` というメトリクスベースの数字を見ており、export が死んでいても発火イベントが 0 件のまま緑で表示され続けた。**メトリクスの生存はログ経路の生存を意味しない。**
 
 **現在の手当て**: `manifests/claude-code/weekly-inventory-cwf.yaml`（週次棚卸しレポート）が毎週「観測系の出口」（tetragon export / alloy / argo の行数）を無条件に報告し、0 行または取得失敗のときは見出しと色を変えて警告する。hubble はこの判定に含めない（`{job="hubble"}` は DROPPED verdict だけに絞られたフィルタ済みストリームで、0 が正常でありうるため）。
+
+## Tetragon TracingPolicy: `matchBinaries` はシェバンスクリプトを除外できない
+
+Tetragon の `matchBinaries` はインタプリタにマッチし、**スクリプトパスにはマッチしない**（公式ドキュメント `selectors.md`「Scripts with shebangs」節）。`#!/bin/sh` のようなシェバンスクリプトを実行すると、カーネルが実際に exec するのはインタプリタ（`/bin/sh`）であり、スクリプトはその引数として渡される。したがって `matchBinaries` にスクリプトの絶対パスを指定しても、比較対象がそもそも違うため一致しない。
+
+**紛らわしい点**: export される JSON の `process.binary` フィールドには、実行されたスクリプトのパスがそのまま出る。Loki 等でイベントを見て「このパスで除外すればよい」と判断すると、export に出る値と `matchBinaries` の比較対象が別物であることを見落とす。
+
+`manifests/kube-system/tracingpolicy-suspicious-binary.yaml` の Network tool セレクタで 2026-09-15 に実際に踏んだ: `github-auth.sh` / `github-signed-commit.sh`（どちらも `#!/bin/sh`）を `matchBinaries: NotIn` で除外するパッチを入れたが、比較対象は `/bin/sh`（busybox）になるため常に不一致となり、除外は一切効かないまま本番反映された。`kubectl apply --dry-run=server` も CRD スキーマ検証も通るため、**反映して発火が実際に止まるかを Loki で測るまで気づけない**。
+
+ELF の実バイナリ（`argocd-repo-server` / `busybox` / `postgres` 等）を対象にした Shell セレクタの除外は同じ形で問題なく機能している。シェバンスクリプトを対象にする場合、`matchBinaries` では指定できないため、そのプロセスが起動する対象コマンド側（`matchArgs`）で絞るか、除外自体を諦めるしかない。

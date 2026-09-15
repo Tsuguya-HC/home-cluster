@@ -2,8 +2,8 @@ apiVersion: cilium.io/v1alpha1
 kind: TracingPolicy
 metadata:
   name: suspicious-binary
-# shell / network tool の 2 セレクタに matchBinaries を足し、「その親が該当バイナリを
-# 起動するのは設計どおり」という既知の定常動作だけを外す。2026-09-15 に Loki で実測
+# shell セレクタに matchBinaries を足し、「その親が該当バイナリを起動するのは設計どおり」
+# という既知の定常動作だけを外す。2026-09-15 に Loki で実測
 # （{namespace="kube-system",pod=~"tetragon-.*",container="export-stdout"} の
 # process_kprobe.process.binary 集計。Prometheus の increase() は短命 Pod を取りこぼして
 # 過小値になるため使わない）。
@@ -12,22 +12,24 @@ metadata:
 # busybox 288 / containerbase-cli 210 = 約90%。postgres がメジャーバージョンでパスを
 # 変えるため NotPrefix にしてある（CRD 上 maxItems: 1 なので一本化）。他の3つは完全パス
 # のつもりだが前方一致の副作用で /usr/bin/busybox-extras のような同名接頭辞も一緒に外れる。
+# 除外後の残りは約209件/日（claude 97 件/日が最大）。
 #
-# Network tool セレクタ: 発火 601 件/日のうち github-auth.sh 442 / github-signed-commit.sh
-# 36 = 約80%が argo-tools 内部スクリプトの curl 経由の GitHub アクセス。除外は curl に
-# 限定するため matchArgs を curl 単独と残り8種に分けた2セレクタにしてある（セレクタ間は
-# OR なので、値集合が重なる分割だと除外が素通りする — 値が重複しないからこそ成立する）。
-# wget / nc / ssh / scp 等に手を出せば親を問わず従来どおり発火する。curl セレクタは
-# 確定パスの除外なので NotIn（完全一致）。
+# Network tool セレクタ: 除外は置かない。発火 601 件/日のうち github-auth.sh 442 /
+# github-signed-commit.sh 36 は argo-tools 内部スクリプト（どちらも #!/bin/sh の
+# シェバンススクリプト）からの curl 経由の GitHub アクセスだが、matchBinaries は
+# インタプリタにマッチしスクリプトパスにはマッチしない（Tetragon selectors.md
+# 「Scripts with shebangs」節）。シェバンスクリプトの実体は /bin/sh（busybox）を
+# exec しているだけなので、/usr/local/bin/github-auth.sh を matchBinaries で
+# 指定しても原理的に一致しない。export に出る process.binary にはスクリプトパスが
+# そのまま出るため Loki のイベントを見ると除外できそうに見えるが、それはマッチングに
+# 使われる値ではない。2026-09-15 に実際この形で除外を入れたが本番で無効だった。
+# Shell セレクタの除外が効くのは、対象4件がすべて ELF 実バイナリだから。
 #
 # 除外はセレクタ単位で効く — 同じ親でも除外対象と別の種類のバイナリを起動すれば従来どおり
-# 発火する。Package manager / Debug の2セレクタには除外が一切無く、全ての親に対して
-# 無条件に発火する。代償は除外対象の親からの shell / curl が見えないこと。除外後の残りは
-# Shell 約209件/日（claude 97 件/日が最大）、Network tool 約123件/日（複数の
-# CronWorkflow / taskflow Job に薄く分散、単一ノイズ源ではない）。policy 全体では
-# 2,645 → 約333件/日（約87%減）で、Grafana の suspicious-binary パネルに出るのは
-# こちら（tetragon_policy_events_total にセレクタを区別するラベルが無く hook 単位で
-# 合算されるため）。
+# 発火する。Network tool / Package manager / Debug の3セレクタには除外が一切無く、
+# 全ての親に対して無条件に発火する。policy 全体では 2,645 → 約811件/日（約69%減）で、
+# Grafana の suspicious-binary パネルに出るのはこちら（tetragon_policy_events_total に
+# セレクタを区別するラベルが無く hook 単位で合算されるため）。
 spec:
   kprobes:
     - call: "security_bprm_check"
@@ -81,6 +83,7 @@ spec:
             - index: 0
               operator: "Equal"
               values:
+                - "/usr/bin/curl"
                 - "/usr/bin/wget"
                 - "/usr/bin/nc"
                 - "/usr/bin/ncat"
@@ -89,25 +92,6 @@ spec:
                 - "/usr/bin/telnet"
                 - "/usr/bin/ssh"
                 - "/usr/bin/scp"
-          matchActions:
-            - action: Post
-              rateLimit: "1m"
-
-        - matchNamespaces:
-            - namespace: Pid
-              operator: NotIn
-              values:
-                - "host_ns"
-          matchBinaries:
-            - operator: "NotIn"
-              values:
-                - "/usr/local/bin/github-auth.sh"
-                - "/usr/local/bin/github-signed-commit.sh"
-          matchArgs:
-            - index: 0
-              operator: "Equal"
-              values:
-                - "/usr/bin/curl"
           matchActions:
             - action: Post
               rateLimit: "1m"

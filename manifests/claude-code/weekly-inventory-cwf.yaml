@@ -57,9 +57,32 @@ spec:
               ALLOY=$(lq 'sum(count_over_time({namespace="monitoring",pod=~"alloy-.*"}[7d]))')
               ARGO_LOG=$(lq 'sum(count_over_time({namespace="argo"}[7d]))')
 
-              T_POLICY=$(pq 'sum(increase(tetragon_policy_events_total[7d]))')
+              # Prometheus の increase() は使わない。tetragon_policy_events_total は
+              # binary / pod ラベルを持ち、Argo WF の短命 Pod ぶんのシリーズが窓の途中で
+              # 生成消滅するため系統的に過小になる（2026-09-15 実測: Renovate の
+              # containerbase-cli 210 件/日が 0.0 として返り、除外リスト作成時に
+              # 見落とした）。export 経由の実イベントを数える。
+              T_POLICY=$(lq 'sum(count_over_time({namespace="kube-system",pod=~"tetragon-.*",container="export-stdout"} |= "process_kprobe" [7d]))')
               TGT_UP=$(pq 'sum(up)')
               TGT_DOWN=$(pq 'sum(up == 0) or vector(0)')
+
+              # 数字は下でそのまま並べる。ここでやるのは「出口が 0 / 取得失敗のとき
+              # 読み飛ばせなくする」ことだけで、抑制も判定の置き換えもしない
+              # （それをやると上のコメントの区別がまた付かなくなる）。
+              # tetragon export / alloy / argo は常時ログを吐くものばかりなので、
+              # 0 は正常値ではない。hubble はここに含めない — helm-values/cilium の
+              # hubble.export.static が allowList で DROPPED verdict だけに絞った
+              # フィルタ済みストリームなので、CNP がチューニングされていれば
+              # 7日間 0 件も正常でありうる（数字自体は下のレポートに従来どおり出す）。
+              DEAD=""
+              for pair in "tetragon export=$T_EXPORT" "alloy=$ALLOY" "argo=$ARGO_LOG"; do
+                nm=${pair%%=*}
+                vl=${pair#*=}
+                case "$vl" in
+                  0) DEAD="$DEAD $nm(0 行)" ;;
+                  '?') DEAD="$DEAD $nm(取得失敗)" ;;
+                esac
+              done
 
               NODES=$(kubectl get nodes --no-headers 2>/dev/null \
                 | awk '$2=="Ready"{r++} END{printf "%d/%d", r, NR}')
@@ -72,13 +95,18 @@ spec:
               CNP_NS=$(kubectl get cnp -A --no-headers 2>/dev/null | awk '{print $1}' | sort -u | wc -l)
               ALL_NS=$(kubectl get ns --no-headers 2>/dev/null | wc -l)
 
-              REPORT=$(printf '**観測系の出口（直近7日・Loki）**\n'
+              REPORT=$(if [ -n "$DEAD" ]; then
+                  printf '**⚠ 観測系の出口が沈黙している:**%s\n' "$DEAD"
+                  printf '_0 行は「異常が無かった」ではなく「経路が死んでいる」可能性が高い。_\n'
+                  printf '_2026-08-27 の tetragon はこの形で 185 日見逃された。_\n\n'
+                fi
+                printf '**観測系の出口（直近7日・Loki）**\n'
                 printf 'tetragon export: `%s` 行\n' "$T_EXPORT"
                 printf 'hubble: `%s` 行\n' "$HUBBLE"
                 printf 'alloy: `%s` 行\n' "$ALLOY"
                 printf 'argo: `%s` 行\n' "$ARGO_LOG"
                 printf '\n**Tetragon（直近7日）**\n'
-                printf 'policy 発火: `%s` 件\n' "$T_POLICY"
+                printf 'policy 発火（export 経由）: `%s` 件\n' "$T_POLICY"
                 printf '\n**クラスタ**\n'
                 printf 'Node Ready: `%s`\n' "$NODES"
                 printf 'Pod: `%s`\n' "$PODS"
@@ -98,10 +126,18 @@ spec:
               URL="https://argo.infra.tgy.io/workflows/${NS}/${WF_NAME}"
               TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)
 
+              if [ -n "$DEAD" ]; then
+                TITLE="週次クラスタ棚卸し — 観測系の出口が沈黙"
+                COLOR=15158332
+              else
+                TITLE="週次クラスタ棚卸し"
+                COLOR=3447003
+              fi
+
               PAYLOAD=$(jq -n \
-                --arg title "週次クラスタ棚卸し" \
+                --arg title "$TITLE" \
                 --arg url "$URL" \
-                --argjson color 3447003 \
+                --argjson color "$COLOR" \
                 --arg report "$BODY" \
                 --arg ts "$TIMESTAMP" \
                 '{embeds: [{title: $title, url: $url, color: $color, description: $report, timestamp: $ts}]}')

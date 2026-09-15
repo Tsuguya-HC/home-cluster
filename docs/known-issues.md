@@ -304,3 +304,15 @@ kubectl -n kube-system rollout restart deploy/cilium-operator
 - `HTTPRouteInfoMissing` — 上の入力である `gatewayapi_httproute_info` メトリクス自体が来ていない状態を検知する番犬。`HTTPRouteNotAccepted` は差分を取る式（`count(info) unless on(...) count(status_condition)`）なので、**`info` が1件も無いと左辺が空ベクタになり、恒久的に発火しないまま沈黙する**
 
 番犬が本体アラートと別建てで要る理由は実例で判明した: この監視を作った当初、CustomResourceState の `info` メトリクス定義（`type: Info`）に `each.info.labelsFromPath` が無く、KSM がラベル無しの値を1件も返さない実装だったため、**`gatewayapi_httproute_info` が実在する HTTPRoute 11本のうち1本も出力されない状態のまま `helm template` / `unread-values.py` / `kubectl apply --dry-run=server` / kubeconform が全部通っていた**。レンダリングや静的検証が緑でも、実クラスタで `/metrics` を採取するまで気づけなかった。**この監視を入れるまでは、新しい HTTPRoute を作らない限り誰も気づけなかった。**
+
+## Tetragon export サイドカーが権限不足でファイルを書けず 185 日サイレント停止（解決済み）
+
+**2026-02-22 の Tetragon 導入から 2026-08-27 に発覚するまで、`export-stdout` サイドカーの JSON export が 1 件も Loki に届いていなかった。**
+
+**原因**: `export-stdout` サイドカーは uid 65532 で動くが、tetragon 本体は chart 既定の `export-file-perm: 600` で export ファイルを root:root で作成する。サイドカーはこのファイルを開けず、**エラーも再起動も出さずに 0 行を吐き続けた**（Pod は `Running 2/2`、`restartCount` は 0 のまま）。
+
+**修正**: `tetragon.exportFilePerm: "644"`（PR #689）。
+
+**見逃した理由**: Grafana ダッシュボード（`manifests/monitoring/dashboard-tetragon.yaml`）は `tetragon_policy_events_total` というメトリクスベースの数字を見ており、export が死んでいても発火イベントが 0 件のまま緑で表示され続けた。**メトリクスの生存はログ経路の生存を意味しない。**
+
+**現在の手当て**: `manifests/claude-code/weekly-inventory-cwf.yaml`（週次棚卸しレポート）が毎週「観測系の出口」（tetragon export / alloy / argo の行数）を無条件に報告し、0 行または取得失敗のときは見出しと色を変えて警告する。hubble はこの判定に含めない（`{job="hubble"}` は DROPPED verdict だけに絞られたフィルタ済みストリームで、0 が正常でありうるため）。

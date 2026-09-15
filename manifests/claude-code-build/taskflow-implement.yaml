@@ -284,9 +284,15 @@ spec:
             # listen したかは見ない。agent が claude を呼ぶまでに mkfs/mount/clone/issue 取得を
             # 挟むので実害は出ていないが、それは偶然の遅延に依存しているだけなので保証を足す。
             # ブローカーに health エンドポイントは無く HTTP GET は許可リストで 403 になるため TCP。
+            # **tcpSocket / httpGet の probe は Pod の IP に接続する（127.0.0.1 ではない）。**
+            # ブローカーは 127.0.0.1 だけに bind しているので、そちらを使うと probe が必ず失敗し、
+            # kubelet がコンテナを殺す → 再起動 → また殺される、を繰り返して agent が永久に
+            # 起動待ちになる（2026-09-15、実際にそうなった。restarts=7 / exitCode=0）。
+            # exec はコンテナの中で走るので localhost が効く。許可リストにより `GET /` は
+            # 403 を返すが、curl は 403 でも終了コード 0 なので「繋がった」の判定に使える。
             startupProbe:
-              tcpSocket:
-                port: 8787
+              exec:
+                command: [curl, -s, --max-time, "2", -o, /dev/null, "http://127.0.0.1:8787/"]
               periodSeconds: 1
               failureThreshold: 10
             resources:

@@ -21,6 +21,7 @@ spec:
           - task-dispatch
           - renovate-webhook
           - aqua-checksum
+          - pr-review-dispatch
   ingressDeny:
     - fromEntities:
         - world

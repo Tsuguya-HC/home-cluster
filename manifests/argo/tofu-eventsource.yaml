@@ -95,6 +95,7 @@ spec:
         method: POST
       events:
         - push
+        - pull_request
       webhookSecret:
         name: memory-github-webhook
         key: credential

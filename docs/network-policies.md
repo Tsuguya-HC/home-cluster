@@ -188,7 +188,7 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 |---|---|---|
 | **talos-build** (talos-build=true) | (deny world) | kube-apiserver, ghcr.io + github.com + api.github.com + uploads.github.com + *.githubusercontent.com + dl-cdn.alpinelinux.org + discord.com :443, seaweedfs-filer (seaweedfs):8333 |
 
-## claude-code (5 policies)
+## claude-code (6 policies)
 
 | Component | Ingress | Egress |
 |---|---|---|
@@ -197,6 +197,7 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 | **taskflow-pr-review** (taskflow-pr-review=true) | (書かない = 全 deny) | api.anthropic.com + github.com + api.github.com :443 |
 | **taskflow-cnp-check** (taskflow-cnp-check=true) | (書かない = 全 deny) | kube-apiserver:6443, api.anthropic.com + github.com + api.github.com :443, loki-gateway (monitoring):8080 |
 | **taskflow-cnp-report** (taskflow-cnp-report=true) | (書かない = 全 deny) | api.anthropic.com + discord.com + github.com + api.github.com :443 |
+| **taskflow-openrouter-smoke** (taskflow-openrouter-smoke=true) | (書かない = 全 deny) | openrouter.ai:443 |
 
 `task-submitter` は Task を 1 つ作るだけの CronWorkflow の Pod。apiserver のほかに要る 2 つは
 コントローラの workflowDefaults が全 Workflow に注入するもの（archiveLogs の保存先と
@@ -236,6 +237,12 @@ Cilium の identity は Pod 単位なので、通知サイドカーのために�
 1 フェーズだった頃は共有の `claude-code=true` に相乗りしており、1 つの Pod が
 apiserver・Loki・Discord・GitHub・npm・crates・SeaweedFS・Prometheus・horenso・ArgoCD を
 まとめて持っていた。
+
+`taskflow-openrouter-smoke` は OpenRouter 配線だけを確かめるスモーク flow の Pod。
+**`api.anthropic.com` を意図的に開けていない** — env 3 つ（`ANTHROPIC_BASE_URL` /
+`ANTHROPIC_AUTH_TOKEN` / 空の `ANTHROPIC_API_KEY`）が効いていなければ Anthropic 直行になるが、
+egress が openrouter.ai だけなのでその場合は CNP に drop されて失敗する。取り違えを緑で
+通さないための設計で、`claude-code-build` の `taskflow-implement` と同じ考え方（下記）。
 
 ## claude-code-build (1 policy)
 
@@ -386,7 +393,7 @@ openrouter.ai への直接到達があるのか」を漏れと誤診しないた
 | Component | Ingress | Egress |
 |---|---|---|
 | **rss-pg** | self → 5432/8000; rss-server/rss-ui/rss-fetcher/rss-cleaner/rss-migration → 5432; cloudnative-pg (cnpg-system), host → 8000 (probes) | kube-apiserver, self:5432/8000 |
-| **rss-server** | oauth2-proxy-rss (oauth2-proxy) → 80 | rss-pg:5432 |
+| **rss-server** | oauth2-proxy-rss (oauth2-proxy) → 80 | rss-pg:5432, world:443 (フィード追加時の即時取得) |
 | **rss-ui** | oauth2-proxy-rss (oauth2-proxy) → 80 | rss-pg:5432 |
 | **rss-fetcher** | rss-cron → 80 | rss-pg:5432, world:443 |
 | **rss-cleaner** | rss-cron → 80 | rss-pg:5432 |

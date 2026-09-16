@@ -286,6 +286,35 @@
     },
     {
       "description": [
+        "manifests/monitoring/netpol-prometheus.yaml の oauth2-proxy 向け ingress は、",
+        "Prometheus の HTTP ルートを CNP の L7 で allowlist している（GET は 'd' 始まりを",
+        "拒否、POST はクエリ系 API のみ）。Prometheus 側でルートが増減するとこの allowlist",
+        "は静かにズレる: CNP はこの PR の diff に出ず、Cilium の ValidatingWebhook も無い",
+        "ので CI も検出できず、Web UI のクエリ実行だけが 403 になる壊れ方をする。",
+        "",
+        "minor/major に絞ってあるのは実測による。直近 120 リリースで Prometheus の minor が",
+        "動いたのは全て chart の minor/major（87.4.0→87.5.0 が 3.12→3.13、88.3.0→88.4.0 が",
+        "3.13→3.14）で、automerge される chart patch が運んだのは Prometheus の patch だけ",
+        "（87.12.3→87.12.4 が 3.13.0→3.13.1）だった。",
+        "",
+        "確認事項は prBodyNotes で PR 本文に出す。description は設定ファイルを読む人にしか",
+        "届かない（PR #802 の本文で実測。Renovate が本文に出すのは Package テーブルと",
+        "Configuration だけで、packageRules の description は含まれない）。"
+      ],
+      "matchPackageNames": ["kube-prometheus-stack"],
+      "matchUpdateTypes": ["minor", "major"],
+      // prBodyNotes の配列は description と意味論が違う: 各要素は trim され、
+      // 空要素は捨てられ、残りが空行（\n\n）で連結される
+      // (lib/workers/repository/update/pr/body/notes.ts)。1 要素 = 1 段落なので、
+      // description のように 1 文を複数要素に折り返すと PR 本文で段落が割れる。
+      "prBodyNotes": [
+        "### :warning: Prometheus の L7 allowlist を突き合わせること",
+        "`manifests/monitoring/netpol-prometheus.yaml` の CNP が Prometheus の HTTP ルートを allowlist している。ズレても CI は緑のまま、Web UI のクエリ実行だけが 403 になる。",
+        "- POST の許可パスを、この版の Prometheus の HTTP API ドキュメント (https://prometheus.io/docs/prometheus/latest/querying/api/) と突き合わせる\n- `d` で始まる新しいルートが増えていないか見る（GET 側は `d` 始まりを一括で拒否している）"
+      ]
+    },
+    {
+      "description": [
         "taskflow は Tsuguya-HC/taskflow 1 リポジトリから 3 つの成果物を出す: remote base の",
         "?ref=、controller image、agent-sidecar image。この 3 つは同じ commit を指している",
         "必要がある（検証は home-cluster#687）。?ref= 側は上の github-tags ルールで自動更新を",

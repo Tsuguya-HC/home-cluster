@@ -31,6 +31,16 @@ spec:
         - ports:
             - port: "1063"
               protocol: TCP
+    # Prometheus からの metrics scrape（:8080、素の HTTP）。ここが閉じていると
+    # ServiceMonitor があっても取れず、reconcile 失敗を鳴らせない（#948）。
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: prometheus
+            io.kubernetes.pod.namespace: monitoring
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
   egress:
     - toEntities:
         - kube-apiserver

@@ -1,0 +1,27 @@
+# ai-gateway-controller の reconcile が失敗しても、**プロセスは落ちず Pod は Running のまま**
+# （controller-runtime がエラーを記録して requeue するだけ）。2026-09-17 の RBAC 絞り込みでは、
+# 権限が 1 つ足りないだけで「Pod は Running なのに extproc が注入されない / filter config Secret が
+# 作られない」状態になる経路が 2 つ見つかった（#942）。どちらも外形的には観測できず、
+# 気づけたのは upstream の実装を読んだからでしかない。その状態を鳴らすための scrape（#948）。
+#
+# taskflow / argo のコントローラと違って kubebuilder の authn/authz フィルタが無く、
+# :8080 に素の HTTP で出ている（Service の port 名は http-metrics）。Bearer も
+# insecureSkipVerify も要らない。
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: ai-gateway-controller
+  namespace: envoy-ai-gateway-system
+  labels:
+    release: kube-prometheus-stack
+spec:
+  endpoints:
+    - port: http-metrics
+      path: /metrics
+      scheme: http
+      interval: 30s
+      scrapeTimeout: 10s
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ai-gateway-helm
+      app.kubernetes.io/instance: agent-router

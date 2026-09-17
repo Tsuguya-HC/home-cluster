@@ -55,6 +55,63 @@ spec:
               memory: 256Mi
             limits:
               memory: 1Gi
+  # gen_ai.* は extproc が dynamic metadata に置く値で、**アクセスログ側で明示的に
+  # 引かないと出ない**（#948）。既定の書式は Envoy Gateway のもので、トークン数の欄が無い。
+  # `aigw run`（単体起動）では aigw が自前で書式を焼くので出ていた — あれを見て
+  # 「Loki にそのまま乗る」と判断したが、K8s ではこの設定が要る。
+  #
+  # **settings を 1 つでも書くと既定のアクセスログは置き換わる**（追加ではない。
+  # internal/gatewayapi/listener.go が settings 非空なら既定へフォールバックしない）。
+  # そのため setting は 2 本要る: LLM 用（gen_ai 付き）と、それ以外を落とさないための catch-all。
+  # catch-all を省くと `x-ai-eg-model` が付かないリクエスト（疎通確認の 404 等）が
+  # **どこにも記録されなくなる** — handler から gateway に届いているかの唯一の外形的証拠なので、
+  # 観測性を足すつもりで観測性を減らすことになる。
+  #
+  # metadataKey は AIGatewayRoute の llmRequestCosts と一致させること（manifests/llm-gateway/
+  # openrouter.yaml）。片方だけ書いても**空欄が並ぶだけでエラーにはならない**。
+  #
+  # 不正な CEL は無視されず EnvoyProxy の telemetry 変換ごと失敗する（= Gateway が
+  # programmed されなくなる）。matches の式は上流 example の逐語コピーから変えないこと。
+  telemetry:
+    accessLog:
+      settings:
+        - matches:
+            - "request.headers['x-ai-eg-model'] != ''"
+          sinks:
+            - type: File
+              file:
+                path: /dev/stdout
+          format:
+            type: JSON
+            json:
+              gen_ai.request.model: "%REQ(X-AI-EG-MODEL)%"
+              gen_ai.response.model: "%DYNAMIC_METADATA(io.envoy.ai_gateway:response_model)%"
+              gen_ai.provider.name: "%DYNAMIC_METADATA(io.envoy.ai_gateway:backend_name)%"
+              gen_ai.usage.input_tokens: "%DYNAMIC_METADATA(io.envoy.ai_gateway:llm_input_token)%"
+              gen_ai.usage.output_tokens: "%DYNAMIC_METADATA(io.envoy.ai_gateway:llm_output_token)%"
+              gen_ai.usage.total_tokens: "%DYNAMIC_METADATA(io.envoy.ai_gateway:llm_total_token)%"
+              start_time: "%START_TIME%"
+              method: "%REQ(:METHOD)%"
+              x-envoy-origin-path: "%REQ(X-ENVOY-ORIGINAL-PATH?:PATH)%"
+              response_code: "%RESPONSE_CODE%"
+              response_flags: "%RESPONSE_FLAGS%"
+              duration: "%DURATION%"
+              user-agent: "%REQ(USER-AGENT)%"
+              x-request-id: "%REQ(X-REQUEST-ID)%"
+              upstream_host: "%UPSTREAM_HOST%"
+              upstream_cluster: "%UPSTREAM_CLUSTER%"
+              downstream_remote_address: "%DOWNSTREAM_REMOTE_ADDRESS%"
+              # 障害切り分けで実際に使う 2 つ。route_name はどのルールにマッチしたか、
+              # response_code_details は DC フラグ付き 200 の理由（downstream_remote_disconnect 等）。
+              route_name: "%ROUTE_NAME%"
+              response_code_details: "%RESPONSE_CODE_DETAILS%"
+        # LLM 以外（疎通確認・ヘルスチェック・ルート外の 404）。matches を書かないので
+        # 全リクエストに当たり、format を省くと Envoy Gateway の既定 JSON が入る。
+        # 上の setting と二重に出るのは x-ai-eg-model があるリクエストだけ。
+        - sinks:
+            - type: File
+              file:
+                path: /dev/stdout
 ---
 # Envoy の既定バッファは 32KiB で、LLM のリクエスト本体（長いプロンプト・画像）が入らない。
 # 上流の examples でも必ず付いている。

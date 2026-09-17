@@ -52,6 +52,7 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 | Workflow pods (claude-code) | Envoy data plane (llm-gateway) | 10080 | LLM API（alias 経由）。現状は taskflow-llm-gateway-smoke のみ |
 | Envoy data plane (llm-gateway) | Envoy Gateway (envoy-gateway-system) | 18000 | xDS |
 | Envoy Gateway (envoy-gateway-system) | Agent Router (envoy-ai-gateway-system) | 1063 | extension server gRPC（xDS 変換） |
+| Prometheus (monitoring) | Agent Router (envoy-ai-gateway-system) | 8080 | Metrics scrape |
 | taskflow-cnp-check (claude-code) | Loki gateway (monitoring) | 8080 | Log query (cnp-check investigation) |
 | PXE sync pods (argo) | SeaweedFS filer (seaweedfs) | 8333 | Artifact/log storage |
 | Etcd backup (argo) | SeaweedFS filer (seaweedfs) | 8333 | Backup storage |
@@ -178,7 +179,7 @@ Application が Unknown のまま一度もレンダリングされない**（ghc
 
 | Component | Ingress | Egress |
 |---|---|---|
-| **prometheus** | grafana, tempo, claude-code (claude-code), kube-apiserver/remote-node (service proxy, RBAC services/proxy で制御) → 9090; oauth2-proxy-prometheus (oauth2-proxy) → 9090 (L7 HTTP: GET は `/debug`（大文字小文字を無視、programsize 24/100）を除いて許可、POST は query/query_range/query_exemplars/series/labels/format_query/parse_query のみ許可の allowlist（クエリ文字列付きも可、programsize 74/100）。他の POST・`/-/reload`・`/-/quit`・`/api/v1/write`・`/api/v1/admin/*`・`/debug/pprof/*` は拒否。allowlist は Prometheus のバージョンに紐づく手書きリストなので chart 更新時に見直すこと。見直しの合図は Renovate 側から出る — renovate.jsonc の packageRule が kube-prometheus-stack の minor/major 更新 PR の本文に確認事項を出す（chart patch は Prometheus の patch しか運ばない実測に基づき対象外）。緊急切り戻し手順は known-issues.md 参照) | kube-apiserver, alertmanager:9093/8080, kube-state-metrics:8080, operator:10250, grafana:3000, smartctl-exporter:9633, argo-workflows-controller (argo):9090, taskflow-controller (taskflow-system):8443, cert-manager controller/webhook/cainjector (cert-manager):9402, tempo:3200 (scrape), coredns (kube-system):9153, tetragon-operator (kube-system):2113, seaweedfs (seaweedfs):9327, trivy-operator (trivy-system):8080, harbor (harbor):8001, host/remote-node:10250/9100/9115/2379/2381/10257/10259/9965/2112 |
+| **prometheus** | grafana, tempo, claude-code (claude-code), kube-apiserver/remote-node (service proxy, RBAC services/proxy で制御) → 9090; oauth2-proxy-prometheus (oauth2-proxy) → 9090 (L7 HTTP: GET は `/debug`（大文字小文字を無視、programsize 24/100）を除いて許可、POST は query/query_range/query_exemplars/series/labels/format_query/parse_query のみ許可の allowlist（クエリ文字列付きも可、programsize 74/100）。他の POST・`/-/reload`・`/-/quit`・`/api/v1/write`・`/api/v1/admin/*`・`/debug/pprof/*` は拒否。allowlist は Prometheus のバージョンに紐づく手書きリストなので chart 更新時に見直すこと。見直しの合図は Renovate 側から出る — renovate.jsonc の packageRule が kube-prometheus-stack の minor/major 更新 PR の本文に確認事項を出す（chart patch は Prometheus の patch しか運ばない実測に基づき対象外）。緊急切り戻し手順は known-issues.md 参照) | kube-apiserver, alertmanager:9093/8080, kube-state-metrics:8080, operator:10250, grafana:3000, smartctl-exporter:9633, argo-workflows-controller (argo):9090, taskflow-controller (taskflow-system):8443, cert-manager controller/webhook/cainjector (cert-manager):9402, tempo:3200 (scrape), coredns (kube-system):9153, tetragon-operator (kube-system):2113, seaweedfs (seaweedfs):9327, trivy-operator (trivy-system):8080, ai-gateway-controller (envoy-ai-gateway-system):8080, harbor (harbor):8001, host/remote-node:10250/9100/9115/2379/2381/10257/10259/9965/2112 |
 | **alertmanager** | prometheus → 9093/8080 | discord.com:443, discordapp.com:443, alertmanager-eventsource (argo):12001 |
 | **grafana** | ingress → 3000 (L7 HTTP); prometheus → 3000 | kube-apiserver, prometheus:9090, loki-gateway:8080, tempo:3200, shared-pg (database):5432, kanidm (kanidm):8443 |
 | **kube-state-metrics** | prometheus → 8080 | kube-apiserver |
@@ -523,7 +524,7 @@ PreSync が落ちて Application が一度も sync しない。
 
 | Component | Ingress | Egress |
 |---|---|---|
-| **agent-router-controller** | kube-apiserver/host/remote-node → 9443 (Pod mutator webhook); envoy-gateway (envoy-gateway-system) → 1063 (extension server gRPC) | kube-apiserver |
+| **agent-router-controller** | kube-apiserver/host/remote-node → 9443 (Pod mutator webhook); envoy-gateway (envoy-gateway-system) → 1063 (extension server gRPC); prometheus (monitoring) → 8080 (metrics, 素の HTTP) | kube-apiserver |
 
 9443 の Pod mutator が届かないと Envoy の Pod に extproc が注入されず、**AI のルートを
 持たないまま起動する**（Pod は Running なので気づきにくい）。taskflow-system と同じく、

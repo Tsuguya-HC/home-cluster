@@ -10,6 +10,20 @@ spec:
     - name: llm-gateway
       kind: Gateway
       group: gateway.networking.k8s.io
+  # これが無いと metadataKey 自体が存在せず、アクセスログの gen_ai.usage.* が空になる（#948）。
+  # EnvoyProxy の telemetry.accessLog（manifests/llm-gateway/gateway.yaml）と対で機能する。
+  #
+  # 注意: AIGatewayRoute を変えると extproc の filter config が変わり、Pod template の
+  # `aigateway.envoyproxy.io/extproc-config-hash` アノテーション経由で**データプレーンの
+  # Pod が置き換わる**。replicas 1 でも maxSurge により新 Pod が Ready になってから
+  # 旧 Pod が消えるので瞬断にはならないが、ルーティングの変更は無停止ではない。
+  llmRequestCosts:
+    - metadataKey: llm_input_token
+      type: InputToken
+    - metadataKey: llm_output_token
+      type: OutputToken
+    - metadataKey: llm_total_token
+      type: TotalToken
   rules:
     - matches:
         - headers:

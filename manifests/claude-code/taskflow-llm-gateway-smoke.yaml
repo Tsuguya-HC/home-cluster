@@ -4,20 +4,25 @@
 # こちらは **Pod を外に出さず gateway だけに出す**。確かめるのは 3 つ:
 #
 #   1. handler の namespace から gateway の ClusterIP に届くこと（両端の CNP が噛み合っている）
-#   2. alias `implement` が AIGatewayRoute にマッチし、実モデルへ解決されること
+#   2. 指定された alias（既定 implement）が AIGatewayRoute にマッチし、実モデルへ解決されること
 #   3. **外に出ているのが gateway だけであること** — この CNP は openrouter.ai を**書かない**ので、
 #      env が効かず Pod が直接出ようとしたら drop されて失敗する。取り違えが緑で通らない
 #
 # handler 側は資格情報を持たない。ANTHROPIC_AUTH_TOKEN はダミーで、gateway が
 # BackendSecurityPolicy の鍵で付け直す。これが #942 の「集約」の実物。
 #
-# 投げ方:
+# 投げ方（alias 省略時は implement）:
 #   kubectl -n claude-code create -f - <<EOF
 #   apiVersion: flow.tgy.io/v1alpha1
 #   kind: Task
 #   metadata: {generateName: llm-gateway-smoke-, namespace: claude-code}
-#   spec: {flow: llm-gateway-smoke}
+#   spec:
+#     flow: llm-gateway-smoke
+#     input: {alias: review}
 #   EOF
+#
+# alias を Task の input から取るのは、上流ごとに flow を複製しないため。CNP は gateway しか
+# 開けていないので、どの alias を指定しても**出口は変わらない**（上流の選択は gateway 側の仕事）。
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -90,6 +95,35 @@ spec:
               - |
                 set -eu
 
+                # alias は Task の spec.input.alias から取る。値は gateway のルートに直接効くので、
+                # pr-review と同じく**形を確かめてからしか使わない**（未知の alias は gateway 側で
+                # 404 になるだけだが、それを「モデルが答えなかった」と読み違えないため）。
+                # siblings は give_up() という名前だが、ここは next の
+                # `Escalated: escalate` が選ぶ終端と名前を合わせている。
+                escalate() {
+                  mkdir -p /workspace/escalate
+                  printf '%s\n' "$1" > /workspace/escalate/report.md
+                  sync
+                  exit 0
+                }
+
+                ALIAS=$(printf '%s' "${FLOW_INPUT:-}" | jq -r '.alias // empty' 2>/dev/null || true)
+                if [ -z "$ALIAS" ]; then
+                  # **input が非空なのに .alias を取れないなら、未指定と区別せず黙って流さない。**
+                  # ここを既定に落とすと、`{alais: review}` のような typo や壊れた JSON が
+                  # **証明済みの alias（implement）で成功して緑になる** — 確かめたいのは
+                  # まだ通したことのない経路の方なので、それでは何も証明していない。
+                  # taskflow-implement.yaml が同じ形を名指しで拒否しているのと同じ理由。
+                  [ -z "${FLOW_INPUT:-}" ] || escalate "spec.input が JSON として読めないか .alias を持たない（キーの typo・空文字・null も含む）。alias の取り違えを既定で握り潰さないため止めた。gateway 経路は一切確かめていない。"
+                  ALIAS="$LLM_ALIAS_DEFAULT"
+                fi
+                case "$ALIAS" in
+                  implement|review|investigate) ;;
+                  # 違反値そのものは返さない（taskflow-pr-review と同じ idiom）。
+                  *) escalate "spec.input.alias が未知の値（implement / review / investigate のみ）。gateway 経路は一切確かめていない。" ;;
+                esac
+                echo "alias=$ALIAS"
+
                 # activeDeadlineSeconds の TERM は PID1 に飛ぶ。前面で待つと POSIX sh は
                 # 前面コマンドの終了まで trap を実行しないので、background + wait にする。
                 claude -p "/workspace/ok/report.md に、いま応答しているモデル名だけを 1 行で書いて終了してください。他のファイルは作らないこと。" \
@@ -97,7 +131,7 @@ spec:
                   --output-format stream-json \
                   --dangerously-skip-permissions \
                   --allowedTools "Write" \
-                  --model "$LLM_ALIAS" \
+                  --model "$ALIAS" \
                   --max-turns 5 < /dev/null &
                 pid=$!
                 trap 'kill -TERM $pid 2>/dev/null
@@ -128,11 +162,20 @@ spec:
               - name: ANTHROPIC_API_KEY
                 value: ""
               # 実モデル名ではなく alias。どのモデルに解決されるかは
-              # manifests/llm-gateway/openrouter.yaml の AIGatewayRoute が決める。
-              - name: LLM_ALIAS
+              # manifests/llm-gateway/ の AIGatewayRoute が決める。
+              # spec.input.alias が無いときの既定。
+              - name: LLM_ALIAS_DEFAULT
                 value: implement
-              # サブエージェントは親のモデルを継がない。alias を固定しないと既定（sonnet）に
-              # 落ち、gateway にマッチするルートが無くなる。
+              # サブエージェントは親のモデルを継がない。固定しないと既定（sonnet）に落ち、
+              # gateway にマッチするルートが無くなる。
+              #
+              # **ここは入力で動かさない。** 親が review / investigate のとき、子だけが
+              # implement のままになる = **親子で上流も課金主体も割れる**
+              # （親 → api.anthropic.com / 個人の Max、子 → openrouter.ai / 従量課金）。
+              # この smoke は Agent を許可していないので今は起きないが、これをテンプレにして
+              # 本番 handler を切り替えるときは、親に括り付けること
+              # （taskflow-implement.yaml は CLAUDE_CODE_SUBAGENT_MODEL="$OPENROUTER_MODEL" で
+              # そうしている）。
               - name: CLAUDE_CODE_SUBAGENT_MODEL
                 value: implement
             securityContext:

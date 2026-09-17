@@ -66,12 +66,21 @@ prometheus:
               storage: 20Gi
 
 kube-state-metrics:
+  # 2026-09-17 時点で 128Mi では足りず、OOMKilled で CrashLoopBackOff に入っていた
+  # （3 日で 15 回。#952）。KSM が死ぬと kube_* を見ているアラートとダッシュボードが
+  # まとめて無言になるので、落ちていること自体に気づきにくい。
+  #
+  # 実測（cAdvisor 由来なので KSM が死んでいても取れる）: 定常は working set 15〜17MiB、
+  # 直近 24h のピークが 126.8MiB で上限に貼り付いていた。**この 126.8 という値は limit に
+  # 切られた観測なので「必要量」ではない**（真の必要量は上限を上げてみないと分からない）。
+  # そのため一旦広めに取り、後日また実測して締める。
+  # 対象オブジェクト数の目安: replicasets 598 / pods 222 / secrets 199 / configmaps 153。
   resources:
     requests:
       cpu: 10m
-      memory: 32Mi
+      memory: 64Mi
     limits:
-      memory: 128Mi
+      memory: 512Mi
   rbac:
     extraRules:
       - apiGroups: ["gateway.networking.k8s.io"]

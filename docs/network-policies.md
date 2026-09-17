@@ -49,7 +49,7 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 | Workflow pods (rss) | SeaweedFS filer (seaweedfs) | 8333 | Artifact/log storage |
 | Workflow pods (claude-code) | Loki gateway (monitoring) | 8080 | Log query (logcli) |
 | Workflow pods (claude-code-build) | Envoy data plane (llm-gateway) | 10080 | LLM API（alias 経由）**次段階。handler 側 egress は未実装** |
-| Workflow pods (claude-code) | Envoy data plane (llm-gateway) | 10080 | LLM API（alias 経由）。現状は taskflow-llm-gateway-smoke のみ |
+| Workflow pods (claude-code) | Envoy data plane (llm-gateway) | 10080 | LLM API（alias 経由）。現状は taskflow-llm-gateway-smoke と taskflow-pr-review |
 | Envoy data plane (llm-gateway) | Envoy Gateway (envoy-gateway-system) | 18000 | xDS |
 | Envoy Gateway (envoy-gateway-system) | Agent Router (envoy-ai-gateway-system) | 1063 | extension server gRPC（xDS 変換） |
 | Prometheus (monitoring) | Agent Router (envoy-ai-gateway-system) | 8080 | Metrics scrape |
@@ -204,7 +204,7 @@ Application が Unknown のまま一度もレンダリングされない**（ghc
 |---|---|---|
 | **claude-code** (claude-code=true) | (deny world) | kube-apiserver, api.anthropic.com + github.com + api.github.com + *.githubusercontent.com + index.crates.io + static.crates.io + registry.npmjs.org + discord.com + gitmcp.io :443, seaweedfs-filer (seaweedfs):8333, loki-gateway (monitoring):8080, prometheus (monitoring):9090, horenso (horenso):3000, task-dispatch-eventsource (argo):12002, argocd-server (argocd):8080 |
 | **task-submitter** (task-submitter=true) | (deny world) | kube-apiserver, discord.com:443, seaweedfs-filer (seaweedfs):8333 |
-| **taskflow-pr-review** (taskflow-pr-review=true) | (書かない = 全 deny) | api.anthropic.com + github.com + api.github.com :443 |
+| **taskflow-pr-review** (taskflow-pr-review=true) | (書かない = 全 deny) | github.com + api.github.com :443, llm-gateway (llm-gateway):10080 |
 | **taskflow-cnp-check** (taskflow-cnp-check=true) | (書かない = 全 deny) | kube-apiserver:6443, api.anthropic.com + github.com + api.github.com :443, loki-gateway (monitoring):8080 |
 | **taskflow-cnp-report** (taskflow-cnp-report=true) | (書かない = 全 deny) | api.anthropic.com + discord.com + github.com + api.github.com :443 |
 | **taskflow-openrouter-smoke** (taskflow-openrouter-smoke=true) | (書かない = 全 deny) | openrouter.ai:443 |

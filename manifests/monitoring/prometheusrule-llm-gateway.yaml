@@ -1,0 +1,128 @@
+# Agent Router が「Pod は Running なのに LLM ルーティングだけ機能しない」状態を鳴らす（#948）。
+#
+# 2026-09-17 の RBAC 絞り込み（#942）で、権限が 1 つ足りないだけでこの状態になる経路が
+# 2 つ見つかった: Gateway の reconcile が毎回 403 で落ちて filter config Secret が作られない、
+# Pod mutator の namespace 無指定 List が弾かれて extproc が注入されない。どちらも
+# controller-runtime はエラーを記録して requeue するだけなので、プロセスは落ちず
+# `kubectl get pods` は Running のまま。**気づく契機がログを見に行くことしか無い。**
+#
+# 同じ形はチャート更新のたびに再発しうる（upstream が新しい cluster-scoped 権限を要求する、
+# kustomize の $patch: delete が名前変更で外れる 等）。agent-router は CI のレンダリング検査から
+# 外れている（#946）ので、そこで赤にはならない。
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: llm-gateway
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: llm-gateway
+      rules:
+        # このファイルが覆うのは reconcile / admission / scrape の 3 つ。
+        # **コントローラの CrashLoop はここでは見ていない** — kube-prometheus-stack 同梱の
+        # KubePodCrashLooping（rule group kubernetes-apps）が namespace 問わず効いている。
+        # replica が 2 本あるので、片方が CrashLoop してももう片方が reconcile していれば
+        # 系列は残り、下の AgentRouterMetricsDown は**原理的に成立しない**。
+        # CrashLoop の検知をこのファイルに期待しないこと。
+        # controller-runtime 標準のカウンタ。**reconcile 経路の**失敗はここに出る
+        # （admission 経路は別系列。下の AgentRouterWebhookRejections）。
+        #
+        # 「エラーが出ていて、かつ成功が 1 件も無い」で取る。件数の閾値を置かないのは、
+        # client-go の既定 rate limiter が `ItemExponentialFailureRateLimiter(5ms, 1000s)` で、
+        # **恒久的に失敗していても定常状態では 16.7 分に 1 件しか出ない**ため。
+        # 短い窓 + 件数閾値だと、バックオフが伸びた時点で increase() が閾値を割り、
+        # 直っていないのにアラートが解消する（実測: 起動時の 6 件はすべて同一秒に出ており、
+        # 5ms からの倍々と一致する）。
+        #
+        # 起動直後のレース（AIServiceBackend 未作成 / httproute の resourceVersion 競合）は
+        # エラーの後に必ず成功が続くので `unless` で消える。実測でも errors=6 と並んで
+        # `controller_runtime_reconcile_total{result="success"}` が立ち、その後カウンタは静止した。
+        #
+        # 既知の穴: 一部の CR だけが失敗し他が成功している状態は `unless` に消される。
+        # alias が 1 本の今は「一部の失敗」＝「全部の失敗」だが、review / investigate を
+        # 足したら `controller` ラベル単位では足りなくなる。
+        - alert: AgentRouterReconcileErrors
+          expr: |
+            increase(controller_runtime_reconcile_errors_total{namespace="envoy-ai-gateway-system"}[1h]) > 0
+              unless on (namespace, pod, controller)
+            increase(controller_runtime_reconcile_total{namespace="envoy-ai-gateway-system", result="success"}[1h]) > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "agent-router: {{ $labels.controller }} の reconcile が成功していない"
+            description: "ai-gateway-controller の {{ $labels.controller }} が reconcile に失敗し続けており、この 1 時間で成功が 1 件も無い。Pod は Running のままなので `kubectl get pods` では分からない。まず `kubectl logs -n envoy-ai-gateway-system deploy/ai-gateway-controller | grep -i forbidden` を見る（RBAC 不足なら forbidden が出る）。権限の範囲は kustomize/agent-router/rbac.yaml、絞った理由と壊れ方は #942。"
+        # admission webhook（Pod mutator）の失敗。**reconcile のカウンタには絶対に出ない**
+        # ため別立てにする（reconcile 系と webhook 系は独立した系列）。
+        #
+        # 2026-09-17 に実際に起きた壊れ方の片方がここ: mutator が namespace 無指定の List を
+        # 弾かれると handler がエラーを返し、failurePolicy: Fail で **Envoy Pod の CREATE が
+        # 拒否される**。
+        #
+        # **コントローラ側の `controller_runtime_webhook_requests_total{code=~"5.."}` は使えない。**
+        # あれが数えるのは HTTP ステータスで、controller-runtime の admission 経路は
+        # `WriteHeader` を呼ばないため応答は常に 200。`admission.Errored(500, err)` の 500 は
+        # JSON ボディの `AdmissionResponse.Result.Code` に入るだけで、カウンタは 200 を刻む。
+        # `{code="500"} 0` の系列は起動時の先出し登録（`cnt.WithLabelValues("500")`）であって
+        # 「500 が出うる証拠」ではない。実測でも、admission を捌いた側の replica は
+        # `{code="200"} 2` / `{code="500"} 0` だった。**このアラート自身が真空成立していた。**
+        #
+        # 代わりに apiserver 側が持つ「本当に拒否したか」を見る。実測で
+        # `{name="ai-gateway-controller.envoy-ai-gateway-system.svc.cluster.local",
+        #   rejected="false", operation="CREATE"} 2` が既に立っている（Envoy Pod の admission 2 回分）。
+        # apiserver の metrics は既存の ServiceMonitor で取れているので配管の追加は不要。
+        #
+        # 発火したときの切り分けには `apiserver_admission_webhook_rejection_count` を見る。
+        # あちらは `error_type` を持ち、ハンドラ自身の失敗（no_error + rejection_code=500）と
+        # 疎通の失敗（calling_webhook_error）を区別できる。
+        #
+        # 注意: `name` は chart が生成する webhook 名。改名されると**静かに空になる**。
+        # **この経路は Pod の CREATE でしか発火しない**（webhook の operations は CREATE のみ）。
+        # データプレーンは replicas 1 で自然な入れ替わりが無いので、RBAC が壊れても
+        # 次に Pod が作り直されるまで（ローリング更新・ノード再起動・退避）鳴らない。
+        # 閾値では埋まらない、シグナルの性質そのものの遅延。継続的に見たいなら
+        # kube-state-metrics の復旧後に `kube_pod_init_container_info{namespace="llm-gateway",
+        # container="ai-gateway-extproc"}` の有無を見る手がある（KSM は現在 OOM で停止中）。
+        #
+        # 疎通失敗（TLS / 接続断）まで覆えるのは **failurePolicy が Fail である間だけ**。
+        # apiserver 側は `ErrCallingWebhook` の rejected=true を `if !ignoreClientCallFailures`
+        # の内側で立てるので、Ignore に変わると呼び出し失敗は
+        # `apiserver_admission_webhook_fail_open_count` の方へ回り、このアラートから消える。
+        - alert: AgentRouterWebhookRejections
+          expr: |
+            increase(apiserver_admission_webhook_admission_duration_seconds_count{name="ai-gateway-controller.envoy-ai-gateway-system.svc.cluster.local", rejected="true"}[15m]) > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "agent-router: Pod mutator が admission を拒否している"
+            description: "ai-gateway-controller の admission webhook が Pod の CREATE を拒否している。failurePolicy: Fail なので、この間 llm-gateway の Envoy Pod は作成できない（既存 Pod は動き続けるため、ノード drain や再起動が重なるまで表面化しないことがある）。種別は `apiserver_admission_webhook_rejection_count{name=~\".*ai-gateway.*\"}` の error_type で分かる。コントローラ側は `kubectl logs -n envoy-ai-gateway-system deploy/ai-gateway-controller | grep -iE 'mutate|forbidden'`。extproc が注入されているかは `kubectl get pod -n llm-gateway -o jsonpath='{.items[*].spec.initContainers[*].name}'` で確認できる。"
+        # scrape が落ちたこと自体を拾う。上の 2 本は metrics が来ている前提なので、
+        # CNP やラベルの変更で scrape ごと止まると**沈黙して「異常なし」に見える**。
+        #
+        # キーは `up` ではなく**上のアラートが依存しているメトリクスそのもの**にする:
+        #   - `up{job=...}` / `{service=...}` はどちらも Service 名由来（実測）で、chart が
+        #     名前を変えると空になる
+        #   - `up{namespace=...}` はこの namespace に別の ServiceMonitor が 1 つ増えただけで
+        #     シリーズが残り、二度と発火しなくなる
+        #   - ターゲットが落ちた場合もメトリクスは staleness 後に消えるので、absent() 一本で
+        #     「落ちた」と「そもそも取れていない」の両方を覆える（`up == 0` の側は
+        #     kube-prometheus-stack 同梱の TargetDown と重複するので置かない）
+        # 本リポの既存 2 件（absent(gatewayapi_httproute_info) / absent(probe_success{...})）と同じ形。
+        #
+        # この系列は**リーダー Pod にしか出ない**（待機系は reconcile を実行しないので
+        # controller_runtime_reconcile_* を一切公開しない。実測）。したがってこのアラートの意味は
+        # 「コントローラが生きている」ではなく **「リーダーが reconcile できている」**。
+        # 鳴ったときに `kubectl get pods` が 2/2 Running を返しても矛盾ではない。
+        # リーダー交代の瞬間は系列が一時的に消えるが `for: 15m` が吸収する。
+        - alert: AgentRouterMetricsDown
+          expr: |
+            absent(controller_runtime_reconcile_total{namespace="envoy-ai-gateway-system"})
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "agent-router: metrics を取れていない"
+            description: "ai-gateway-controller の metrics が 15 分取れていない。この間 AgentRouterReconcileErrors は鳴らないので、沈黙を「正常」と読まないこと。admission の拒否は apiserver 側のメトリクス（別 scrape 経路）を見ているので AgentRouterWebhookRejections は影響を受けない。CNP（manifests/envoy-ai-gateway-system/netpol.yaml の :8080 ingress と manifests/monitoring/netpol-prometheus.yaml の egress）と ServiceMonitor のセレクタ、コントローラ自身の生死を確認する。"

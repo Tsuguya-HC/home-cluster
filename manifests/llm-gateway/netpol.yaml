@@ -49,6 +49,8 @@ spec:
     # 上流 LLM。ここが「外に出られる唯一の口」。
     - toFQDNs:
         - matchName: "openrouter.ai"
+        # Max の alias（review / investigate）。#942 の第一段階では OpenRouter だけだった。
+        - matchName: "api.anthropic.com"
       toPorts:
         - ports:
             - port: "443"

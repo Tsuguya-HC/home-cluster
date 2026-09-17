@@ -1,0 +1,118 @@
+# Max（Anthropic 直）向けの alias。issue #942 の表のうち `review` / `investigate` の 2 本。
+#
+# handler ごとに alias を切るのは、`x-ai-eg-model` がそのまま帰属の単位になるため。
+# 今はどちらも同じモデル（sonnet）・同じバックエンドに解決されるが、分けておくと
+# 「どの handler が Max の枠を食っているか」がログで分かれる。OpenRouter 経路と違って
+# こちらは Anthropic ネイティブの素通しなので、トークン数も取れる見込み（#954 の
+# 非互換は OpenAI 形式の usage チャンクの話）。**未実測なので、載せたら確かめること。**
+apiVersion: aigateway.envoyproxy.io/v1beta1
+kind: AIGatewayRoute
+metadata:
+  name: claude-max
+  namespace: llm-gateway
+spec:
+  parentRefs:
+    - name: llm-gateway
+      kind: Gateway
+      group: gateway.networking.k8s.io
+  llmRequestCosts:
+    - metadataKey: llm_input_token
+      type: InputToken
+    - metadataKey: llm_output_token
+      type: OutputToken
+    - metadataKey: llm_total_token
+      type: TotalToken
+  # modelNameOverride は**固定 ID** で、WFT が使ってきた `sonnet`（浮動 alias）とは追随しない。
+  # 次の Sonnet が出た日に、gateway は旧モデルを配り続ける。**沈黙して乖離する**ので、
+  # モデルを上げるときはここを人が上げる。
+  rules:
+    # レビュー系（pr-review / adjudicator 等）。既存 WFT は全て --model sonnet。
+    - matches:
+        - headers:
+            - type: Exact
+              name: x-ai-eg-model
+              value: review
+      modelsOwnedBy: Envoy AI Gateway
+      backendRefs:
+        - name: claude-max
+          modelNameOverride: claude-sonnet-5
+          weight: 1
+          priority: 0
+    # 障害調査系（alert-investigate / cnp-check 等）。将来ここだけ従量課金の
+    # Anthropic API キーへフォールバックする案が #942 にある。
+    - matches:
+        - headers:
+            - type: Exact
+              name: x-ai-eg-model
+              value: investigate
+      modelsOwnedBy: Envoy AI Gateway
+      backendRefs:
+        - name: claude-max
+          modelNameOverride: claude-sonnet-5
+          weight: 1
+          priority: 0
+---
+# Anthropic 入力 → Anthropic 出力の素通し。OpenRouter 側（OpenAI 変換）と違い、
+# 形の変換が入らない。
+apiVersion: aigateway.envoyproxy.io/v1beta1
+kind: AIServiceBackend
+metadata:
+  name: claude-max
+  namespace: llm-gateway
+spec:
+  schema:
+    name: Anthropic
+  backendRef:
+    name: claude-max
+    kind: Backend
+    group: gateway.envoyproxy.io
+---
+# **汎用の APIKey を使う（AnthropicAPIKey ではない）。**
+# upstream の example は `type: AnthropicAPIKey` だが、あれは `x-api-key` を出す
+# Anthropic の API キー用。Max の OAuth トークンは `Authorization: Bearer` で送る必要があり、
+# それを出すのは汎用の `type: APIKey` の方（2026-09-16 実測）。取り違えると 401 になる。
+#
+# `anthropic-beta: oauth-2025-04-20` は不要（実測で確認済み）。Anthropic が subscription
+# OAuth をゲートしているのは **Claude Code の system prompt が先頭にあるか**で、
+# 無いと枠切れを装った 429（message が "Error" だけ）を返す。handler は claude CLI なので
+# 条件を満たすが、**claude CLI 以外をこの alias に乗せてはいけない**。
+apiVersion: aigateway.envoyproxy.io/v1beta1
+kind: BackendSecurityPolicy
+metadata:
+  name: claude-max
+  namespace: llm-gateway
+spec:
+  targetRefs:
+    - group: aigateway.envoyproxy.io
+      kind: AIServiceBackend
+      name: claude-max
+  type: APIKey
+  apiKey:
+    secretRef:
+      name: claude-max-apikey
+      namespace: llm-gateway
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: Backend
+metadata:
+  name: claude-max
+  namespace: llm-gateway
+spec:
+  endpoints:
+    - fqdn:
+        hostname: api.anthropic.com
+        port: 443
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: BackendTLSPolicy
+metadata:
+  name: claude-max
+  namespace: llm-gateway
+spec:
+  targetRefs:
+    - group: gateway.envoyproxy.io
+      kind: Backend
+      name: claude-max
+  validation:
+    wellKnownCACertificates: System
+    hostname: api.anthropic.com

@@ -42,8 +42,12 @@
 # **通知を Pod の外に置いたのは、この §8 の状況でもう一つ効く。** Cilium の identity は Pod 単位
 # なので（design.md §7）、サイドカーのために開けた egress は agent コンテナからも到達できる。
 # Discord の webhook は誰でも作れて誰でも読めるため、開けてあれば注入されたエージェントが
-# CLAUDE_CODE_OAUTH_TOKEN を攻撃者自身の webhook へ送れる。github.com と api.anthropic.com には
-# この性質が無い（攻撃者が受信ログを読めない）。**この Pod に discord.com は開けない。**
+# 資格情報を攻撃者自身の webhook へ送れる。github.com と llm-gateway にはこの性質が無い
+# （攻撃者が受信ログを読めない）。**この Pod に discord.com は開けない。**
+#
+# **2026-09-18 以降、この Pod は LLM の資格情報を一切持たない**（#942）。推論は llm-gateway
+# 経由で、実キーは gateway 側にしかない。持ち出す対象が無くなったので、上の懸念は
+# GitHub のトークン（gh の認証）だけに縮んだ。
 # レビュアーは apiserver に用が無い。RBAC を与えないだけでなくトークン自体を配らない
 # （読む対象が信頼できない入力なので、置いてある資格情報は少ないほどよい）。
 apiVersion: v1
@@ -55,7 +59,7 @@ automountServiceAccountToken: false
 ---
 # 専用 CNP。claude-code=true の共有ポリシーは apiserver / Loki / Prometheus / horenso / ArgoCD まで
 # 開くので、攻撃者が書ける diff を読む Pod には過大（設計 §16）。ここが開けるのは
-# GitHub（clone と PR の取得）・Anthropic API（推論）だけ。notify サイドカーは持たないので
+# GitHub（clone と PR の取得）・llm-gateway（推論。上流は gateway が選ぶ）だけ。notify サイドカーは持たないので
 # Discord（discord.com）はここには開けていない（下の冒頭コメントの通り、通知は framework
 # の信号を Alertmanager 経由で出す。配線は manifests/monitoring/prometheusrule-taskflow.yaml）。
 # DNS は CCNP allow-dns で全 Pod に共通適用済み。ingress は 1 つも書かないので全 deny
@@ -71,12 +75,23 @@ spec:
       taskflow-pr-review: "true"
   egress:
     - toFQDNs:
-        - matchName: "api.anthropic.com"
         - matchName: "github.com"
         - matchName: "api.github.com"
       toPorts:
         - ports:
             - port: "443"
+              protocol: TCP
+    # 推論は llm-gateway 経由（#942）。**api.anthropic.com は書かない** — env が効かずに
+    # Anthropic へ直行する取り違えを、drop で落として検出するため
+    # （manifests/claude-code-build/taskflow-implement.yaml と同じ考え方）。
+    # 10080 は listener 80 に対して Envoy が実際に listen する port。
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/managed-by: envoy-gateway
+            io.kubernetes.pod.namespace: llm-gateway
+      toPorts:
+        - ports:
+            - port: "10080"
               protocol: TCP
 ---
 apiVersion: flow.tgy.io/v1alpha1
@@ -250,7 +265,7 @@ spec:
                   --output-format stream-json \
                   --dangerously-skip-permissions \
                   --allowedTools "Bash,Read,Write,Grep,Glob" \
-                  --model sonnet \
+                  --model review \
                   --max-turns 80 < /dev/null &
                 pid=$!
                 # activeDeadlineSeconds の TERM は PID1 に飛ぶ。前面で claude を待っていると
@@ -292,11 +307,22 @@ spec:
                 value: "off"
               - name: GOTOOLCHAIN
                 value: local
-              - name: CLAUDE_CODE_OAUTH_TOKEN
-                valueFrom:
-                  secretKeyRef:
-                    name: claude-code-token
-                    key: credential
+              # 推論は llm-gateway 経由（#942）。**この Pod は LLM の資格情報を持たない** —
+              # 実キーは gateway の BackendSecurityPolicy 側にしかなく、gateway が
+              # Authorization を付け直す。
+              - name: ANTHROPIC_BASE_URL
+                value: http://llm-gateway.llm-gateway.svc.cluster.local/anthropic
+              # claude は空だと起動しないので置くが、**これは資格情報ではない**。
+              - name: ANTHROPIC_AUTH_TOKEN
+                value: handled-by-llm-gateway
+              # 空にしないと OAuth 側が優先されて Anthropic 直行になる（そちらは CNP で落ちる）。
+              - name: ANTHROPIC_API_KEY
+                value: ""
+              # サブエージェントは親のモデルを継がない。固定しないと既定（sonnet）に落ち、
+              # gateway にマッチするルートが無くなる。親と同じ alias に括り付けて、
+              # 上流と課金主体が親子で割れないようにする。
+              - name: CLAUDE_CODE_SUBAGENT_MODEL
+                value: review
             securityContext:
               # ここだけ readOnlyRootFilesystem を付けていない。claude CLI が rootfs の
               # どこに書くかを確かめていないため（HOME は /tmp に向けてある）。サイドカー 3 つは

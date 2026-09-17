@@ -35,6 +35,17 @@ spec:
     kubernetes:
       envoyService:
         type: ClusterIP
+        # handler の ANTHROPIC_BASE_URL に書く名前なので明示ピンする。
+        # GatewayNamespace モードでは既定名も Gateway 名（= llm-gateway）そのものなので
+        # 現状これは no-op だが、ControllerNamespace に戻すと既定は
+        # envoy-<ns>-<gw>-<hash> のハッシュ名になり URL が変わる
+        # （upstream の ResourceRender.Name() が分岐する）。書いておけば変わらない。
+        #
+        # 注意: この名前は Gateway 単位ではなく **EnvoyProxy 単位**。ピンする前は Gateway 名が
+        # そのまま Service 名になるので自然に分かれていたが、ピンした後は同じ EnvoyProxy を
+        # 2 本目の Gateway が参照すると両方が同じ Service 名を取りにいく（upstream に検出も
+        # validation も無い）。Gateway を足すときは EnvoyProxy を分けること。
+        name: llm-gateway
       envoyDeployment:
         replicas: 1
         container:

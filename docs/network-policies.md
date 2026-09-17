@@ -49,7 +49,7 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 | Workflow pods (rss) | SeaweedFS filer (seaweedfs) | 8333 | Artifact/log storage |
 | Workflow pods (claude-code) | Loki gateway (monitoring) | 8080 | Log query (logcli) |
 | Workflow pods (claude-code-build) | Envoy data plane (llm-gateway) | 10080 | LLM API（alias 経由）**次段階。handler 側 egress は未実装** |
-| Workflow pods (claude-code) | Envoy data plane (llm-gateway) | 10080 | LLM API（alias 経由）**次段階。handler 側 egress は未実装** |
+| Workflow pods (claude-code) | Envoy data plane (llm-gateway) | 10080 | LLM API（alias 経由）。現状は taskflow-llm-gateway-smoke のみ |
 | Envoy data plane (llm-gateway) | Envoy Gateway (envoy-gateway-system) | 18000 | xDS |
 | Envoy Gateway (envoy-gateway-system) | Agent Router (envoy-ai-gateway-system) | 1063 | extension server gRPC（xDS 変換） |
 | taskflow-cnp-check (claude-code) | Loki gateway (monitoring) | 8080 | Log query (cnp-check investigation) |
@@ -197,7 +197,7 @@ Application が Unknown のまま一度もレンダリングされない**（ghc
 |---|---|---|
 | **talos-build** (talos-build=true) | (deny world) | kube-apiserver, ghcr.io + github.com + api.github.com + uploads.github.com + *.githubusercontent.com + dl-cdn.alpinelinux.org + discord.com :443, seaweedfs-filer (seaweedfs):8333 |
 
-## claude-code (5 policies)
+## claude-code (7 policies)
 
 | Component | Ingress | Egress |
 |---|---|---|
@@ -206,6 +206,8 @@ Application が Unknown のまま一度もレンダリングされない**（ghc
 | **taskflow-pr-review** (taskflow-pr-review=true) | (書かない = 全 deny) | api.anthropic.com + github.com + api.github.com :443 |
 | **taskflow-cnp-check** (taskflow-cnp-check=true) | (書かない = 全 deny) | kube-apiserver:6443, api.anthropic.com + github.com + api.github.com :443, loki-gateway (monitoring):8080 |
 | **taskflow-cnp-report** (taskflow-cnp-report=true) | (書かない = 全 deny) | api.anthropic.com + discord.com + github.com + api.github.com :443 |
+| **taskflow-openrouter-smoke** (taskflow-openrouter-smoke=true) | (書かない = 全 deny) | openrouter.ai:443 |
+| **taskflow-llm-gateway-smoke** (taskflow-llm-gateway-smoke=true) | (書かない = 全 deny) | llm-gateway (llm-gateway):10080（Service の port は 80、CNP は backend の 10080） |
 
 `task-submitter` は Task を 1 つ作るだけの CronWorkflow の Pod。apiserver のほかに要る 2 つは
 コントローラの workflowDefaults が全 Workflow に注入するもの（archiveLogs の保存先と
@@ -245,6 +247,12 @@ Cilium の identity は Pod 単位なので、通知サイドカーのために�
 1 フェーズだった頃は共有の `claude-code=true` に相乗りしており、1 つの Pod が
 apiserver・Loki・Discord・GitHub・npm・crates・SeaweedFS・Prometheus・horenso・ArgoCD を
 まとめて持っていた。
+
+2 つの smoke はどちらも「配管だけを確かめる」flow で、**出口に書かないもの**が主眼。
+`taskflow-openrouter-smoke` は api.anthropic.com を書かないので、env が効かず Anthropic に
+飛んだら drop されて落ちる。`taskflow-llm-gateway-smoke`（#942）は **openrouter.ai を書かない**
+ので、gateway を経由せず Pod が直接出ようとしたら落ちる — 「外に出ているのは gateway だけ」を
+緑/赤で判定できる形にしてある。後者の handler は資格情報を一切持たない。
 
 ## claude-code-build (1 policy)
 

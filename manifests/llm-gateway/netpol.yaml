@@ -15,7 +15,8 @@ spec:
       app.kubernetes.io/managed-by: envoy-gateway
   ingress:
     # handler から。alias ごとに Pod を分けないので namespace 単位で開ける。
-    # **handler 側の egress はまだ無い**（切り替えは次段階、issue #942 の進め方）。
+    # 対向の egress は claude-code 側が taskflow-llm-gateway-smoke の分だけ実装済みで、
+    # claude-code-build（実行系 handler の切り替え）は次段階（issue #942 の進め方）。
     - fromEndpoints:
         - matchLabels:
             io.kubernetes.pod.namespace: claude-code-build

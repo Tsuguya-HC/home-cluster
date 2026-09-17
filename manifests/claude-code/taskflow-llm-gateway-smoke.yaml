@@ -149,6 +149,11 @@ spec:
             env:
               - name: HOME
                 value: /tmp
+              # どの handler からの呼び出しかを gateway に名乗る（#942）。
+              # 書式は `Name: Value`、複数なら改行区切り。gateway 側の
+              # requestHeaderAttributes がこれを拾ってアクセスログに出す。
+              - name: ANTHROPIC_CUSTOM_HEADERS
+                value: "x-tf-handler: llm-gateway-smoke"
               # gateway 宛。Anthropic 入力は /anthropic 配下にあるので、claude が足す
               # /v1/messages と合わせて /anthropic/v1/messages になる。
               - name: ANTHROPIC_BASE_URL

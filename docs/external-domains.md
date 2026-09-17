@@ -39,3 +39,21 @@ Application が Unknown のまま止まる形で出る。
 | Domain | Required | Notes |
 |---|---|---|
 | `openrouter.ai` | Yes | API（OpenAI 互換は `/api/v1`）。サブドメインは使わない |
+
+## Anthropic（Max の alias）
+
+- **用途**: `llm-gateway` の `review` / `investigate` alias（Max の OAuth トークンで Anthropic 直）
+- **引く側**: Envoy データプレーン（`manifests/llm-gateway/netpol.yaml`）。handler は gateway 経由なので直接は出ない
+- **Port**: 443
+
+| Domain | Required | Notes |
+|---|---|---|
+| `api.anthropic.com` | Yes | Messages API。Agent Router は Anthropic 固有ヘッダを足さないので、`anthropic-version` はクライアント（claude CLI）が送る |
+
+`claude-code` 側の CNP にも `api.anthropic.com` がある（`netpol.yaml` / `taskflow-pr-review.yaml` /
+`taskflow-cnp-check.yaml` の 4 箇所）。あちらは handler が直接叩いていた時代のもので、
+gateway への切り替えが済めば落とせる。
+
+**`claude-code-build` には無い。あちらに `api.anthropic.com` を足してはいけない。**
+`taskflow-implement.yaml` は「書かないこと」を不変条件として持っており、env が効かず
+Anthropic に飛んだら drop されて落ちる、という設計で取り違えを検出している。

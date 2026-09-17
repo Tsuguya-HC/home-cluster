@@ -483,11 +483,31 @@ CNP を絞って測るときは、apiserver が張り済みの TCP 接続がそ�
 
 | Component | Ingress | Egress |
 |---|---|---|
-| **llm-gateway-envoy** | claude-code-build / claude-code → 10080; host/remote-node → 19003 (probes) | envoy-gateway (envoy-gateway-system):18000, openrouter.ai:443 |
+| **llm-gateway-envoy** | claude-code-build / claude-code → 10080; host/remote-node → 19003 (probes) | envoy-gateway (envoy-gateway-system):18000, openrouter.ai + api.anthropic.com:443 |
 
-Agent Router のデータプレーン（issue #942）。**外部 LLM への egress を持つのはこの
-namespace だけ**で、handler 側は gateway の ClusterIP にしか出られず、資格情報も持たない。
-alias（`x-ai-eg-model`）で上流と実モデルが決まるので、handler の CNP に上流ドメインは現れない。
+Agent Router のデータプレーン（issue #942）。alias（`x-ai-eg-model`）で上流と実モデルが決まる。
+
+**「外部 LLM への egress を持つのはこの namespace だけ」は移行完了後の姿であって、現状はまだ
+そうなっていない。** handler 側にも直接の上流 egress が残っている — `claude-code` は
+`api.anthropic.com`、`claude-code-build` は `openrouter.ai`。claude-code namespace の 12 本の切り替えでそれらを落とし、
+資格情報も handler から外して初めて「唯一の口」になる。
+
+**ingress は namespace 単位で開けている。つまり `claude-code` / `claude-code-build` に Pod を
+足すと、その Pod は alias を名乗るだけで gateway の上流に到達できる。** #942 の第一段階では
+その先は OpenRouter だけ（従量課金で、最悪でもコスト増）だったが、Max の alias
+（`review` / `investigate`）を足した時点で、**同じ境界の裏に個人の Max サブスクリプションが入った**
+（アカウント単位の OAuth で、異常な利用パターンは停止のリスクがある）。
+
+Anthropic は subscription OAuth を「Claude Code の system prompt が先頭にあるか」でゲートしており、
+claude CLI 以外がこの alias を叩いても*枠切れを装った 429* になるだけだが、**成否をクラスタ側で
+制御できているわけではない**。この 2 つの namespace に claude CLI 以外のワークロードを足すときは、
+Max の alias に到達できることを承知した上で置くこと。
+
+**絞りたくなったら今すぐできる。** Cilium は Pod の ServiceAccount を
+`io.cilium.k8s.policy.serviceaccount` としてアイデンティティラベルに入れており（実測）、
+flow ごとに専用 SA が既に割り当たっている（`agent-pr-reviewer` / `agent-llm-gateway-smoke` 等）。
+namespace 単位の ingress を既知 SA の allowlist に置き換えるのは **CNP 側だけで完結**し、
+taskflow 側の変更は要らない。#942 のフォローアップとして検討する。
 
 Envoy の Pod がこの namespace に立つのは `helm-values/envoy-gateway/values.yaml` で
 `deploy.type: GatewayNamespace` にしているため。**Envoy Gateway の既定は

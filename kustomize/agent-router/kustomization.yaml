@@ -1,0 +1,69 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Agent Router だけ Helm ではなく kustomize でチャートを展開している。理由は 1 つ:
+# **チャートが無条件で作る ClusterRoleBinding を消すため**。
+#
+# ai-gateway-helm 1.1.0 の ClusterRole `ai-gateway-controller:envoy-ai-gateway-system` は
+# `secrets` / `pods` / `services` に `verbs: ["*"]` を**クラスタ全域**で与える
+# （チャート内に upstream 自身の `# TODO: this can be limited to EG system namespace` あり、
+# upstream main でも未修正、values で無効化する手段は無い）。このクラスタでは全 Secret が
+# 読めるということは argo namespace の OpenTofu state（Cloudflare / Harbor の生きた資格情報）と
+# external-secrets の 1Password Connect 資格情報が読めるということで、`pods: "*"` は
+# privileged enforce の namespace（kube-system 等 6 つ）に任意の Pod を作れるということ。
+# issue #942 の目的が「資格情報を gateway だけに閉じる」なので、そのまま入れると目的と逆を向く。
+#
+# **rules は書き換えない。** 書き換えると upstream が権限を足したときに追随を漏らし、
+# 「Healthy なのに何も起きない」で気づけなくなる。代わりに束ね方だけ変える:
+#   1. チャートの ClusterRoleBinding を消す
+#   2. 同じ ClusterRole を llm-gateway / envoy-ai-gateway-system の RoleBinding で参照する
+#      （RoleBinding 経由なら、その ClusterRole の rules はその namespace の中でしか効かない）
+#   3. 本当に cluster-scoped が要る分だけ rbac.yaml で自前に持つ
+# これで namespaced な権限は upstream の定義をそのまま使い続けられる。
+#
+# 前提: values.yaml の `controller.watch.namespaces`。あれが無いと cache がクラスタ全域を
+# LIST しようとして 403 になる（cmd/controller/main.go の setupCache が DefaultNamespaces に渡す）。
+
+helmCharts:
+  - name: ai-gateway-crds-helm
+    repo: oci://docker.io/envoyproxy
+    version: 1.1.0
+    releaseName: agent-router-crds
+    namespace: envoy-ai-gateway-system
+  - name: ai-gateway-helm
+    repo: oci://docker.io/envoyproxy
+    version: 1.1.0
+    releaseName: agent-router
+    namespace: envoy-ai-gateway-system
+    valuesFile: values.yaml
+
+resources:
+  - rbac.yaml
+
+patches:
+  # **マーカーの付いていない ClusterRoleBinding を、名前を問わず全部消す。**
+  #
+  # チャートは ClusterRoleBinding を 2 本作る:
+  #   - ai-gateway-controller:envoy-ai-gateway-system … コントローラ本体。これが元の CRITICAL
+  #   - envoy-ai-gateway-inference-pool-reader-binding:… … envoy-gateway の SA に InferencePool の
+  #     読みを全 namespace で与える。Inference Extension は入れていない（CRD も無い）ので不要
+  # ClusterRole 本体は残るが、bind されなければ何の権限も生まない。
+  #
+  # 名前で列挙して消すと「列挙したものだけ deny」になり、upstream が改名・追加したときに
+  # 黙って素通りする。マーカー（rbac.yaml の自前 ClusterRoleBinding だけが持つ annotation）の
+  # 有無で選ぶと「マーカーが無いものは全部 deny」= fail-closed になる。チャート側のリソースには
+  # 識別できるラベルが無いので、選ぶ側ではなく除く側にマーカーを置いている。
+  #
+  # 代償: upstream が**正当に必要な** ClusterRoleBinding を足したときも消える。その場合は
+  # コントローラが forbidden で落ちるか admission が拒否するので、静かには壊れない。
+  - target:
+      group: rbac.authorization.k8s.io
+      version: v1
+      kind: ClusterRoleBinding
+      annotationSelector: "!home-cluster.tgy.io/rbac-owner"
+    patch: |-
+      $patch: delete
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: ClusterRoleBinding
+      metadata:
+        name: placeholder

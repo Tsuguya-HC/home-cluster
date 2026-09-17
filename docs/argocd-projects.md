@@ -15,6 +15,17 @@ ArgoCD AppProject でアプリケーションをドメインごとに分離し�
 | storage | ストレージ (SeaweedFS, CNPG, QNAP CSI, NFS) | cnpg-system, database, nfs-provisioner, seaweedfs, trident | 6 |
 | ai | AI/ML インフラ (Qdrant, Ollama, TaskFlow, LLM gateway) | qdrant, ollama, taskflow-system, llm-gateway, envoy-gateway-system, envoy-ai-gateway-system | 6 |
 
+## sourceRepos が及ばない範囲（重要）
+
+`sourceRepos` が検証するのは Application の `spec.source(s).repoURL` **だけ**。
+`kustomize.buildOptions: --enable-helm`（`helm-values/argocd/values.yaml`、kustomize/agent-router の
+ために有効化）を入れた結果、**kustomization.yaml の `helmCharts[].repo` は sourceRepos の検査を
+受けずに任意のレジストリからチャートを取得できる**（ArgoCD の既知の制約）。この設定は repo-server
+全体に効くので、どの AppProject の kustomize app にも当てはまる。
+
+実効的な歯止めは `manifests/argocd/netpol-repo-server.yaml` の `toFQDNs` allow-list だけ。
+新しいチャート供給元を足すときは、sourceRepos ではなくそちらを見ること。
+
 ## クラスタスコープリソースの許可 (clusterResourceWhitelist)
 
 各プロジェクトは namespaced リソースに加え、クラスタスコープリソースの許可リストを持つ。

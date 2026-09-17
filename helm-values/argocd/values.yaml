@@ -29,6 +29,11 @@ applicationSet:
 
 configs:
   cm:
+    # kustomize/agent-router が helmCharts でチャートを展開するため。ai-gateway-helm が
+    # 無条件で作る ClusterRoleBinding（全 namespace の secrets/pods/services に "*"）を
+    # 消すには post-render が要り、ArgoCD で helmCharts を使うにはこのフラグが要る。
+    # repo-server 全体に効く（このリポの kustomization すべてがチャートを展開できる）。
+    kustomize.buildOptions: --enable-helm
     resource.exclusions: |
       - apiGroups:
           - cilium.io

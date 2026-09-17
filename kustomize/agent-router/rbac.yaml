@@ -1,0 +1,126 @@
+# チャートの ClusterRole を namespace 単位で束ね直す（kustomization.yaml の理由を参照）。
+# RoleBinding が ClusterRole を参照すると、その rules はこの namespace の中でしか効かない。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ai-gateway-controller
+  namespace: envoy-ai-gateway-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ai-gateway-controller:envoy-ai-gateway-system
+subjects:
+  - kind: ServiceAccount
+    name: ai-gateway-controller
+    namespace: envoy-ai-gateway-system
+---
+# データプレーンと設定 CR の置き場。コントローラが読む Secret は
+# ここの openrouter-apikey だけで、**この namespace に他の Secret を置かないこと**が
+# この絞り込みの成立条件（RBAC にラベルの軸は無いので、境界は namespace が担う）。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ai-gateway-controller
+  namespace: llm-gateway
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ai-gateway-controller:envoy-ai-gateway-system
+subjects:
+  - kind: ServiceAccount
+    name: ai-gateway-controller
+    namespace: envoy-ai-gateway-system
+---
+# コントローラは Gateway の reconcile で、**Gateway の namespace と envoyGatewayNamespace の
+# 両方**に対して Pod / Deployment / DaemonSet を List する
+# （internal/controller/gateway.go:1348-1383 の getObjectsForGateway、typed clientset なので
+# watch.namespaces では絞られない）。片方でも失敗すると即 return し、Reconcile が毎回
+# エラーになって **filter config Secret が作られず extproc が注入されない**。
+# ここはチャートの ClusterRole を丸ごと束ねると secrets への "*" まで付くので、
+# 実際に呼ばれる List だけの Role を自前で持つ。
+#
+# **list だけで足りるのは helm-values/envoy-gateway/values.yaml が
+# deploy.type: GatewayNamespace である間だけ。** 既定の ControllerNamespace に戻すと
+# Envoy Pod が envoy-gateway-system に立ち、後続の annotateGatewayPods（Pod / Deployment の
+# patch）と reconcileFilterConfigSecret（Secret の create/update）がこの namespace に対して
+# 走るので、この Role では 403 になる。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ai-gateway-controller-infra-reader
+  namespace: envoy-gateway-system
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["list"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "daemonsets"]
+    verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ai-gateway-controller-infra-reader
+  namespace: envoy-gateway-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: ai-gateway-controller-infra-reader
+subjects:
+  - kind: ServiceAccount
+    name: ai-gateway-controller
+    namespace: envoy-ai-gateway-system
+---
+# 本当に cluster-scoped が要る分だけ。upstream の実装で確認した用途は 3 つ:
+#   - internal/controller/controller.go: InferencePool CRD の存在確認（名前指定の Get）
+#   - cmd/controller/main.go maybePatchAdmissionWebhook(): 自分の webhook の caBundle 更新。
+#   - internal/controller/gateway_mutator.go: Pod mutator の namespace 無指定 List
+# upstream が新しい cluster-scoped の権限を要求し始めたらコントローラのログに forbidden が出る。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ai-gateway-controller-cluster-scoped
+rules:
+  # Pod mutator が namespace 無指定で List する 2 種類。`internal/controller/gateway_mutator.go`
+  # の listAIGatewayRoutesForGateway / listMCPRoutesForGateway は、キャッシュ索引が
+  # **0 件を返しただけで** noCacheReader（mgr.GetAPIReader()、namespace 無指定）へ
+  # フォールバックする。うちは MCPRoute を作らないので後者は**毎回**この経路に入る。
+  # ここが 403 だと mutatePod がエラーを返し、failurePolicy: Fail により
+  # **Envoy データプレーン Pod の作成そのものが admission で拒否される**。
+  # 読み取り専用・自分の CRD 2 種だけなので、絞り込みの意図は損なわない。
+  - apiGroups: ["aigateway.envoyproxy.io"]
+    resources: ["aigatewayroutes", "mcproutes"]
+    verbs: ["list"]
+  # InferencePool CRD の存在確認（controller.go:193-198）。名前指定の Get だけ。
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["get"]
+  # webhook の caBundle 更新（main.go:452,527）。client.New の直クライアントなので
+  # cache が要らず、Get と Update だけで足りる（list / watch / patch は不要）。
+  - apiGroups: ["admissionregistration.k8s.io"]
+    resources: ["mutatingwebhookconfigurations"]
+    verbs: ["get"]
+  - apiGroups: ["admissionregistration.k8s.io"]
+    resources: ["mutatingwebhookconfigurations"]
+    resourceNames: ["envoy-ai-gateway-gateway-pod-mutator.envoy-ai-gateway-system"]
+    verbs: ["update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ai-gateway-controller-cluster-scoped
+  annotations:
+    # kustomization.yaml の削除パッチが「消さないもの」を見分けるためのマーカー。
+    # これが無い ClusterRoleBinding は名前を問わず消える。
+    # **ここに ClusterRoleBinding を足すときは必ずこの annotation を付けること。**
+    # 付け忘れると自分のパッチに黙って消される（kustomize はエラーも警告も出さない）。
+    # 症状は「権限を足したのに効かない」で、一番気づきにくい形で出る。
+    home-cluster.tgy.io/rbac-owner: home-cluster
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ai-gateway-controller-cluster-scoped
+subjects:
+  - kind: ServiceAccount
+    name: ai-gateway-controller
+    namespace: envoy-ai-gateway-system

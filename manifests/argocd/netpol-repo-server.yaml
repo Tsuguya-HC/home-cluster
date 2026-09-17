@@ -41,6 +41,13 @@ spec:
         - matchName: "external-secrets.io"
         - matchName: "qdrant.github.io"
         - matchName: "helm.otwld.com"
+        # Agent Router / Envoy Gateway の OCI チャート（oci://docker.io/envoyproxy）。
+        # Docker Hub は 3 ホストに割れる: API は registry-1、トークンは auth、
+        # blob は 307 で cloudfront へ飛ぶ（2026-09-17 実測）。どれか 1 つ欠けると
+        # チャートを引けず、Application が一度もレンダリングされない。
+        - matchName: "registry-1.docker.io"
+        - matchName: "auth.docker.io"
+        - matchName: "production.cloudfront.docker.com"
       toPorts:
         - ports:
             - port: "443"

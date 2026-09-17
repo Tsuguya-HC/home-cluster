@@ -1,0 +1,54 @@
+# Envoy データプレーン。外部 LLM への egress を持つのはここだけで、handler の
+# namespace からは ClusterIP への ingress しか許可しない（issue #942）。
+#
+# Envoy Pod がこの namespace に立つのは helm-values/envoy-gateway/values.yaml で
+# deploy.type: GatewayNamespace にしているため。既定（ControllerNamespace）だと
+# envoy-gateway-system 側に立ち、この CNP は何も選択しない。
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: llm-gateway-envoy
+  namespace: llm-gateway
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/managed-by: envoy-gateway
+  ingress:
+    # handler から。alias ごとに Pod を分けないので namespace 単位で開ける。
+    # **handler 側の egress はまだ無い**（切り替えは次段階、issue #942 の進め方）。
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: claude-code-build
+        - matchLabels:
+            io.kubernetes.pod.namespace: claude-code
+      toPorts:
+        - ports:
+            - port: "10080"
+              protocol: TCP
+    # kubelet の probe。Envoy Gateway の readiness は :19003/ready で、:19001 は
+    # stats（Prometheus 用、今は誰も引いていない）。混同すると probe が落ちて
+    # Pod が永久に Ready にならない。
+    - fromEntities:
+        - host
+        - remote-node
+      toPorts:
+        - ports:
+            - port: "19003"
+              protocol: TCP
+  egress:
+    # xDS。Envoy Gateway コントローラから設定を受け取る。
+    - toEndpoints:
+        - matchLabels:
+            control-plane: envoy-gateway
+            io.kubernetes.pod.namespace: envoy-gateway-system
+      toPorts:
+        - ports:
+            - port: "18000"
+              protocol: TCP
+    # 上流 LLM。ここが「外に出られる唯一の口」。
+    - toFQDNs:
+        - matchName: "openrouter.ai"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP

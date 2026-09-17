@@ -1,0 +1,36 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: agent-router
+  namespace: argocd
+spec:
+  project: ai
+  sources:
+    - repoURL: docker.io/envoyproxy
+      chart: ai-gateway-crds-helm
+      targetRevision: "1.1.0"
+      helm:
+        releaseName: agent-router-crds
+    - repoURL: docker.io/envoyproxy
+      chart: ai-gateway-helm
+      targetRevision: "1.1.0"
+      helm:
+        releaseName: agent-router
+        valueFiles:
+          - $values/helm-values/agent-router/values.yaml
+    - repoURL: https://github.com/Tsuguya-HC/home-cluster.git
+      targetRevision: main
+      ref: values
+    - repoURL: https://github.com/Tsuguya-HC/home-cluster.git
+      targetRevision: main
+      path: manifests/envoy-ai-gateway-system
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: envoy-ai-gateway-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

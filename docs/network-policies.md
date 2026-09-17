@@ -48,6 +48,10 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 | Workflow pods (claude-code) | SeaweedFS filer (seaweedfs) | 8333 | Artifact/log storage |
 | Workflow pods (rss) | SeaweedFS filer (seaweedfs) | 8333 | Artifact/log storage |
 | Workflow pods (claude-code) | Loki gateway (monitoring) | 8080 | Log query (logcli) |
+| Workflow pods (claude-code-build) | Envoy data plane (llm-gateway) | 10080 | LLM API（alias 経由）**次段階。handler 側 egress は未実装** |
+| Workflow pods (claude-code) | Envoy data plane (llm-gateway) | 10080 | LLM API（alias 経由）**次段階。handler 側 egress は未実装** |
+| Envoy data plane (llm-gateway) | Envoy Gateway (envoy-gateway-system) | 18000 | xDS |
+| Envoy Gateway (envoy-gateway-system) | Agent Router (envoy-ai-gateway-system) | 1063 | extension server gRPC（xDS 変換） |
 | taskflow-cnp-check (claude-code) | Loki gateway (monitoring) | 8080 | Log query (cnp-check investigation) |
 | PXE sync pods (argo) | SeaweedFS filer (seaweedfs) | 8333 | Artifact/log storage |
 | Etcd backup (argo) | SeaweedFS filer (seaweedfs) | 8333 | Backup storage |
@@ -460,3 +464,54 @@ CNP を絞って測るときは、apiserver が張り済みの TCP 接続がそ�
 
 この webhook が拒否側に倒れたときの症状と切り分けは [known-issues.md](known-issues.md) の
 「TaskFlow 構造検査 webhook」節にある（caBundle 注入窓とコントローラ不在の 2 つ）。
+
+## llm-gateway (1 policy)
+
+| Component | Ingress | Egress |
+|---|---|---|
+| **llm-gateway-envoy** | claude-code-build / claude-code → 10080; host/remote-node → 19003 (probes) | envoy-gateway (envoy-gateway-system):18000, openrouter.ai:443 |
+
+Agent Router のデータプレーン（issue #942）。**外部 LLM への egress を持つのはこの
+namespace だけ**で、handler 側は gateway の ClusterIP にしか出られず、資格情報も持たない。
+alias（`x-ai-eg-model`）で上流と実モデルが決まるので、handler の CNP に上流ドメインは現れない。
+
+Envoy の Pod がこの namespace に立つのは `helm-values/envoy-gateway/values.yaml` で
+`deploy.type: GatewayNamespace` にしているため。**Envoy Gateway の既定は
+`ControllerNamespace`** で、そのままだとデータプレーンが `envoy-gateway-system` 側に立ち、
+この CNP は何も選択しない（＝ Pod は Running のまま外に出られない）。
+
+同じ values の `watch.namespaces` は `envoy-gateway-system` と `llm-gateway` の 2 つだけで、
+**この Envoy Gateway は他の namespace の Gateway / HTTPRoute / EnvoyProxy をエラーも出さずに
+無視する**（`Cache.DefaultNamespaces` に代入されるだけで、コントローラ namespace も自動では
+足されない）。別の namespace に Gateway を足すときは、ここに namespace を追加しないと
+「作ったのに何も起きない」になる。
+
+`10080` は listener port 80 に対して Envoy Gateway が実際に listen する port（特権 port を
+避けて 1xxxx へずらす）。Service の port は 80 なので、CNP だけ数字が食い違って見える。
+
+## envoy-gateway-system (2 policies)
+
+| Component | Ingress | Egress |
+|---|---|---|
+| **envoy-gateway** | llm-gateway → 18000 (xDS); kube-apiserver/host/remote-node → 9443 (topologyInjector webhook) | kube-apiserver, agent-router (envoy-ai-gateway-system):1063 |
+| **envoy-gateway-certgen** | (none) | kube-apiserver |
+
+`certgen` は chart の pre-install / pre-upgrade フック Job（ArgoCD の PreSync）で、Pod ラベルが
+`app: certgen` しかないためコントローラ用の CNP では選択されない。policy enforcement が always の
+このクラスタでは **選択されないエンドポイントは egress も deny** なので、専用の CNP が無いと
+PreSync が落ちて Application が一度も sync しない。
+
+**この CNP 自身も `argocd.argoproj.io/hook: PreSync` + `sync-wave: "-2"` で PreSync フック
+として入れている。** 通常リソースとして置くと適用が Sync フェーズ＝ Job より後になり、
+初回は永久に収束しない。kyverno / seaweedfs の hook Job 用 CNP は post-install（PostSync）
+なので通常リソースで足りており、**そのまま真似ると成立しない**。
+
+## envoy-ai-gateway-system (1 policy)
+
+| Component | Ingress | Egress |
+|---|---|---|
+| **agent-router-controller** | kube-apiserver/host/remote-node → 9443 (Pod mutator webhook); envoy-gateway (envoy-gateway-system) → 1063 (extension server gRPC) | kube-apiserver |
+
+9443 の Pod mutator が届かないと Envoy の Pod に extproc が注入されず、**AI のルートを
+持たないまま起動する**（Pod は Running なので気づきにくい）。taskflow-system と同じく、
+実際にどの identity で届くかは hubble で確かめること。

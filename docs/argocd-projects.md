@@ -13,7 +13,7 @@ ArgoCD AppProject でアプリケーションをドメインごとに分離し�
 | security | Secret 管理・セキュリティ (ESO, OAuth2 Proxy, Kanidm, Trivy, Kyverno) | `*` | 10 |
 | apps | ユーザー向けアプリケーション (Nextcloud, Harbor) | nextcloud, harbor | 2 |
 | storage | ストレージ (SeaweedFS, CNPG, QNAP CSI, NFS) | cnpg-system, database, nfs-provisioner, seaweedfs, trident | 6 |
-| ai | AI/ML インフラ (Qdrant, Ollama, TaskFlow) | qdrant, ollama, taskflow-system | 3 |
+| ai | AI/ML インフラ (Qdrant, Ollama, TaskFlow, LLM gateway) | qdrant, ollama, taskflow-system, llm-gateway, envoy-gateway-system, envoy-ai-gateway-system | 6 |
 
 ## クラスタスコープリソースの許可 (clusterResourceWhitelist)
 
@@ -66,6 +66,8 @@ ArgoCD AppProject でアプリケーションをドメインごとに分離し�
 | storage | CSIDriver | `*` | QNAP CSI |
 | storage | TridentOrchestrator | `*` | QNAP Trident |
 | ai | ValidatingWebhookConfiguration | admissionregistration.k8s.io | taskflow の TaskFlow 構造検査 webhook |
+| ai | MutatingWebhookConfiguration | admissionregistration.k8s.io | Agent Router の Pod mutator / Envoy Gateway の topologyInjector |
+| ai | GatewayClass | gateway.networking.k8s.io | llm-gateway（Cilium とは controllerName が別） |
 
 ## 新しいサービスを追加するとき
 

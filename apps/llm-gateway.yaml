@@ -1,0 +1,27 @@
+# gateway 本体の設定（Gateway / AIGatewayRoute / AIServiceBackend / BackendSecurityPolicy）。
+# コントローラ 2 つ（envoy-gateway / agent-router）の CRD が入るまで sync は失敗するが、
+# ArgoCD の再試行で収束させる（sync-wave は使わない）。envoy-gateway は watch.namespaces に
+# 従って llm-gateway namespace へ Role を出すので、**wave を付けると依存が両方向になり
+# デッドロックになる**。namespace 自体は manifests/infra/llm-gateway-namespace.yaml。
+# 先例: gateway-api-crds と cilium も wave なしで同じように収束している。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: llm-gateway
+  namespace: argocd
+spec:
+  project: ai
+  source:
+    repoURL: https://github.com/Tsuguya-HC/home-cluster.git
+    targetRevision: main
+    path: manifests/llm-gateway
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: llm-gateway
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

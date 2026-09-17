@@ -1,0 +1,81 @@
+# Envoy Gateway コントロールプレーン。データプレーン（llm-gateway ns）に xDS を配り、
+# xDS を組み立てる過程で Agent Router の extension server を呼ぶ。外部へは出ない。
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: envoy-gateway
+  namespace: envoy-gateway-system
+spec:
+  endpointSelector:
+    matchLabels:
+      control-plane: envoy-gateway
+  ingress:
+    # データプレーンからの xDS
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: llm-gateway
+      toPorts:
+        - ports:
+            - port: "18000"
+              protocol: TCP
+    # apiserver からの admission（topologyInjector の MutatingWebhook、:9443）。
+    # taskflow-system と同じく実際に届くのは remote-node のことが多いが、他の webhook と
+    # 書き方を揃えて 3 つ並べる（docs/network-policies.md）。
+    - fromEntities:
+        - kube-apiserver
+        - host
+        - remote-node
+      toPorts:
+        - ports:
+            - port: "9443"
+              protocol: TCP
+  egress:
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "6443"
+              protocol: TCP
+    # Agent Router の extension server（:1063）。**呼ぶのはこちら側**で、
+    # extproc サイドカーは unix socket で listen するだけで 1063 を dial しない。
+    # helm-values/envoy-gateway/values.yaml の extensionManager.service.fqdn が実体。
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: ai-gateway-helm
+            io.kubernetes.pod.namespace: envoy-ai-gateway-system
+      toPorts:
+        - ports:
+            - port: "1063"
+              protocol: TCP
+---
+# certgen は chart の pre-install / pre-upgrade フック Job（ArgoCD の PreSync）。
+# Pod ラベルが `app: certgen` だけなので上の CNP では選択されず、policy enforcement が
+# always のこのクラスタでは egress ごと deny される → **PreSync が落ち、Sync フェーズに
+# 一度も進まないまま Application が固まる**。
+#
+# **この CNP 自身も PreSync フックにする必要がある。** 通常リソースとして置くと適用は
+# Sync フェーズ＝ certgen Job より後になり、初回は永久に PreSync が通らない
+# （Job が落ちる → Sync に進まない → CNP が入らない → また Job が落ちる）。
+# kyverno / seaweedfs の hook Job 用 CNP は post-install = PostSync なのでこの問題が無く、
+# そのまま真似ると成立しない。
+# wave -2 はチャートの certgen リソース（RBAC が hook-weight -1、Job が 0）より前。
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: envoy-gateway-certgen
+  namespace: envoy-gateway-system
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  endpointSelector:
+    matchLabels:
+      app: certgen
+  egress:
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "6443"
+              protocol: TCP

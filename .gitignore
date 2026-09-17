@@ -14,3 +14,7 @@ node_modules/
 
 # Python
 __pycache__/
+
+# kustomize --enable-helm は helmCharts のチャートをこの下に展開する。ビルド生成物で、
+# ArgoCD の repo-server は自分で pull するのでコミットしない。
+kustomize/*/charts/

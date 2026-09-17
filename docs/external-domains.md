@@ -12,3 +12,30 @@ CNP egress (`toFQDNs`) 設定時のリファレンス。各外部サービスが
 | `*.1password.com` | Yes | Core API |
 | `*.1passwordusercontent.com` | Yes | Vault data (attachments, profile images) |
 | `*.1passwordservices.com` | No | Telemetry, subscription management — Connect Server では不要 |
+
+## Docker Hub（OCI Helm チャート）
+
+- **用途**: `oci://docker.io/envoyproxy` の `gateway-helm` / `ai-gateway-helm` 系（Envoy Gateway / Agent Router）
+- **引く側**: ArgoCD repo-server（`manifests/argocd/netpol-repo-server.yaml`）
+- **Port**: 443
+- **実測**: 2026-09-17
+
+| Domain | Required | Notes |
+|---|---|---|
+| `registry-1.docker.io` | Yes | Registry API（`docker.io` はクライアント側でここへ正規化される） |
+| `auth.docker.io` | Yes | Bearer トークンの発行。401 の `WWW-Authenticate` realm がここを指す |
+| `production.cloudfront.docker.com` | Yes | blob の実体。manifest 取得後に 307 で飛ぶ |
+
+`ghcr.io`（spin-operator）は単一ホストで完結するので、OCI = 1 ドメインという先入観を持ちやすい。
+Docker Hub は 3 つに割れており、**欠けても「認証エラー」ではなく単に引けない**ので、
+Application が Unknown のまま止まる形で出る。
+
+## OpenRouter
+
+- **用途**: 実行系 handler の LLM 呼び出し。今は `llm-gateway`（Agent Router のデータプレーン）と
+  `claude-code-build` の openrouter-broker サイドカーの 2 経路があり、handler の切り替えが済めば前者だけになる
+- **Port**: 443
+
+| Domain | Required | Notes |
+|---|---|---|
+| `openrouter.ai` | Yes | API（OpenAI 互換は `/api/v1`）。サブドメインは使わない |

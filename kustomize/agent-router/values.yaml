@@ -1,0 +1,47 @@
+# Agent Router（旧 Envoy AI Gateway）。LLM トラフィックの control plane。
+# helm-values/ ではなくここに置いてあるのは、この app だけ kustomize でチャートを
+# 展開しているため（kustomization.yaml の理由を読むこと）。kustomize の既定の
+# load restrictor は root 外のファイルを読まないので、values は同じディレクトリに置く。
+
+extProc:
+  # 帰属はリクエスト単位の JSON アクセスログ（gen_ai.* / OTel セマンティック規約）で取る。
+  # text のままだと Loki 側でパースが要る。
+  logFormat: json
+
+controller:
+  logFormat: json
+  # cache の DefaultNamespaces になる（cmd/controller/main.go の setupCache）。
+  # **RBAC を RoleBinding に絞った前提そのもの** — ここが空だとコントローラは
+  # Secret / Pod / Gateway をクラスタ全域で LIST しようとして 403 で回らなくなる。
+  watch:
+    namespaces:
+      - envoy-ai-gateway-system
+      - llm-gateway
+  # このコントローラが配る Pod mutator は failurePolicy: Fail で、Envoy の Pod 生成の
+  # たびに呼ばれる（extproc の注入）。1 replica だとコントローラが落ちている間
+  # **データプレーンが再作成できない**（docs/known-issues.md の TaskFlow webhook と同型）。
+  replicaCount: 2
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: ai-gateway-helm
+          topologyKey: kubernetes.io/hostname
+  mutatingWebhook:
+    certManager:
+      # チャート既定の自己署名証明書は render のたびに中身が変わる（実測）。ArgoCD の
+      # selfHeal が毎 sync で Secret と caBundle を書き換え続けるので cert-manager に出す。
+      enable: true
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+
+# MCP ルートは使わない。使うときは mcpSessionEncryptionSeed（チャート既定は
+# "default-insecure-seed"）を ESO 経由の値に差し替えること。

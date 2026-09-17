@@ -4,11 +4,13 @@ metadata:
   name: ai
   namespace: argocd
 spec:
-  description: AI/ML infrastructure (Qdrant, Ollama, taskflow)
+  description: AI/ML infrastructure (Qdrant, Ollama, taskflow, LLM gateway)
   sourceRepos:
     - https://qdrant.github.io/qdrant-helm
     - https://helm.otwld.com/
     - https://github.com/Tsuguya-HC/home-cluster.git
+    # Agent Router / Envoy Gateway の OCI chart（oci:// は付けない書き方が ArgoCD の規約）
+    - docker.io/envoyproxy
   destinations:
     - server: https://kubernetes.default.svc
       namespace: qdrant
@@ -16,6 +18,12 @@ spec:
       namespace: ollama
     - server: https://kubernetes.default.svc
       namespace: taskflow-system
+    - server: https://kubernetes.default.svc
+      namespace: llm-gateway
+    - server: https://kubernetes.default.svc
+      namespace: envoy-gateway-system
+    - server: https://kubernetes.default.svc
+      namespace: envoy-ai-gateway-system
   clusterResourceWhitelist:
     - group: '*'
       kind: CustomResourceDefinition
@@ -24,6 +32,12 @@ spec:
     # group を '*' にせず絞れるのは、これを出す chart / base が 1 つしかないため。
     - group: admissionregistration.k8s.io
       kind: ValidatingWebhookConfiguration
+    # Agent Router の Pod mutator（extproc 注入）と Envoy Gateway の topologyInjector
+    - group: admissionregistration.k8s.io
+      kind: MutatingWebhookConfiguration
+    # llm-gateway 用の GatewayClass（Cilium のものとは controllerName が別）
+    - group: gateway.networking.k8s.io
+      kind: GatewayClass
     - group: '*'
       kind: ClusterRole
     - group: '*'

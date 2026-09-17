@@ -211,6 +211,21 @@
     },
     {
       "description": [
+        "同じ pinDigests の罠が kustomize manager 側にもある。kustomize/agent-router は",
+        "helmCharts で oci://docker.io/envoyproxy のチャートを展開しており、1.1.0@sha256:... に",
+        "書き換えられると version はチャートのバージョンであってイメージ参照ではないので",
+        "kustomize build が壊れる。kustomize/taskflow と kustomize/qnap-csi は helmCharts を",
+        "使っていないので影響しない。",
+        "depType は oci:// でも HelmChart。upstream の readme には OCIChart とも書いてあるが",
+        "lib/modules/manager/kustomize/extract.ts は一度も emit しない（readme 側の記述バグ）。",
+        "matchDepTypes は自由文字列なので、綴りを間違えても --strict は拾わない。"
+      ],
+      "matchManagers": ["kustomize"],
+      "matchDepTypes": ["HelmChart"],
+      "pinDigests": false
+    },
+    {
+      "description": [
         "First-party code does not soak. minimumReleaseAge buys time for someone",
         "else to notice a poisoned release before we take it; there is no someone",
         "else here — we wrote it, reviewed it and merged it. Waiting three days on",
@@ -282,6 +297,20 @@
     {
       "description": "Do not automerge critical infrastructure",
       "matchPackageNames": ["cilium", "tetragon", "https://github.com/kubernetes-sigs/gateway-api.git"],
+      "automerge": false
+    },
+    {
+      "description": [
+        "Envoy Gateway と Agent Router は CRD チャートと本体チャートが別 dep になる",
+        "（apps/envoy-gateway.yaml は argocd manager、kustomize/agent-router は kustomize",
+        "manager、どちらも datasource は docker）。groupName が無いと minor が別々の PR で",
+        "automerge され、新しいコントローラが古い CRD のまま起動する — このファイルが",
+        "taskflow の節で名指ししているのと同じ事故。1 PR に束ね、人が見てから入れる。",
+        "agent-router は kustomize 化により CI のレンダリング検査（_helm-template /",
+        "unread-values / _image-existence）から外れているので、無人マージは特に効きが悪い。"
+      ],
+      "groupName": "envoy-gateway",
+      "matchPackageNames": ["/^docker\\.io/envoyproxy//"],
       "automerge": false
     },
     {

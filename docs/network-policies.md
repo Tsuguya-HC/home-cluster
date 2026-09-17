@@ -48,6 +48,10 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 | Workflow pods (claude-code) | SeaweedFS filer (seaweedfs) | 8333 | Artifact/log storage |
 | Workflow pods (rss) | SeaweedFS filer (seaweedfs) | 8333 | Artifact/log storage |
 | Workflow pods (claude-code) | Loki gateway (monitoring) | 8080 | Log query (logcli) |
+| Workflow pods (claude-code-build) | Envoy data plane (llm-gateway) | 10080 | LLM API（alias 経由）**次段階。handler 側 egress は未実装** |
+| Workflow pods (claude-code) | Envoy data plane (llm-gateway) | 10080 | LLM API（alias 経由）。現状は taskflow-llm-gateway-smoke のみ |
+| Envoy data plane (llm-gateway) | Envoy Gateway (envoy-gateway-system) | 18000 | xDS |
+| Envoy Gateway (envoy-gateway-system) | Agent Router (envoy-ai-gateway-system) | 1063 | extension server gRPC（xDS 変換） |
 | taskflow-cnp-check (claude-code) | Loki gateway (monitoring) | 8080 | Log query (cnp-check investigation) |
 | PXE sync pods (argo) | SeaweedFS filer (seaweedfs) | 8333 | Artifact/log storage |
 | Etcd backup (argo) | SeaweedFS filer (seaweedfs) | 8333 | Backup storage |
@@ -130,12 +134,17 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 |---|---|---|
 | **server** | ingress, cloudflared, claude-code (claude-code) → 8080 | kube-apiserver, repo-server:8081, kanidm (kanidm):8443, redis:6379 |
 | **application-controller** | host → 8082 | kube-apiserver, repo-server:8081, redis:6379 |
-| **repo-server** | server, app-controller → 8081 | github.com + api.github.com + ghcr.io + {argoproj,grafana,grafana-community,oauth2-proxy,aquasecurity,kyverno,cloudnative-pg,kubernetes-sigs,prometheus-community,seaweedfs,stakater,qdrant}.github.io + *.githubusercontent.com + charts.jetstack.io + helm.cilium.io + helm.goharbor.io + charts.external-secrets.io + external-secrets.io + helm.otwld.com:443, redis:6379 |
+| **repo-server** | server, app-controller → 8081 | github.com + api.github.com + ghcr.io + {argoproj,grafana,grafana-community,oauth2-proxy,aquasecurity,kyverno,cloudnative-pg,kubernetes-sigs,prometheus-community,seaweedfs,stakater,qdrant}.github.io + *.githubusercontent.com + charts.jetstack.io + helm.cilium.io + helm.goharbor.io + charts.external-secrets.io + external-secrets.io + helm.otwld.com + registry-1.docker.io + auth.docker.io + production.cloudfront.docker.com:443, redis:6379 |
 | **redis** | server, repo-server, app-controller → 6379 | (none) |
 | **applicationset-controller** | (deny world) | kube-apiserver |
 | **notifications-controller** | (deny world) | kube-apiserver, discord.com:443, horenso (horenso):3000, argocd-deployed-eventsource (argo):12003 |
 | **redis-secret-init** (Job) | (deny world) | kube-apiserver |
 | **cloudflared** | (deny world) | *.v2.argotunnel.com + cftunnel.com + h2.cftunnel.com + quic.cftunnel.com:443/7844 (7844 TCP+UDP), server:8080, eventsource (argo):12000, kanidm (kanidm):8443, nextcloud (nextcloud):80, harbor-nginx (harbor):8443, oauth2-proxy-rss (oauth2-proxy):4180 |
+
+Docker Hub の 3 ホスト（`registry-1` / `auth` / `production.cloudfront`）は `oci://docker.io/envoyproxy` の
+チャート（Agent Router / Envoy Gateway）用。Docker Hub は API・トークン・blob が別ホストに割れており、
+blob は 307 で cloudfront に飛ぶ（2026-09-17 実測）。**1 つでも欠けるとチャートを引けず、
+Application が Unknown のまま一度もレンダリングされない**（ghcr.io は単一ホストで済むので前例が無い）。
 
 ## argo (23 policies)
 
@@ -188,7 +197,7 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 |---|---|---|
 | **talos-build** (talos-build=true) | (deny world) | kube-apiserver, ghcr.io + github.com + api.github.com + uploads.github.com + *.githubusercontent.com + dl-cdn.alpinelinux.org + discord.com :443, seaweedfs-filer (seaweedfs):8333 |
 
-## claude-code (5 policies)
+## claude-code (7 policies)
 
 | Component | Ingress | Egress |
 |---|---|---|
@@ -197,6 +206,8 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 | **taskflow-pr-review** (taskflow-pr-review=true) | (書かない = 全 deny) | api.anthropic.com + github.com + api.github.com :443 |
 | **taskflow-cnp-check** (taskflow-cnp-check=true) | (書かない = 全 deny) | kube-apiserver:6443, api.anthropic.com + github.com + api.github.com :443, loki-gateway (monitoring):8080 |
 | **taskflow-cnp-report** (taskflow-cnp-report=true) | (書かない = 全 deny) | api.anthropic.com + discord.com + github.com + api.github.com :443 |
+| **taskflow-openrouter-smoke** (taskflow-openrouter-smoke=true) | (書かない = 全 deny) | openrouter.ai:443 |
+| **taskflow-llm-gateway-smoke** (taskflow-llm-gateway-smoke=true) | (書かない = 全 deny) | llm-gateway (llm-gateway):10080（Service の port は 80、CNP は backend の 10080） |
 
 `task-submitter` は Task を 1 つ作るだけの CronWorkflow の Pod。apiserver のほかに要る 2 つは
 コントローラの workflowDefaults が全 Workflow に注入するもの（archiveLogs の保存先と
@@ -236,6 +247,12 @@ Cilium の identity は Pod 単位なので、通知サイドカーのために�
 1 フェーズだった頃は共有の `claude-code=true` に相乗りしており、1 つの Pod が
 apiserver・Loki・Discord・GitHub・npm・crates・SeaweedFS・Prometheus・horenso・ArgoCD を
 まとめて持っていた。
+
+2 つの smoke はどちらも「配管だけを確かめる」flow で、**出口に書かないもの**が主眼。
+`taskflow-openrouter-smoke` は api.anthropic.com を書かないので、env が効かず Anthropic に
+飛んだら drop されて落ちる。`taskflow-llm-gateway-smoke`（#942）は **openrouter.ai を書かない**
+ので、gateway を経由せず Pod が直接出ようとしたら落ちる — 「外に出ているのは gateway だけ」を
+緑/赤で判定できる形にしてある。後者の handler は資格情報を一切持たない。
 
 ## claude-code-build (1 policy)
 
@@ -460,3 +477,54 @@ CNP を絞って測るときは、apiserver が張り済みの TCP 接続がそ�
 
 この webhook が拒否側に倒れたときの症状と切り分けは [known-issues.md](known-issues.md) の
 「TaskFlow 構造検査 webhook」節にある（caBundle 注入窓とコントローラ不在の 2 つ）。
+
+## llm-gateway (1 policy)
+
+| Component | Ingress | Egress |
+|---|---|---|
+| **llm-gateway-envoy** | claude-code-build / claude-code → 10080; host/remote-node → 19003 (probes) | envoy-gateway (envoy-gateway-system):18000, openrouter.ai:443 |
+
+Agent Router のデータプレーン（issue #942）。**外部 LLM への egress を持つのはこの
+namespace だけ**で、handler 側は gateway の ClusterIP にしか出られず、資格情報も持たない。
+alias（`x-ai-eg-model`）で上流と実モデルが決まるので、handler の CNP に上流ドメインは現れない。
+
+Envoy の Pod がこの namespace に立つのは `helm-values/envoy-gateway/values.yaml` で
+`deploy.type: GatewayNamespace` にしているため。**Envoy Gateway の既定は
+`ControllerNamespace`** で、そのままだとデータプレーンが `envoy-gateway-system` 側に立ち、
+この CNP は何も選択しない（＝ Pod は Running のまま外に出られない）。
+
+同じ values の `watch.namespaces` は `envoy-gateway-system` と `llm-gateway` の 2 つだけで、
+**この Envoy Gateway は他の namespace の Gateway / HTTPRoute / EnvoyProxy をエラーも出さずに
+無視する**（`Cache.DefaultNamespaces` に代入されるだけで、コントローラ namespace も自動では
+足されない）。別の namespace に Gateway を足すときは、ここに namespace を追加しないと
+「作ったのに何も起きない」になる。
+
+`10080` は listener port 80 に対して Envoy Gateway が実際に listen する port（特権 port を
+避けて 1xxxx へずらす）。Service の port は 80 なので、CNP だけ数字が食い違って見える。
+
+## envoy-gateway-system (2 policies)
+
+| Component | Ingress | Egress |
+|---|---|---|
+| **envoy-gateway** | llm-gateway → 18000 (xDS); kube-apiserver/host/remote-node → 9443 (topologyInjector webhook) | kube-apiserver, agent-router (envoy-ai-gateway-system):1063 |
+| **envoy-gateway-certgen** | (none) | kube-apiserver |
+
+`certgen` は chart の pre-install / pre-upgrade フック Job（ArgoCD の PreSync）で、Pod ラベルが
+`app: certgen` しかないためコントローラ用の CNP では選択されない。policy enforcement が always の
+このクラスタでは **選択されないエンドポイントは egress も deny** なので、専用の CNP が無いと
+PreSync が落ちて Application が一度も sync しない。
+
+**この CNP 自身も `argocd.argoproj.io/hook: PreSync` + `sync-wave: "-2"` で PreSync フック
+として入れている。** 通常リソースとして置くと適用が Sync フェーズ＝ Job より後になり、
+初回は永久に収束しない。kyverno / seaweedfs の hook Job 用 CNP は post-install（PostSync）
+なので通常リソースで足りており、**そのまま真似ると成立しない**。
+
+## envoy-ai-gateway-system (1 policy)
+
+| Component | Ingress | Egress |
+|---|---|---|
+| **agent-router-controller** | kube-apiserver/host/remote-node → 9443 (Pod mutator webhook); envoy-gateway (envoy-gateway-system) → 1063 (extension server gRPC) | kube-apiserver |
+
+9443 の Pod mutator が届かないと Envoy の Pod に extproc が注入されず、**AI のルートを
+持たないまま起動する**（Pod は Running なので気づきにくい）。taskflow-system と同じく、
+実際にどの identity で届くかは hubble で確かめること。

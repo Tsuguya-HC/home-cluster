@@ -1,0 +1,173 @@
+# Agent Router（llm-gateway）を経由して claude が動くかだけを確かめるスモーク flow（#942）。
+#
+# `taskflow-openrouter-smoke` の gateway 版。あちらは Pod から openrouter.ai へ直接出る形で、
+# こちらは **Pod を外に出さず gateway だけに出す**。確かめるのは 3 つ:
+#
+#   1. handler の namespace から gateway の ClusterIP に届くこと（両端の CNP が噛み合っている）
+#   2. alias `implement` が AIGatewayRoute にマッチし、実モデルへ解決されること
+#   3. **外に出ているのが gateway だけであること** — この CNP は openrouter.ai を**書かない**ので、
+#      env が効かず Pod が直接出ようとしたら drop されて失敗する。取り違えが緑で通らない
+#
+# handler 側は資格情報を持たない。ANTHROPIC_AUTH_TOKEN はダミーで、gateway が
+# BackendSecurityPolicy の鍵で付け直す。これが #942 の「集約」の実物。
+#
+# 投げ方:
+#   kubectl -n claude-code create -f - <<EOF
+#   apiVersion: flow.tgy.io/v1alpha1
+#   kind: Task
+#   metadata: {generateName: llm-gateway-smoke-, namespace: claude-code}
+#   spec: {flow: llm-gateway-smoke}
+#   EOF
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: agent-llm-gateway-smoke
+  namespace: claude-code
+automountServiceAccountToken: false
+---
+# 出口は gateway だけ。**openrouter.ai を書かない**のがこの CNP の主眼。
+# 10080 は listener 80 に対して Envoy が実際に listen する port（Service の port は 80 だが、
+# CNP は変換後の backend port で当たる）。DNS は CCNP allow-dns で共通適用済み。
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: taskflow-llm-gateway-smoke
+  namespace: claude-code
+spec:
+  endpointSelector:
+    matchLabels:
+      taskflow-llm-gateway-smoke: "true"
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/managed-by: envoy-gateway
+            io.kubernetes.pod.namespace: llm-gateway
+      toPorts:
+        - ports:
+            - port: "10080"
+              protocol: TCP
+---
+apiVersion: flow.tgy.io/v1alpha1
+kind: TaskHandler
+metadata:
+  name: llm-gateway-smoke
+  namespace: claude-code
+spec:
+  phase: 確認
+  runner:
+    type: Job
+  timeout: 10m
+  maxInfraRetries: 1
+  workspace:
+    volume: flow-workspace
+    mountPath: /workspace
+  jobTemplate:
+    template:
+      metadata:
+        labels:
+          taskflow-llm-gateway-smoke: "true"
+      spec:
+        restartPolicy: Never
+        runtimeClassName: kata
+        serviceAccountName: agent-llm-gateway-smoke
+        automountServiceAccountToken: false
+        terminationGracePeriodSeconds: 60
+        securityContext:
+          runAsUser: 65533
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        volumes:
+          - name: tmp
+            emptyDir: {}
+        containers:
+          - name: agent
+            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:f4bf69bfa990c3ebfbcc23fe666005a56377b5dc2a2ee1919dca5e54e31f174e
+            workingDir: /workspace
+            command: [sh, -c]
+            args:
+              - |
+                set -eu
+
+                # activeDeadlineSeconds の TERM は PID1 に飛ぶ。前面で待つと POSIX sh は
+                # 前面コマンドの終了まで trap を実行しないので、background + wait にする。
+                claude -p "/workspace/ok/report.md に、いま応答しているモデル名だけを 1 行で書いて終了してください。他のファイルは作らないこと。" \
+                  --verbose \
+                  --output-format stream-json \
+                  --dangerously-skip-permissions \
+                  --allowedTools "Write" \
+                  --model "$LLM_ALIAS" \
+                  --max-turns 5 < /dev/null &
+                pid=$!
+                trap 'kill -TERM $pid 2>/dev/null
+                      i=0
+                      while kill -0 $pid 2>/dev/null && [ $i -lt 10 ]; do sleep 1; i=$((i+1)); done
+                      kill -KILL $pid 2>/dev/null
+                      sync
+                      exit 143' TERM INT
+                rc=0
+                wait $pid || rc=$?
+                echo "claude exited with $rc"
+                # 判定はディレクトリで出る。終了コードは当てにしない（認証エラーでも
+                # stream-json の result は subtype=success を返す）。
+                sync
+            env:
+              - name: HOME
+                value: /tmp
+              # gateway 宛。Anthropic 入力は /anthropic 配下にあるので、claude が足す
+              # /v1/messages と合わせて /anthropic/v1/messages になる。
+              - name: ANTHROPIC_BASE_URL
+                value: http://llm-gateway.llm-gateway.svc.cluster.local/anthropic
+              # claude は空だと起動しないので置くが、**これは資格情報ではない**。
+              # 実キーは gateway の BackendSecurityPolicy が持っており、ここに何が入っていても
+              # OpenRouter には届かない。
+              - name: ANTHROPIC_AUTH_TOKEN
+                value: handled-by-llm-gateway
+              # 空にしないと OAuth 側が優先されて Anthropic に飛ぶ（そちらは CNP で落ちる）。
+              - name: ANTHROPIC_API_KEY
+                value: ""
+              # 実モデル名ではなく alias。どのモデルに解決されるかは
+              # manifests/llm-gateway/openrouter.yaml の AIGatewayRoute が決める。
+              - name: LLM_ALIAS
+                value: implement
+              # サブエージェントは親のモデルを継がない。alias を固定しないと既定（sonnet）に
+              # 落ち、gateway にマッチするルートが無くなる。
+              - name: CLAUDE_CODE_SUBAGENT_MODEL
+                value: implement
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop: [ALL]
+            volumeMounts:
+              - name: flow-workspace
+                mountPath: /workspace
+              - name: tmp
+                mountPath: /tmp
+            resources:
+              requests:
+                cpu: 200m
+                memory: 256Mi
+              limits:
+                # Kata では limit がそのまま VM のサイズ。cpu limit を書かないと 1 vCPU になる。
+                cpu: "1"
+                memory: 1Gi
+---
+apiVersion: flow.tgy.io/v1alpha1
+kind: TaskFlow
+metadata:
+  name: llm-gateway-smoke
+  namespace: claude-code
+spec:
+  profile: investigate
+  start: 確認
+  workspace: {}
+  bindings:
+    確認:
+      handler: llm-gateway-smoke
+      next:
+        完了: ok
+        Escalated: escalate
+  terminals:
+    完了: Success
+  reworkBudget: 0

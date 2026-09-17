@@ -1,0 +1,79 @@
+# implement alias（issue #942）。handler は alias 名しか知らず、実モデルはここで決まる。
+# `x-ai-eg-model` は Anthropic 入力の場合 body の model フィールドから gateway が埋める。
+apiVersion: aigateway.envoyproxy.io/v1beta1
+kind: AIGatewayRoute
+metadata:
+  name: implement
+  namespace: llm-gateway
+spec:
+  parentRefs:
+    - name: llm-gateway
+      kind: Gateway
+      group: gateway.networking.k8s.io
+  rules:
+    - matches:
+        - headers:
+            - type: Exact
+              name: x-ai-eg-model
+              value: implement
+      backendRefs:
+        - name: openrouter
+          modelNameOverride: meta/muse-spark-1.3-contributor
+---
+# OpenRouter は OpenAI 互換 API（/api/v1/chat/completions）。入力は Anthropic
+# （/anthropic/v1/messages）で受けて gateway が変換する。
+apiVersion: aigateway.envoyproxy.io/v1beta1
+kind: AIServiceBackend
+metadata:
+  name: openrouter
+  namespace: llm-gateway
+spec:
+  schema:
+    name: OpenAI
+    prefix: /api/v1
+  backendRef:
+    name: openrouter
+    kind: Backend
+    group: gateway.envoyproxy.io
+---
+# 汎用 APIKey。Authorization: Bearer <key> を gateway が付け直す。
+apiVersion: aigateway.envoyproxy.io/v1beta1
+kind: BackendSecurityPolicy
+metadata:
+  name: openrouter
+  namespace: llm-gateway
+spec:
+  targetRefs:
+    - group: aigateway.envoyproxy.io
+      kind: AIServiceBackend
+      name: openrouter
+  type: APIKey
+  apiKey:
+    secretRef:
+      name: openrouter-apikey
+      namespace: llm-gateway
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: Backend
+metadata:
+  name: openrouter
+  namespace: llm-gateway
+spec:
+  endpoints:
+    - fqdn:
+        hostname: openrouter.ai
+        port: 443
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: BackendTLSPolicy
+metadata:
+  name: openrouter
+  namespace: llm-gateway
+spec:
+  targetRefs:
+    - group: gateway.envoyproxy.io
+      kind: Backend
+      name: openrouter
+  validation:
+    wellKnownCACertificates: System
+    hostname: openrouter.ai

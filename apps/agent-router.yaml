@@ -1,0 +1,28 @@
+# Agent Router（旧 Envoy AI Gateway）。ここだけ Helm ではなく kustomize でチャートを
+# 展開している — チャートが無条件で作る ClusterRoleBinding（全 namespace の
+# secrets/pods/services に verbs: ["*"]）を消すため。理由の全文は
+# kustomize/agent-router/kustomization.yaml。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: agent-router
+  namespace: argocd
+spec:
+  project: ai
+  sources:
+    - repoURL: https://github.com/Tsuguya-HC/home-cluster.git
+      targetRevision: main
+      path: kustomize/agent-router
+    - repoURL: https://github.com/Tsuguya-HC/home-cluster.git
+      targetRevision: main
+      path: manifests/envoy-ai-gateway-system
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: envoy-ai-gateway-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

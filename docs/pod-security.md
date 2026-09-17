@@ -15,9 +15,12 @@ Cluster-wide default is **restricted enforce** (configured in Talos `admissionCo
 | default | restricted | Pod なし |
 | external-dns | restricted | |
 | external-secrets | (default) | Helm chart が namespace 作成。クラスタデフォルトで restricted |
+| envoy-ai-gateway-system | restricted | Agent Router コントローラ |
+| envoy-gateway-system | restricted | Envoy Gateway コントローラ（LLM 用データプレーンは llm-gateway 側） |
 | gateway | restricted | Pod なし（Cilium agent 内 Envoy で処理） |
 | kanidm | restricted | |
 | kyverno | restricted | |
+| llm-gateway | restricted | Agent Router のデータプレーン（Envoy）。CNP で外部 LLM への egress を持つ唯一の ns |
 | nfs-provisioner | restricted | |
 | kube-node-lease | restricted | Pod なし |
 | kube-public | restricted | Pod なし |

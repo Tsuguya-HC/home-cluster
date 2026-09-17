@@ -1,0 +1,43 @@
+# Agent Router のデータプレーン。Cilium Gateway API とは GatewayClass で棲み分け、
+# これは llm-gateway namespace の ClusterIP Gateway しか持たない（外向きは Cilium 側）。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: envoy-gateway
+  namespace: argocd
+spec:
+  project: ai
+  sources:
+    # EG 固有 CRD だけを入れる。Gateway API CRD（gateway-api-crds app）と
+    # safe-upgrades VAP は既にクラスタにあるので gatewayAPI.enabled は false のまま。
+    - repoURL: docker.io/envoyproxy
+      chart: gateway-crds-helm
+      targetRevision: "1.9.1"
+      helm:
+        releaseName: envoy-gateway-crds
+        parameters:
+          - name: crds.envoyGateway.enabled
+            value: "true"
+    - repoURL: docker.io/envoyproxy
+      chart: gateway-helm
+      targetRevision: "1.9.1"
+      helm:
+        releaseName: envoy-gateway
+        valueFiles:
+          - $values/helm-values/envoy-gateway/values.yaml
+    - repoURL: https://github.com/Tsuguya-HC/home-cluster.git
+      targetRevision: main
+      ref: values
+    - repoURL: https://github.com/Tsuguya-HC/home-cluster.git
+      targetRevision: main
+      path: manifests/envoy-gateway-system
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: envoy-gateway-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

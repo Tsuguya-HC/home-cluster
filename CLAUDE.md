@@ -12,7 +12,7 @@ manifests/         # 生の K8s マニフェスト（namespace ごとにディ�
   infra/           # Gateway, CertManager, IP Pool, CCNP
   secrets/         # 全 ExternalSecret（専用 secrets app で管理）
   storage/         # CSI StorageClass, Backend
-kustomize/         # Kustomize ベースのマニフェスト（QNAP CSI）
+kustomize/         # Kustomize ベースのマニフェスト（QNAP CSI / taskflow / agent-router）
 docs/              # 運用ドキュメント
 ```
 

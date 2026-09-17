@@ -1,0 +1,75 @@
+# CRD はこの Application の第 1 source（gateway-crds-helm）で入れる。このチャートの
+# crds.enabled は「EG CRD + Gateway API CRD + safe-upgrades VAP」を一括で出す作りで、
+# 後ろ 2 つは既存の gateway-api-crds app が持っている（同名の
+# ValidatingAdmissionPolicy を 2 つの Application が取り合う）。
+crds:
+  enabled: false
+
+config:
+  envoyGateway:
+    provider:
+      type: Kubernetes
+      kubernetes:
+        # 既定（ControllerNamespace）だとデータプレーンの Envoy Pod が
+        # envoy-gateway-system に作られる。それでは「外部 LLM への egress を持つのは
+        # llm-gateway だけ」という境界（issue #942）が成立せず、CNP も届かない。
+        deploy:
+          type: GatewayNamespace
+        # watch を絞ると、チャートが secrets / configmaps / pods を**クラスタ全域に**
+        # 与える ClusterRole をやめ、この 2 namespace の Role に分割する
+        # （templates/envoy-gateway-rbac.yaml の分岐）。
+        watch:
+          type: Namespaces
+          namespaces:
+            - envoy-gateway-system
+            - llm-gateway
+    # ここから下は Agent Router 連携の必須設定（上流 ai-gateway の
+    # manifests/envoy-gateway-values.yaml が「最小構成」として要求している）。
+    # 欠けると Gateway も Pod も Healthy のまま **AIGatewayRoute が xDS に
+    # 一度も反映されない**。
+    extensionApis:
+      enableEnvoyPatchPolicy: true
+      # AIServiceBackend が指す gateway.envoyproxy.io/Backend を有効化する。
+      enableBackend: true
+    extensionManager:
+      hooks:
+        xdsTranslator:
+          translation:
+            listener:
+              includeAll: true
+            route:
+              includeAll: true
+            cluster:
+              includeAll: true
+            secret:
+              includeAll: true
+          post:
+            - Translation
+            - Cluster
+            - Route
+      service:
+        fqdn:
+          hostname: ai-gateway-controller.envoy-ai-gateway-system.svc.cluster.local
+          port: 1063
+
+deployment:
+  replicas: 1
+  pod:
+    affinity:
+      podAntiAffinity:
+        # データプレーン（llm-gateway ns の Envoy）と同じノードに乗ると、ノード再起動で
+        # 両方同時に落ちて Ready 化が遅れる。required にするほどではない。
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/managed-by: envoy-gateway
+              topologyKey: kubernetes.io/hostname
+  envoyGateway:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        memory: 512Mi

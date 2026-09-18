@@ -258,7 +258,8 @@ apiserver・Loki・Discord・GitHub・npm・crates・SeaweedFS・Prometheus・ho
 `taskflow-openrouter-smoke` は api.anthropic.com を書かないので、env が効かず Anthropic に
 飛んだら drop されて落ちる。`taskflow-llm-gateway-smoke`（#942）は **openrouter.ai を書かない**
 ので、gateway を経由せず Pod が直接出ようとしたら落ちる — 「外に出ているのは gateway だけ」を
-緑/赤で判定できる形にしてある。後者の handler は資格情報を一切持たない。
+緑/赤で判定できる形にしてある。後者の handler は LLM の資格情報を持たない
+（gateway のクライアントキーだけを持つ。実キーは gateway 側にしかない）。
 
 ## claude-code-build (1 policy)
 

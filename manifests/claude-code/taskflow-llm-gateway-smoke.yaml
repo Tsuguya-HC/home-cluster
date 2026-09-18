@@ -143,6 +143,31 @@ spec:
                 # 「gateway に繋がらない」と区別がつく。
                 [ -n "$ANTHROPIC_AUTH_TOKEN" ] || escalate "クライアントキーが空。llm-gateway-client-keys Secret を確認すること。gateway 経路は一切確かめていない。"
 
+                # --- 否定側の見張り -------------------------------------------------
+                # **SecurityPolicy が外れていても、この下の happy path は緑のまま通る。**
+                # Secret 側の事故は 500 で fail-closed だが、targetRefs が外れる・2 本目が
+                # Conflicted で黙って無視される、は fail-open で、アクセスログの
+                # 「tf.handler あり / llm.client 空」以外に兆候が無い。だから毎回
+                # 「鍵が無ければ拒まれる」ことを確かめる。これが無いと、認証が丸ごと
+                # 効かなくなった状態で smoke だけ緑になる。
+                #
+                # 401 は apiKeyAuth が sendLocalReply + StopIteration で返すのでルーティング
+                # 前に止まり、**上流に行かない＝トークンを消費しない**（Max の枠も食わない）。
+                # 逆に 200 が返ったら認証が効いていない証拠で、そのときだけ 1 トークン払う。
+                BAD=$(curl -s --max-time 10 -o /dev/null -w '%{http_code}' \
+                  -X POST \
+                  -H "Authorization: Bearer this-key-is-deliberately-invalid" \
+                  -H 'content-type: application/json' \
+                  -H 'anthropic-version: 2023-06-01' \
+                  --data '{"model":"'"$ALIAS"'","max_tokens":1,"messages":[{"role":"user","content":"x"}]}' \
+                  "${ANTHROPIC_BASE_URL}/v1/messages" || true)
+                case "$BAD" in
+                  401) echo "否定側 OK: 無効な鍵は 401（alias=$ALIAS）" ;;
+                  000|"") escalate "gateway に接続できない（否定側の確認が届かなかった）。CNP と Envoy を確認すること。alias=$ALIAS の確認はしていない。" ;;
+                  500) escalate "gateway が 500 を返した。SecurityPolicy の翻訳エラー（Secret の参照ミス・鍵の値の重複・Secret 消失）が疑われる。alias=$ALIAS の確認はしていない。" ;;
+                  *) escalate "無効な鍵が 401 以外（HTTP $BAD）で通った。**呼び出し側の認証が効いていない** — SecurityPolicy の付け忘れ、targetRefs の外れ、2 本目が Conflicted で無視された等。alias=$ALIAS。" ;;
+                esac
+
                 # activeDeadlineSeconds の TERM は PID1 に飛ぶ。前面で待つと POSIX sh は
                 # 前面コマンドの終了まで trap を実行しないので、background + wait にする。
                 claude -p "/workspace/ok/report.md に、いま応答しているモデル名だけを 1 行で書いて終了してください。他のファイルは作らないこと。" \

@@ -29,9 +29,9 @@ metadata:
   namespace: claude-code-build
 automountServiceAccountToken: false
 ---
-# 出口は OpenRouter・GitHub・依存の取得先だけ。**api.anthropic.com は書かない** —
-# env が効かずに Anthropic へ落ちる取り違えを、緑で通さないため（manifests/claude-code/
-# taskflow-openrouter-smoke.yaml と同じ考え方）。
+# 出口は llm-gateway・GitHub・依存の取得先だけ。**api.anthropic.com も openrouter.ai も
+# 書かない** — env が効かずに外部 LLM へ直行する取り違えを、緑で通さないため。上流の選択は
+# gateway の仕事で、この Pod は alias しか知らない（#942）。
 # DNS は CCNP allow-dns で全 Pod に共通適用済み。ingress は書かないので全 deny。
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
@@ -43,8 +43,17 @@ spec:
     matchLabels:
       taskflow-implement: "true"
   egress:
+    # 推論は llm-gateway 経由。in-cluster なので toFQDNs ではなく toEndpoints。
+    # 対向の ingress は manifests/llm-gateway/netpol.yaml 側が claude-code-build を含む。
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/managed-by: envoy-gateway
+            io.kubernetes.pod.namespace: llm-gateway
+      toPorts:
+        - ports:
+            - port: "10080"
+              protocol: TCP
     - toFQDNs:
-        - matchName: "openrouter.ai"
         - matchName: "github.com"
         - matchName: "api.github.com"
         - matchPattern: "*.githubusercontent.com"
@@ -122,10 +131,6 @@ spec:
                   topologyKey: kubernetes.io/hostname
         volumes:
           - name: tmp
-            emptyDir: {}
-          # ブローカー専用。agent と tmp を共有すると「エージェントから読めない環境」という
-          # 設計前提と矛盾する（今はトークンをファイルに書かないので実害は無いが、共有点を残さない）。
-          - name: broker-tmp
             emptyDir: {}
           - name: parts
             emptyDir: {}
@@ -244,60 +249,14 @@ spec:
             resources:
               requests: {cpu: 10m, memory: 16Mi}
               limits: {cpu: 100m, memory: 64Mi}
-          # OpenRouter の API キーをエージェントの届かない場所に置くためのサイドカー。
-          #
-          # エージェントは信頼できない入力（issue 本文）を読んで Bash を実行する。キーが
-          # その環境変数にあると、読み出して作業ツリーや report に書けてしまい、それが
-          # draft PR として PUBLIC リポジトリに出る（CNP は PR を塞げない。正規の経路なので）。
-          # 実値をこのコンテナにだけ置けば、難読化しようが分割しようがエージェントの側に
-          # 元の値が無い。agent は 127.0.0.1 の口だけを知る。
-          #
-          # restartPolicy: Always = native sidecar。ここを付けないと agent が終わっても
-          # Job が完了しない。taskflow が注入する publish も同じ形（job.go:782）。
-          # PID 名前空間は共有しない（shareProcessNamespace を書かない）ので、agent 側の
-          # root からこのプロセスの environ は読めない。
-          - name: openrouter-broker
-            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:f4bf69bfa990c3ebfbcc23fe666005a56377b5dc2a2ee1919dca5e54e31f174e
-            restartPolicy: Always
-            command: [node, /usr/local/bin/openrouter-broker.js]
-            env:
-              - name: OPENROUTER_TOKEN
-                valueFrom:
-                  secretKeyRef:
-                    name: openrouter-token
-                    key: credential
-              - name: BROKER_PORT
-                value: "8787"
-              - name: HOME
-                value: /tmp
-            securityContext:
-              # agent（65533）とも init（65532）とも別に見えるが、ここで重要なのは
-              # コンテナが分かれていること自体。uid は非 root であればよい。
-              runAsUser: 65532
-              runAsNonRoot: true
-              readOnlyRootFilesystem: true
-              allowPrivilegeEscalation: false
-              capabilities: {drop: [ALL]}
-            volumeMounts:
-              - {name: broker-tmp, mountPath: /tmp}
-            # native sidecar は「プロセスが起動した」だけで次へ進んでよいと判定され、port を
-            # listen したかは見ない。agent が claude を呼ぶまでに mkfs/mount/clone/issue 取得を
-            # 挟むので実害は出ていないが、それは偶然の遅延に依存しているだけなので保証を足す。
-            # ブローカーに health エンドポイントは無く HTTP GET は許可リストで 403 になるため TCP。
-            # **tcpSocket / httpGet の probe は Pod の IP に接続する（127.0.0.1 ではない）。**
-            # ブローカーは 127.0.0.1 だけに bind しているので、そちらを使うと probe が必ず失敗し、
-            # kubelet がコンテナを殺す → 再起動 → また殺される、を繰り返して agent が永久に
-            # 起動待ちになる（2026-09-15、実際にそうなった。restarts=7 / exitCode=0）。
-            # exec はコンテナの中で走るので localhost が効く。許可リストにより `GET /` は
-            # 403 を返すが、curl は 403 でも終了コード 0 なので「繋がった」の判定に使える。
-            startupProbe:
-              exec:
-                command: [curl, -s, --max-time, "2", -o, /dev/null, "http://127.0.0.1:8787/"]
-              periodSeconds: 1
-              failureThreshold: 10
-            resources:
-              requests: {cpu: 50m, memory: 64Mi}
-              limits: {cpu: 500m, memory: 256Mi}
+        # LLM の API キーはこの Pod のどのコンテナにも無い（#942）。
+        #
+        # エージェントは信頼できない入力（issue 本文）を読んで Bash を実行する。キーが
+        # その環境変数にあると、読み出して作業ツリーや report に書けてしまい、それが
+        # draft PR として PUBLIC リポジトリに出る（CNP は PR を塞げない。正規の経路なので）。
+        # 2026-09-18 まではこれを openrouter-broker サイドカーで隔てていた（同じ Pod でも
+        # 別コンテナなら environ は読めない）が、実キーが llm-gateway に移ったので不要になった。
+        # agent が知っているのは gateway の URL と alias だけ。
         containers:
           - name: agent
             image: registry.infra.tgy.io/tools/claude-code:latest@sha256:f4bf69bfa990c3ebfbcc23fe666005a56377b5dc2a2ee1919dca5e54e31f174e
@@ -459,7 +418,8 @@ spec:
                         ANTHROPIC_BASE_URL="$ANTHROPIC_BASE_URL" \
                         ANTHROPIC_AUTH_TOKEN="$ANTHROPIC_AUTH_TOKEN" \
                         ANTHROPIC_API_KEY= \
-                        CLAUDE_CODE_SUBAGENT_MODEL="$OPENROUTER_MODEL" \
+                        ANTHROPIC_CUSTOM_HEADERS="$ANTHROPIC_CUSTOM_HEADERS" \
+                        CLAUDE_CODE_SUBAGENT_MODEL="$LLM_ALIAS" \
                         CARGO_HOME=/scratch/cargo \
                         XDG_DATA_HOME=/scratch/xdg-data \
                         "$@"
@@ -513,7 +473,7 @@ spec:
                 # claude は作業ツリー（/scratch/src）ではなく workingDir の /workspace で
                 # 起動してしまうので、run_tests と同じく sh -c 越しに cd する。
                 #
-                # timeout はブローカーが 1 回落ちて claude CLI が長時間ブロックしたときに、
+                # timeout は gateway が一時的に落ちて claude CLI が長時間ブロックしたときに、
                 # Job 全体の timeout: 60m を丸ごと・maxInfraRetries を診断情報ゼロで消費するのを
                 # 防ぐための下限。exec するので timeout の終了コードがそのまま run_agent の
                 # 戻り値になり、claude 自身の非ゼロ終了と呼び出し側で区別できる。
@@ -529,16 +489,16 @@ spec:
                   log="$1"; timeout_dur="$2"; shift 2
                   supervise as_agent sh -c "cd /scratch/src && exec timeout -k 10 '$timeout_dur' claude \"\$@\"" claude "$@" < /dev/null > "$log" 2>&1
                 }
-                # ブローカーのポートに繋がらない（起動前・クラッシュ中・再起動中）と、claude は
+                # gateway に繋がらない（Envoy が落ちている・CNP が閉じている）と、claude は
                 # upstream の 5xx とは違って error_status:null/"unknown" のまま延々リトライし続け、
-                # run_agent の timeout（15m/30m）に達するまで気付けない（実測）。claude を呼ぶ前に
-                # 生死だけ先に見て、繋がらないなら呼ばずに確定した報告を残す。
-                # GET / は許可リストで 403 を返す — これは「繋がっている」ことの確認であって異常
-                # ではない（--fail を付けないので curl は 403 でも exit 0）。exit 7=接続不可、
-                # 28=タイムアウトの場合だけ異常とする。upstream 側の 5xx は claude 自身のリトライと
-                # CLAUDE_RC の捕捉で十分な診断が出るので、ここでは見ない。
-                check_broker() {
-                  curl -s --max-time 2 -o /dev/null "http://127.0.0.1:8787/"
+                # run_agent の timeout（15m/30m）に達するまで気付けない（実測。相手がブローカー
+                # だった頃と同じ症状）。claude を呼ぶ前に生死だけ先に見て、繋がらないなら呼ばずに
+                # 確定した報告を残す。
+                # GET は 404 が返る（推論は POST /v1/messages で、かつ alias ヘッダが要る）— これは
+                # 「Envoy が応答した」ことの確認であって異常ではない（--fail を付けないので curl は
+                # 404 でも exit 0）。exit 7=接続不可、28=タイムアウトの場合だけ異常とする。
+                check_gateway() {
+                  curl -s --max-time 2 -o /dev/null "http://llm-gateway.llm-gateway.svc.cluster.local/anthropic/"
                 }
 
                 # --- 0. 依存の取得 --------------------------------------------------
@@ -565,8 +525,8 @@ spec:
                 fi
 
                 # --- 2. テストだけ書かせる ----------------------------------------
-                check_broker \
-                  || give_up "openrouter-broker（127.0.0.1:8787）に接続できない。実装は行っていない。サイドカーの状態は kubectl describe pod で確認すること。"
+                check_gateway \
+                  || give_up "llm-gateway に接続できない。実装は行っていない。llm-gateway namespace の Envoy と、claude-code-build 側／llm-gateway 側の CNP を確認すること。"
                 # set -eu の下では、if/&&/|| に囲まれていない単純コマンドが非ゼロで
                 # 終わった瞬間にスクリプトごと落ちる。次の行で $? を読む形は、その1行に
                 # 到達すること自体がない（done も escalate も書かれず NoAnswer になる）。
@@ -579,7 +539,7 @@ spec:
                   --verbose --output-format stream-json \
                   --dangerously-skip-permissions \
                   --allowedTools "Bash,Read,Write,Edit,Glob,Grep" \
-                  --model "$OPENROUTER_MODEL" \
+                  --model "$LLM_ALIAS" \
                   --max-turns 60 || CLAUDE_RC=$?
                 # 終了コードを握り潰すと、モデル slug 無効・認証失敗・クレジット切れが
                 # 全部「テストが 1 行も書かれなかった」に化ける。実態を先に報告する。
@@ -587,7 +547,7 @@ spec:
                 # ではなく SIGTERM の 143、KILL まで行けば 137 を返す）で、claude 自身の失敗
                 # ではない。
                 if [ "$CLAUDE_RC" -eq 124 ] || [ "$CLAUDE_RC" -eq 143 ]; then
-                  { echo "テストの回の claude が 15m で打ち切られた（timeout の exit ${CLAUDE_RC}。claude 自身の失敗ではない）。ブローカー（127.0.0.1:8787）の疎通を確認すること。実装には進んでいない。"
+                  { echo "テストの回の claude が 15m で打ち切られた（timeout の exit ${CLAUDE_RC}。claude 自身の失敗ではない）。llm-gateway の疎通を確認すること。実装には進んでいない。"
                     echo
                     echo "stream-json の末尾:"
                     tail -20 /tmp/claude-tests.log
@@ -639,8 +599,8 @@ spec:
                 # いると、2 回目の PR 本文の「## 実装の回」にテストの回の文章が載る。prepare が
                 # 敷いた宣言ディレクトリなので、消してもこの handler 自身が困ることはない。
                 find /workspace/done -mindepth 1 -delete 2>/dev/null || true
-                check_broker \
-                  || give_up "openrouter-broker（127.0.0.1:8787）に接続できない。PR は作っていない。サイドカーの状態は kubectl describe pod で確認すること。"
+                check_gateway \
+                  || give_up "llm-gateway に接続できない。PR は作っていない。llm-gateway namespace の Envoy と、claude-code-build 側／llm-gateway 側の CNP を確認すること。"
                 CLAUDE_RC=0
                 run_agent /tmp/claude-implement.log 30m \
                   -p "/implement ${REPO} の issue #${ISSUE}" \
@@ -649,11 +609,11 @@ spec:
                   --verbose --output-format stream-json \
                   --dangerously-skip-permissions \
                   --allowedTools "Bash,Read,Write,Edit,Glob,Grep" \
-                  --model "$OPENROUTER_MODEL" \
+                  --model "$LLM_ALIAS" \
                   --max-turns 120 || CLAUDE_RC=$?
                 # 124/143 は run_agent 内の timeout 由来（打ち切り）。上のテストの回と同じ理由。
                 if [ "$CLAUDE_RC" -eq 124 ] || [ "$CLAUDE_RC" -eq 143 ]; then
-                  { echo "実装の回の claude が 30m で打ち切られた（timeout の exit ${CLAUDE_RC}。claude 自身の失敗ではない）。ブローカー（127.0.0.1:8787）の疎通を確認すること。PR は作っていない。"
+                  { echo "実装の回の claude が 30m で打ち切られた（timeout の exit ${CLAUDE_RC}。claude 自身の失敗ではない）。llm-gateway の疎通を確認すること。PR は作っていない。"
                     echo
                     echo "stream-json の末尾:"
                     tail -20 /tmp/claude-implement.log
@@ -715,8 +675,19 @@ spec:
                 # 書いて降りた後でも、緑判定が通れば PR まで進んでしまう。捨てずに PR 本文へ
                 # 畳み込む（下で escalate ディレクトリを空にする前に読む）。
                 ESCALATE_NOTE=$(cat /workspace/escalate/report.md 2>/dev/null || true)
+                # gateway 経由になったので、この Pod が知っているのは alias だけ（実モデルは
+                # gateway 側で決まる）。「どのモデルが書いたか」は PR を読む人が要る情報なので、
+                # stream-json の応答が名乗った実モデルを拾う。拾えなければ拾えないと書く —
+                # alias をモデル名のふりをさせない。
+                ACTUAL_MODEL=$(grep -o '"model":"[^"]*"' /tmp/claude-implement.log 2>/dev/null \
+                  | cut -d'"' -f4 | grep -v "^$LLM_ALIAS$" | head -1)
+                if [ -n "$ACTUAL_MODEL" ]; then
+                  MODEL_NOTE="${ACTUAL_MODEL}（llm-gateway の alias ${LLM_ALIAS} 経由）"
+                else
+                  MODEL_NOTE="alias ${LLM_ALIAS}（llm-gateway 経由。応答したモデルは特定できなかった）"
+                fi
                 PR_BODY=$(printf 'closes #%s\n\n実装 handler（%s）が TDD で書いた。テストを先に書き、赤を観測してから実装している。\n\n## テストの回\n\n%s\n\n## 実装の回\n\n%s\n' \
-                    "$ISSUE" "$OPENROUTER_MODEL" "$(cat /tmp/tests-report.md)" "$(cat /workspace/done/report.md 2>/dev/null || echo '(報告なし)')")
+                    "$ISSUE" "$MODEL_NOTE" "$(cat /tmp/tests-report.md)" "$(cat /workspace/done/report.md 2>/dev/null || echo '(報告なし)')")
                 if [ -n "$ESCALATE_NOTE" ]; then
                   PR_BODY=$(printf '%s\n\n## エージェントが escalate に書いていたこと（テストは緑だったため PR は作成）\n\n%s\n' "$PR_BODY" "$ESCALATE_NOTE")
                 fi
@@ -733,16 +704,24 @@ spec:
                 printf '%s\n' "$PR_URL" >> /workspace/done/report.md
                 sync
             env:
-              # ブローカー宛。実キーはこのコンテナには無い（openrouter-broker が持つ）。
+              # 推論は llm-gateway 経由（#942）。**この Pod は LLM の資格情報を持たない** —
+              # 実キーは gateway の BackendSecurityPolicy 側にしかなく、gateway が
+              # Authorization を付け直す。openrouter-broker サイドカーはこれで不要になった。
               - name: ANTHROPIC_BASE_URL
-                value: http://127.0.0.1:8787/api
+                value: http://llm-gateway.llm-gateway.svc.cluster.local/anthropic
               # claude は値が空だと起動しないので置くが、**これは資格情報ではない**。
-              # ブローカーがクライアントの名乗る Authorization を捨てて付け直すので、
-              # ここに何が入っていても OpenRouter には届かない。
               - name: ANTHROPIC_AUTH_TOKEN
-                value: handled-by-openrouter-broker
-              - name: OPENROUTER_MODEL
-                value: meta/muse-spark-1.3-contributor
+                value: handled-by-llm-gateway
+              # 空にしないと OAuth 側が優先されて Anthropic 直行になる（そちらは CNP で落ちる）。
+              - name: ANTHROPIC_API_KEY
+                value: ""
+              # どの handler からの呼び出しかを gateway に名乗る。アクセスログの tf.handler に出る。
+              - name: ANTHROPIC_CUSTOM_HEADERS
+                value: "x-tf-handler: taskflow-implement"
+              # gateway の alias。実モデル（今は OpenRouter の一つ）は gateway 側で決まるので、
+              # 上流を替えてもこの Pod は変わらない。
+              - name: LLM_ALIAS
+                value: implement
               - name: GOPROXY
                 value: "off"
               - name: GOTOOLCHAIN

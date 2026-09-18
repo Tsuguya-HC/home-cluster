@@ -48,7 +48,7 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 | Workflow pods (claude-code) | SeaweedFS filer (seaweedfs) | 8333 | Artifact/log storage |
 | Workflow pods (rss) | SeaweedFS filer (seaweedfs) | 8333 | Artifact/log storage |
 | Workflow pods (claude-code) | Loki gateway (monitoring) | 8080 | Log query (logcli) |
-| Workflow pods (claude-code-build) | Envoy data plane (llm-gateway) | 10080 | LLM API（alias 経由）**次段階。handler 側 egress は未実装** |
+| Workflow pods (claude-code-build) | Envoy data plane (llm-gateway) | 10080 | LLM API（alias 経由）。taskflow-implement |
 | Workflow pods (claude-code) | Envoy data plane (llm-gateway) | 10080 | LLM API（alias 経由）。claude-code の全 handler |
 | Envoy data plane (llm-gateway) | Envoy Gateway (envoy-gateway-system) | 18000 | xDS |
 | Envoy Gateway (envoy-gateway-system) | Agent Router (envoy-ai-gateway-system) | 1063 | extension server gRPC（xDS 変換） |
@@ -263,20 +263,19 @@ apiserver・Loki・Discord・GitHub・npm・crates・SeaweedFS・Prometheus・ho
 
 | Component | Ingress | Egress |
 |---|---|---|
-| **taskflow-implement** (taskflow-implement=true) | (書かない = 全 deny) | openrouter.ai + github.com + api.github.com + *.githubusercontent.com + index.crates.io + static.crates.io + registry.npmjs.org :443 |
+| **taskflow-implement** (taskflow-implement=true) | (書かない = 全 deny) | llm-gateway:10080 + github.com + api.github.com + *.githubusercontent.com + index.crates.io + static.crates.io + registry.npmjs.org :443 |
 
 `claude-code` とは別 namespace（PSA が `privileged`。Kata ゲスト内で `volumeMode: Block` を
-mkfs するため、docs/pod-security.md）にしてあるので CNP も分けて持つ。推論は Anthropic ではなく
-OpenRouter で、**`api.anthropic.com` は開けていない** — env が効かず Anthropic へ落ちる取り違えを
-緑で通さないため（`taskflow-openrouter-smoke.yaml` と同じ考え方）。`index.crates.io` /
-`static.crates.io` / `registry.npmjs.org` は依存の取得用で、対応する言語を足すときはここも
-足す必要がある（宛先が無いと失敗ではなくハングする）。
+mkfs するため、docs/pod-security.md）にしてあるので CNP も分けて持つ。推論は 2026-09-18 に
+llm-gateway 経由へ移した（#942）。**`api.anthropic.com` も `openrouter.ai` も開けていない** —
+env が効かず外部 LLM へ直行する取り違えを緑で通さないため。上流の選択は gateway の仕事で、
+この Pod は alias しか知らない。`index.crates.io` / `static.crates.io` / `registry.npmjs.org` は
+依存の取得用で、対応する言語を足すときはここも足す必要がある（宛先が無いと失敗ではなくハングする）。
 
-実際に openrouter.ai へ喋るのは `openrouter-broker` サイドカーだけで、`agent` コンテナは
-127.0.0.1:8787 しか知らない設計（`manifests/claude-code-build/taskflow-implement.yaml`）。
-それでも openrouter.ai の egress を agent 用に別途絞ることはできない — **CNP は Pod 単位
-（同一 identity）で、同じ Pod 内のコンテナを分離できない**ため。将来「なぜ agent にまだ
-openrouter.ai への直接到達があるのか」を漏れと誤診しないための記録。
+2026-09-18 まで `openrouter.ai` への egress と `openrouter-broker` サイドカーを持っていた。
+ブローカーは鍵を `agent` コンテナから隔てるためのもので、**CNP は Pod 単位（同一 identity）なので
+同じ Pod 内のコンテナを分離できない**という制約への対処だった。鍵が gateway へ移った今は
+ブローカーごと不要になり、この Pod からの外部 LLM 到達性そのものが無くなっている。
 
 ## image-build (2 policies)
 

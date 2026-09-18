@@ -32,8 +32,10 @@ Application が Unknown のまま止まる形で出る。
 
 ## OpenRouter
 
-- **用途**: 実行系 handler の LLM 呼び出し。今は `llm-gateway`（Agent Router のデータプレーン）と
-  `claude-code-build` の openrouter-broker サイドカーの 2 経路があり、handler の切り替えが済めば前者だけになる
+- **用途**: 実行系 handler の LLM 呼び出し（`implement` alias）
+- **引く側**: Envoy データプレーン（`manifests/llm-gateway/netpol.yaml`）**だけ**。
+  `claude-code-build` の openrouter-broker サイドカーは 2026-09-18 に廃止した。
+  ただし `claude-code` の `taskflow-openrouter-smoke` は直行のまま（gateway を通さない経路の smoke）
 - **Port**: 443
 
 | Domain | Required | Notes |

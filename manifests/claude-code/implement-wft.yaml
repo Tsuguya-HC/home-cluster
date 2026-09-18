@@ -312,7 +312,7 @@ spec:
             value: ""
           # どの handler からの呼び出しかを gateway に名乗る（アクセスログの tf.handler）。
           - name: ANTHROPIC_CUSTOM_HEADERS
-            value: "x-tf-handler: implement-wft"
+            value: "x-tf-handler: implement"
           # サブエージェントは親のモデルを継がない。親と同じ alias に括り付ける。
           - name: CLAUDE_CODE_SUBAGENT_MODEL
             value: review
@@ -594,7 +594,7 @@ spec:
             value: ""
           # どの handler からの呼び出しかを gateway に名乗る（アクセスログの tf.handler）。
           - name: ANTHROPIC_CUSTOM_HEADERS
-            value: "x-tf-handler: implement-wft"
+            value: "x-tf-handler: implement-verify"
           # サブエージェントは親のモデルを継がない。親と同じ alias に括り付ける。
           - name: CLAUDE_CODE_SUBAGENT_MODEL
             value: review

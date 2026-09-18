@@ -318,6 +318,9 @@ spec:
               # 空にしないと OAuth 側が優先されて Anthropic 直行になる（そちらは CNP で落ちる）。
               - name: ANTHROPIC_API_KEY
                 value: ""
+              # どの handler からの呼び出しかを gateway に名乗る。アクセスログの tf.handler に出る。
+              - name: ANTHROPIC_CUSTOM_HEADERS
+                value: "x-tf-handler: pr-review"
               # サブエージェントは親のモデルを継がない。固定しないと既定（sonnet）に落ち、
               # gateway にマッチするルートが無くなる。親と同じ alias に括り付けて、
               # 上流と課金主体が親子で割れないようにする。

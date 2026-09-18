@@ -84,7 +84,7 @@ data:
     if [ -n "$API_STATUS" ] && [ "$API_STATUS" != "null" ]; then
       echo "**API が HTTP ${API_STATUS} を返しています**。エージェントの判断ではなく実行基盤側の問題です。"
       case "$API_STATUS" in
-        401|403) echo; echo "認証の失敗です。\`claude-code-token\` の期限切れ・失効を確認してください。" ;;
+        401|403) echo; echo "認証の失敗です。handler は資格情報を持ちません。llm-gateway 側の \`claude-max-apikey\` を確認してください。" ;;
         429)     echo; echo "レート制限です。時間をおいて再実行すれば通る見込みです。" ;;
         5*)      echo; echo "API 側の障害の可能性があります。https://status.anthropic.com を確認してください。" ;;
       esac

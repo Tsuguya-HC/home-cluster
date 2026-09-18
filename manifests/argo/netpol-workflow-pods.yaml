@@ -20,6 +20,8 @@ spec:
         operator: DoesNotExist
       - key: aqua-checksum
         operator: DoesNotExist
+      - key: pluto-check
+        operator: DoesNotExist
   ingressDeny:
     - fromEntities:
         - world
@@ -58,32 +60,4 @@ spec:
       toPorts:
         - ports:
             - port: "50000"
-              protocol: TCP
----
-# pluto-check の推論だけが llm-gateway を通る（#942）。**上の workflow-pods に足さない** —
-# あちらは `workflows.argoproj.io/workflow` Exists で選ぶので、renovate / tofu-harbor まで
-# Max の alias への出口を持ってしまう（除外リストに入っていない）。Cilium の identity は
-# ServiceAccount を持つので、pluto-check の SA だけを選ぶ。
-# CNP は加算なので、これは workflow-pods が与える egress に足されるだけ（何も塞がない）。
-# 対向の ingress も manifests/llm-gateway/netpol.yaml 側で同じ SA に絞ってある。
-#
-# in-cluster 宛なので toFQDNs でも toCIDR でもなく toEndpoints。workflow-pods の
-# `toCIDR: 0.0.0.0/0`:443 は Pod の identity には評価されないため、あれでは届かない。
-apiVersion: cilium.io/v2
-kind: CiliumNetworkPolicy
-metadata:
-  name: pluto-check-llm-gateway
-  namespace: argo
-spec:
-  endpointSelector:
-    matchLabels:
-      io.cilium.k8s.policy.serviceaccount: pluto-checker
-  egress:
-    - toEndpoints:
-        - matchLabels:
-            app.kubernetes.io/managed-by: envoy-gateway
-            io.kubernetes.pod.namespace: llm-gateway
-      toPorts:
-        - ports:
-            - port: "10080"
               protocol: TCP

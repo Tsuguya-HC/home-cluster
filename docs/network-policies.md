@@ -165,8 +165,8 @@ Application が Unknown のまま一度もレンダリングされない**（ghc
 | **talos-extension-bump-sensor** | (deny world) | kube-apiserver, eventbus:4222 |
 | **events-controller** | host → 8081 | kube-apiserver, eventbus:8222 |
 | **eventbus** | eventsource (github-webhook), alertmanager-eventsource (alertmanager-webhook), task-dispatch-eventsource (task-dispatch), task-status-sync-eventsource (task-status-sync), argocd-deployed-eventsource (argocd-deployed), sensors (tofu-cloudflare, tofu-unifi, tofu-harbor, upgrade-k8s, pxe-sync, talos-build, images-build, single-repo-build, alert-investigate, task-dispatch, task-status-sync, talos-extension-bump, renovate-webhook, aqua-checksum, pr-review-dispatch) → 4222; self → 6222/7777; events-controller → 8222 | self:6222/7777 |
-| **workflow-pods** (backup-workflow, pxe-sync, talos-build, kanidm-repl-exchange, kanidm-backup, aqua-checksum除外) | (deny world) | kube-apiserver, HTTPS 443, kube-apiserver/remote-node/host:50000 (Talos apid — node IP は node identity を持つので toCIDR では一致しない), seaweedfs-filer (seaweedfs):8333 |
-| **pluto-check-llm-gateway** (SA `pluto-checker`) | — | llm-gateway-envoy (llm-gateway):10080 |
+| **workflow-pods** (backup-workflow, pxe-sync, talos-build, kanidm-repl-exchange, kanidm-backup, aqua-checksum, pluto-check除外) | (deny world) | kube-apiserver, HTTPS 443, kube-apiserver/remote-node/host:50000 (Talos apid — node IP は node identity を持つので toCIDR では一致しない), seaweedfs-filer (seaweedfs):8333 |
+| **pluto-check** (pluto-check=true) | (deny world) | kube-apiserver:6443, seaweedfs-filer (seaweedfs):8333, llm-gateway-envoy (llm-gateway):10080, github.com + api.github.com + discord.com :443 |
 | **etcd-backup** (backup-workflow=true) | (deny world) | kube-apiserver:6443/50000 (Talos apid), *.r2.cloudflarestorage.com:443, seaweedfs-filer (seaweedfs):8333 |
 | **pxe-sync** (pxe-sync=true) | (deny world) | kube-apiserver, github.com + api.github.com + *.githubusercontent.com + dl-cdn.alpinelinux.org :443, seaweedfs-filer (seaweedfs):8333, QNAP NAS (192.168.5.240):2049 (NFS) |
 | **kanidm-backup** (kanidm-backup=true) | (deny world) | kube-apiserver, *.r2.cloudflarestorage.com:443, seaweedfs-filer (seaweedfs):8333 |
@@ -498,12 +498,16 @@ Agent Router のデータプレーン（issue #942）。alias（`x-ai-eg-model`�
 `argo` の `pluto-check` も 2026-09-18 に gateway 経由へ切り替えた。**Anthropic に直行するよう
 設定された Pod はもう無い。**
 
-ただし `pluto-check` だけは**クラスタが経路を強制していない**。他の 2 namespace は env が壊れて
-直行に倒れると CNP で drop されて落ちる（＝取り違えが緑で通らない）が、argo の `workflow-pods` は
-`toCIDR: 0.0.0.0/0`:443 を持ち、これは他の workflow Pod が使うので外せない。今は資格情報が無いので
-どのみち失敗するが、**「gateway 経由である」ことは設定の話であって到達性の話ではない**。
-揃えるなら `pluto-check` を `workflow-pods` の除外リストへ移して専用 CNP を持たせることになるが、
-exit hook の discord-notify が同じ Pod ラベルを共有する問題を先に片付ける必要がある。
+`pluto-check` は `workflow-pods` の除外リストへ移し、専用の `netpol-pluto-check.yaml` を持たせた。
+狙いは `toCIDR: 0.0.0.0/0`:443 を外すこと — あれが効いていると env が壊れて直行に倒れても
+ネットワーク的には通ってしまい、「gateway 経由である」ことを設定でしか担保できない。
+**これで 3 つの namespace すべてで、直行は drop されて落ちる。**
+
+onExit の Discord 通知 Pod にも `podMetadata.labels` が乗るので、専用 CNP には `discord.com` が
+要る（`netpol-aqua-checksum.yaml` が実測で踏んでいる）。同じラベルを共有する以上、ai-fix の
+エージェントからも discord.com に届く — `taskflow-pr-review` で開けていない理由がここには
+当てはまらないのは、あの flow が読むのが攻撃者の書ける PR diff なのに対し、こちらが読むのは
+pluto の出力と自リポジトリだからで、**論拠が違うだけで無害だからではない**。
 
 残る外部 LLM への直行は `claude-code-build` の `taskflow-implement` で、openrouter-broker
 サイドカー経由で `openrouter.ai` に出る。それを倒すまで「外部 LLM への egress は llm-gateway

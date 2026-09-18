@@ -56,6 +56,12 @@ metadata:
 spec:
   activeDeadlineSeconds: 2400
   serviceAccountName: pluto-checker
+  # netpol-pluto-check.yaml がこのラベルで選ぶ。付けると workflow-pods の
+  # `toCIDR: 0.0.0.0/0`:443 から外れるので、env が壊れて外部 LLM へ直行したら
+  # drop されて落ちる（claude-code / claude-code-build と同じ検出）。
+  podMetadata:
+    labels:
+      pluto-check: "true"
   entrypoint: main
   templates:
     - name: main

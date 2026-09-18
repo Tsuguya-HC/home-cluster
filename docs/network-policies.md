@@ -49,7 +49,7 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 | Workflow pods (rss) | SeaweedFS filer (seaweedfs) | 8333 | Artifact/log storage |
 | Workflow pods (claude-code) | Loki gateway (monitoring) | 8080 | Log query (logcli) |
 | Workflow pods (claude-code-build) | Envoy data plane (llm-gateway) | 10080 | LLM API（alias 経由）**次段階。handler 側 egress は未実装** |
-| Workflow pods (claude-code) | Envoy data plane (llm-gateway) | 10080 | LLM API（alias 経由）。現状は taskflow-llm-gateway-smoke と taskflow-pr-review |
+| Workflow pods (claude-code) | Envoy data plane (llm-gateway) | 10080 | LLM API（alias 経由）。claude-code の全 handler |
 | Envoy data plane (llm-gateway) | Envoy Gateway (envoy-gateway-system) | 18000 | xDS |
 | Envoy Gateway (envoy-gateway-system) | Agent Router (envoy-ai-gateway-system) | 1063 | extension server gRPC（xDS 変換） |
 | Prometheus (monitoring) | Agent Router (envoy-ai-gateway-system) | 8080 | Metrics scrape |
@@ -202,11 +202,11 @@ Application が Unknown のまま一度もレンダリングされない**（ghc
 
 | Component | Ingress | Egress |
 |---|---|---|
-| **claude-code** (claude-code=true) | (deny world) | kube-apiserver, api.anthropic.com + github.com + api.github.com + *.githubusercontent.com + index.crates.io + static.crates.io + registry.npmjs.org + discord.com + gitmcp.io :443, seaweedfs-filer (seaweedfs):8333, loki-gateway (monitoring):8080, prometheus (monitoring):9090, horenso (horenso):3000, task-dispatch-eventsource (argo):12002, argocd-server (argocd):8080 |
+| **claude-code** (claude-code=true) | (deny world) | kube-apiserver, llm-gateway (llm-gateway):10080, github.com + api.github.com + *.githubusercontent.com + index.crates.io + static.crates.io + registry.npmjs.org + discord.com + gitmcp.io :443, seaweedfs-filer (seaweedfs):8333, loki-gateway (monitoring):8080, prometheus (monitoring):9090, horenso (horenso):3000, task-dispatch-eventsource (argo):12002, argocd-server (argocd):8080 |
 | **task-submitter** (task-submitter=true) | (deny world) | kube-apiserver, discord.com:443, seaweedfs-filer (seaweedfs):8333 |
 | **taskflow-pr-review** (taskflow-pr-review=true) | (書かない = 全 deny) | github.com + api.github.com :443, llm-gateway (llm-gateway):10080 |
-| **taskflow-cnp-check** (taskflow-cnp-check=true) | (書かない = 全 deny) | kube-apiserver:6443, api.anthropic.com + github.com + api.github.com :443, loki-gateway (monitoring):8080 |
-| **taskflow-cnp-report** (taskflow-cnp-report=true) | (書かない = 全 deny) | api.anthropic.com + discord.com + github.com + api.github.com :443 |
+| **taskflow-cnp-check** (taskflow-cnp-check=true) | (書かない = 全 deny) | kube-apiserver:6443, github.com + api.github.com :443, llm-gateway (llm-gateway):10080, loki-gateway (monitoring):8080 |
+| **taskflow-cnp-report** (taskflow-cnp-report=true) | (書かない = 全 deny) | discord.com + github.com + api.github.com :443, llm-gateway (llm-gateway):10080 |
 | **taskflow-openrouter-smoke** (taskflow-openrouter-smoke=true) | (書かない = 全 deny) | openrouter.ai:443 |
 | **taskflow-llm-gateway-smoke** (taskflow-llm-gateway-smoke=true) | (書かない = 全 deny) | llm-gateway (llm-gateway):10080（Service の port は 80、CNP は backend の 10080） |
 
@@ -216,13 +216,17 @@ discord-notify の exit hook）で、これが無いと起票自体は通って�
 
 `taskflow-pr-review` は**攻撃者が書ける入力（PR の diff）を読む** Pod なので、`claude-code=true` の
 共有ポリシーには相乗りさせない（設計 §8）。apiserver も Loki も store も開いておらず、
-到達できるのは GitHub と Anthropic API だけ。
+到達できるのは GitHub と llm-gateway だけ（推論は gateway 経由。この Pod は LLM の
+資格情報を持たない）。
 
 **この Pod にだけ `discord.com` を開けていない**のは意図的で、他の claude-code Pod との違いはここ。
 Cilium の identity は Pod 単位なので、通知サイドカーのために開けた egress はエージェントの
 コンテナからも到達できる。Discord の webhook は誰でも作れて誰でも読めるため、開いていれば
-注入されたエージェントが `CLAUDE_CODE_OAUTH_TOKEN` を攻撃者自身の webhook へ送れてしまう
-（`github.com` / `api.anthropic.com` は攻撃者が受信ログを読めないのでこの性質が無い）。
+注入されたエージェントが**攻撃者自身が受信ログを読める宛先**を手に入れる。initContainer の
+`parts` が作る GitHub App の installation token や、読んだ private リポの中身がそこへ出ていく。
+LLM の資格情報を handler から外した（#942）後もこの理由は変わらない — 抜ける物が
+`CLAUDE_CODE_OAUTH_TOKEN` から他の資格情報とデータに移っただけで、`github.com` /
+llm-gateway は攻撃者が受信ログを読めないのでこの性質が無い。
 この flow は通知サイドカーを持たず、人間への通知は framework が終端で出す Warning Event /
 `Ready=False` / metric から引く。
 
@@ -231,8 +235,8 @@ Cilium の identity は Pod 単位なので、通知サイドカーのために�
 
 - **調査**（`taskflow-cnp-check`）は点検対象を読むので apiserver と Loki が要る。
   **Discord は開けない** — 通知サイドカーは終端の 報告 にしかなく、Cilium の identity は
-  Pod 単位なので、開けた穴は `CLAUDE_CODE_OAUTH_TOKEN` を持つエージェントのコンテナからも
-  使える（上の taskflow-pr-review と同じ理由）
+  Pod 単位なので、開けた穴はエージェントのコンテナからも使える（上の taskflow-pr-review と
+  同じ理由。攻撃者が受信ログを読める宛先を与えないという話で、LLM トークンの有無ではない）
 - **報告**（`taskflow-cnp-report`）は材料を workspace PVC 越しに受け取るので、
   ネットワークで要るのは推論 API と通知先だけ。**apiserver も Loki も開けない** —
   「材料に無いことは確かめようがない」を、プロンプトの約束ではなく到達可能性で支えている
@@ -487,10 +491,17 @@ CNP を絞って測るときは、apiserver が張り済みの TCP 接続がそ�
 
 Agent Router のデータプレーン（issue #942）。alias（`x-ai-eg-model`）で上流と実モデルが決まる。
 
-**「外部 LLM への egress を持つのはこの namespace だけ」は移行完了後の姿であって、現状はまだ
-そうなっていない。** handler 側にも直接の上流 egress が残っている — `claude-code` は
-`api.anthropic.com`、`claude-code-build` は `openrouter.ai`。claude-code namespace の 12 本の切り替えでそれらを落とし、
-資格情報も handler から外して初めて「唯一の口」になる。
+**`claude-code` namespace の handler は全て gateway 経由**（2026-09-18 に達成）。
+`api.anthropic.com` への直行も `claude-code-token` の参照もあの namespace には残っていない。
+
+ただし**クラスタで Anthropic に直行する Pod はまだある**。`argo` namespace の `pluto-check`
+（`manifests/argo/pluto-check.yaml`）が `claude-code-token` を持って `claude --print` を叩き、
+`netpol-workflow-pods.yaml` の `toCIDR: 0.0.0.0/0`:443 で外に出る。あれも倒すまで
+「Anthropic への egress を持つのは llm-gateway だけ」とは言えない。
+
+残るのは `claude-code-build` の `taskflow-implement` で、こちらは `openrouter.ai` への直行と
+openrouter-broker サイドカーを持つ。それを倒すまで「外部 LLM への egress は llm-gateway だけ」
+は完成しない。
 
 **ingress は namespace 単位で開けている。つまり `claude-code` / `claude-code-build` に Pod を
 足すと、その Pod は alias を名乗るだけで gateway の上流に到達できる。** #942 の第一段階では

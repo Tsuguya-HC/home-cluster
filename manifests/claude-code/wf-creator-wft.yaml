@@ -177,8 +177,26 @@ spec:
             - --verbose --output-format stream-json は必ずセット（Argo UI でログ確認用）
             - --dangerously-skip-permissions で権限プロンプトをスキップ
             - --allowedTools で必要なツールだけ許可
-            - --model sonnet（コスト効率）
+            - --model は llm-gateway の alias を指定する。review（レビュー・実装系）か
+              investigate（調査系）のどちらか。**sonnet のような実モデル名は使わない** —
+              gateway に一致するルートが無く 404 になる
             - --max-turns で暴走防止
+
+            ## 推論の経路（新しい handler には必須）
+            LLM の資格情報は Pod に置かない。gateway が持ち、Pod は alias で呼ぶだけ。
+            Pod に CLAUDE_CODE_OAUTH_TOKEN を渡してはいけない。env は次の 5 本:
+            - ANTHROPIC_BASE_URL: http://llm-gateway.llm-gateway.svc.cluster.local/anthropic
+            - ANTHROPIC_AUTH_TOKEN: handled-by-llm-gateway（資格情報ではない。空だと claude が起動しない）
+            - ANTHROPIC_API_KEY: 空文字（空にしないと OAuth 側が優先されて Anthropic 直行になる）
+            - ANTHROPIC_CUSTOM_HEADERS: x-tf-handler に handler 名（アクセスログの帰属に使う）
+            - CLAUDE_CODE_SUBAGENT_MODEL: --model と同じ alias（サブエージェントは親のモデルを継がない）
+
+            CNP は api.anthropic.com ではなく gateway 宛に開ける。
+            toEndpoints で app.kubernetes.io/managed-by: envoy-gateway かつ
+            io.kubernetes.pod.namespace: llm-gateway、ポートは 10080/TCP。
+            **新しい namespace に置く場合は両端が要る** — manifests/llm-gateway/netpol.yaml の
+            ingress fromEndpoints は namespace を列挙しているので、そこにも足す。
+            片側だけだとエラーは出ず、接続がただ失敗する。
 
             ## Git 操作
             - ブランチ名: wf/<workflow-name>
@@ -198,16 +216,28 @@ spec:
               --output-format stream-json \
               --dangerously-skip-permissions \
               --allowedTools "Bash,Read,Write,Edit,Glob,Grep,Agent" \
-              --model sonnet \
+              --model review \
               "$PROMPT" || true
         env:
           - name: HOME
             value: /claude-home
-          - name: CLAUDE_CODE_OAUTH_TOKEN
-            valueFrom:
-              secretKeyRef:
-                name: claude-code-token
-                key: credential
+          # 推論は llm-gateway 経由（#942）。**この Pod は LLM の資格情報を持たない** —
+          # 実キーは gateway の BackendSecurityPolicy 側にしかなく、gateway が付け直す。
+          - name: ANTHROPIC_BASE_URL
+            value: http://llm-gateway.llm-gateway.svc.cluster.local/anthropic
+          # claude は空だと起動しないので置くが、**これは資格情報ではない**。
+          - name: ANTHROPIC_AUTH_TOKEN
+            value: handled-by-llm-gateway
+          # 空にしないと OAuth 側が優先されて Anthropic 直行になる（CNP で落ちる）。
+          - name: ANTHROPIC_API_KEY
+            value: ""
+          # どの handler からの呼び出しかを gateway に名乗る（アクセスログの tf.handler）。
+          - name: ANTHROPIC_CUSTOM_HEADERS
+            value: "x-tf-handler: wf-creator"
+          # サブエージェントは親のモデルを継がない。固定しないと既定（sonnet）に落ち、
+          # gateway にマッチするルートが無くなる。親と同じ alias に括り付ける。
+          - name: CLAUDE_CODE_SUBAGENT_MODEL
+            value: review
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:

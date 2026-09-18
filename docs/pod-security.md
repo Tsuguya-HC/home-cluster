@@ -20,7 +20,7 @@ Cluster-wide default is **restricted enforce** (configured in Talos `admissionCo
 | gateway | restricted | Pod なし（Cilium agent 内 Envoy で処理） |
 | kanidm | restricted | |
 | kyverno | restricted | |
-| llm-gateway | restricted | Agent Router のデータプレーン（Envoy）。移行完了後は外部 LLM への egress を持つ唯一の ns になる（現状は handler 側にも残る） |
+| llm-gateway | restricted | Agent Router のデータプレーン（Envoy）。claude-code の handler は全てここ経由。未切り替えは claude-code-build の実行系と argo の pluto-check |
 | nfs-provisioner | restricted | |
 | kube-node-lease | restricted | Pod なし |
 | kube-public | restricted | Pod なし |

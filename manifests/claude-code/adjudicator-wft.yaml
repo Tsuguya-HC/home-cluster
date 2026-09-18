@@ -133,9 +133,15 @@ spec:
           # 実キーは gateway の BackendSecurityPolicy 側にしかなく、gateway が付け直す。
           - name: ANTHROPIC_BASE_URL
             value: http://llm-gateway.llm-gateway.svc.cluster.local/anthropic
-          # claude は空だと起動しないので置くが、**これは資格情報ではない**。
+          # gateway のクライアントキー。**LLM の資格情報ではない** — Max の OAuth トークンも
+          # OpenRouter の API キーも gateway 側にしかなく、gateway が Authorization を付け直す。
+          # この鍵が示すのは「どの階層を呼んでよいか」だけで、llm-gateway に届く Pod の
+          # 外では使えない（CNP の内側）。handler 単位で revoke できる。
           - name: ANTHROPIC_AUTH_TOKEN
-            value: handled-by-llm-gateway
+            valueFrom:
+              secretKeyRef:
+                name: llm-gateway-client-keys
+                key: adjudicator
           # 空にしないと OAuth 側が優先されて Anthropic 直行になる（CNP で落ちる）。
           - name: ANTHROPIC_API_KEY
             value: ""

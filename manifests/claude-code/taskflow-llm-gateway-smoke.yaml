@@ -8,8 +8,12 @@
 #   3. **外に出ているのが gateway だけであること** — この CNP は openrouter.ai を**書かない**ので、
 #      env が効かず Pod が直接出ようとしたら drop されて失敗する。取り違えが緑で通らない
 #
-# handler 側は資格情報を持たない。ANTHROPIC_AUTH_TOKEN はダミーで、gateway が
-# BackendSecurityPolicy の鍵で付け直す。これが #942 の「集約」の実物。
+# handler 側は LLM の資格情報を持たない。ANTHROPIC_AUTH_TOKEN に入るのは gateway の
+# クライアントキーで、実キー（Max の OAuth トークン）は BackendSecurityPolicy 側にしか
+# なく、gateway が Authorization を付け直す。これが #942 の「集約」の実物。
+#
+# この smoke は alias を入力で変えられる唯一の handler なので、**両階層の鍵を持つ**
+# （claude-max ルートと implement ルートには別々の SecurityPolicy が掛かっている）。
 #
 # 投げ方（alias 省略時は implement）:
 #   kubectl -n claude-code create -f - <<EOF
@@ -124,6 +128,21 @@ spec:
                 esac
                 echo "alias=$ALIAS"
 
+                # **鍵は alias の階層で決まる。** claude-max ルート（review / investigate）と
+                # implement ルートには別々の SecurityPolicy が掛かっていて、それぞれ自分の
+                # Secret にあるクライアントキーしか通さない。この smoke は alias を入力で
+                # 変えられる唯一の handler なので、両方の鍵を持って選ぶ。
+                # 他の handler は alias が固定なので鍵も 1 本だけ。
+                case "$ALIAS" in
+                  implement) ANTHROPIC_AUTH_TOKEN="$LLM_KEY_METERED" ;;
+                  *)         ANTHROPIC_AUTH_TOKEN="$LLM_KEY_MAX" ;;
+                esac
+                export ANTHROPIC_AUTH_TOKEN
+                # 鍵が空のまま走ると 401 になり、claude は 10 回リトライしてから
+                # 「認証に失敗」で落ちる（約 3 分、2026-09-18 実測）。ここで止めた方が速いし、
+                # 「gateway に繋がらない」と区別がつく。
+                [ -n "$ANTHROPIC_AUTH_TOKEN" ] || escalate "クライアントキーが空。llm-gateway-client-keys Secret を確認すること。gateway 経路は一切確かめていない。"
+
                 # activeDeadlineSeconds の TERM は PID1 に飛ぶ。前面で待つと POSIX sh は
                 # 前面コマンドの終了まで trap を実行しないので、background + wait にする。
                 claude -p "/workspace/ok/report.md に、いま応答しているモデル名だけを 1 行で書いて終了してください。他のファイルは作らないこと。" \
@@ -162,11 +181,23 @@ spec:
               # /v1/messages と合わせて /anthropic/v1/messages になる。
               - name: ANTHROPIC_BASE_URL
                 value: http://llm-gateway.llm-gateway.svc.cluster.local/anthropic
-              # claude は空だと起動しないので置くが、**これは資格情報ではない**。
+              # gateway のクライアントキー。**LLM の資格情報ではない** — Max の OAuth トークンも
+              # OpenRouter の API キーも gateway 側にしかなく、gateway が Authorization を付け直す。
+              # この鍵が示すのは「どの階層を呼んでよいか」だけで、llm-gateway に届く Pod の
+              # 外では使えない（CNP の内側）。handler 単位で revoke できる。
               # 実キーは gateway の BackendSecurityPolicy が持っており、ここに何が入っていても
               # OpenRouter には届かない。
-              - name: ANTHROPIC_AUTH_TOKEN
-                value: handled-by-llm-gateway
+              # alias で使い分けるのでスクリプト側で代入する（上の case を参照）。
+              - name: LLM_KEY_METERED
+                valueFrom:
+                  secretKeyRef:
+                    name: llm-gateway-client-keys
+                    key: llm-gateway-smoke
+              - name: LLM_KEY_MAX
+                valueFrom:
+                  secretKeyRef:
+                    name: llm-gateway-client-keys
+                    key: llm-gateway-smoke-max
               # 空にしないと OAuth 側が優先されて Anthropic に飛ぶ（そちらは CNP で落ちる）。
               - name: ANTHROPIC_API_KEY
                 value: ""

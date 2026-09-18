@@ -120,7 +120,7 @@ spec:
 
     - name: detect-in-cluster
       script:
-        image: us-docker.pkg.dev/fairwinds-ops/oss/pluto:v5.24.3@sha256:08554ef0f998d52366fcdca82ad4cd48e4e36747b89c4738f66abf0740dc38b6
+        image: us-docker.pkg.dev/fairwinds-ops/oss/pluto:v5.24.4@sha256:0b058f9f27f05fef92a3a4325a5c02b1c250095fba360ed87c7734ea11f1d188
         resources:
           requests:
             cpu: 10m
@@ -142,7 +142,7 @@ spec:
 
     - name: detect-helm
       script:
-        image: us-docker.pkg.dev/fairwinds-ops/oss/pluto:v5.24.3@sha256:08554ef0f998d52366fcdca82ad4cd48e4e36747b89c4738f66abf0740dc38b6
+        image: us-docker.pkg.dev/fairwinds-ops/oss/pluto:v5.24.4@sha256:0b058f9f27f05fef92a3a4325a5c02b1c250095fba360ed87c7734ea11f1d188
         resources:
           requests:
             cpu: 10m

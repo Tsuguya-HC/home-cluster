@@ -183,13 +183,30 @@ spec:
             - --max-turns で暴走防止
 
             ## 推論の経路（新しい handler には必須）
-            LLM の資格情報は Pod に置かない。gateway が持ち、Pod は alias で呼ぶだけ。
-            Pod に CLAUDE_CODE_OAUTH_TOKEN を渡してはいけない。env は次の 5 本:
+            LLM の資格情報は Pod に置かない。実キー（Max の OAuth トークン / OpenRouter の
+            API キー）は gateway が持つ。Pod に CLAUDE_CODE_OAUTH_TOKEN を渡してはいけない。
+            env は次の 5 本:
             - ANTHROPIC_BASE_URL: http://llm-gateway.llm-gateway.svc.cluster.local/anthropic
-            - ANTHROPIC_AUTH_TOKEN: handled-by-llm-gateway（資格情報ではない。空だと claude が起動しない）
+            - ANTHROPIC_AUTH_TOKEN: **リテラルを書かない。** llm-gateway-client-keys Secret の
+              secretKeyRef で、キー名は handler 名（= x-tf-handler に書く値と同じ）にする。
+              固定値を書くと gateway の SecurityPolicy に弾かれて 401 になる
             - ANTHROPIC_API_KEY: 空文字（空にしないと OAuth 側が優先されて Anthropic 直行になる）
             - ANTHROPIC_CUSTOM_HEADERS: x-tf-handler に handler 名（アクセスログの帰属に使う）
             - CLAUDE_CODE_SUBAGENT_MODEL: --model と同じ alias（サブエージェントは親のモデルを継がない）
+
+            ## クライアントキーの用意（env を書く前に必要）
+            上の secretKeyRef が指すキーは自動では生えない。**先に 3 箇所に足すこと。**
+            足さないと Pod が CreateContainerConfigError で起動しない。
+            1. 1Password の item `llm-gateway-client-keys`（vault home-cluster）に、
+               handler 名のラベルで新しいフィールドを作る（48 文字程度のランダム英数）
+            2. manifests/secrets/claude-code-llm-gateway-client-keys.yaml の data に
+               `secretKey: <handler 名>` / `property: <handler 名>` を追加
+            3. manifests/secrets/llm-gateway-claude-max-client-keys.yaml（alias が review /
+               investigate の場合）または llm-gateway-implement-client-keys.yaml（implement の
+               場合）にも同じ handler 名で追加。**gateway 側に無い鍵は 401 になる。**
+               鍵の値は階層ごとに別のものを使う — 同じ Secret の中で値が重複すると
+               SecurityPolicy 全体が翻訳エラーになる
+            人手が要るのは 1 だけなので、そこは escalate して人に頼むこと。
 
             CNP は api.anthropic.com ではなく gateway 宛に開ける。
             toEndpoints で app.kubernetes.io/managed-by: envoy-gateway かつ

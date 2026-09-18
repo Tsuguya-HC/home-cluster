@@ -147,7 +147,7 @@ Docker Hub の 3 ホスト（`registry-1` / `auth` / `production.cloudfront`）�
 blob は 307 で cloudfront に飛ぶ（2026-09-17 実測）。**1 つでも欠けるとチャートを引けず、
 Application が Unknown のまま一度もレンダリングされない**（ghcr.io は単一ホストで済むので前例が無い）。
 
-## argo (23 policies)
+## argo (24 policies)
 
 | Component | Ingress | Egress |
 |---|---|---|
@@ -166,7 +166,7 @@ Application が Unknown のまま一度もレンダリングされない**（ghc
 | **events-controller** | host → 8081 | kube-apiserver, eventbus:8222 |
 | **eventbus** | eventsource (github-webhook), alertmanager-eventsource (alertmanager-webhook), task-dispatch-eventsource (task-dispatch), task-status-sync-eventsource (task-status-sync), argocd-deployed-eventsource (argocd-deployed), sensors (tofu-cloudflare, tofu-unifi, tofu-harbor, upgrade-k8s, pxe-sync, talos-build, images-build, single-repo-build, alert-investigate, task-dispatch, task-status-sync, talos-extension-bump, renovate-webhook, aqua-checksum, pr-review-dispatch) → 4222; self → 6222/7777; events-controller → 8222 | self:6222/7777 |
 | **workflow-pods** (backup-workflow, pxe-sync, talos-build, kanidm-repl-exchange, kanidm-backup, aqua-checksum, pluto-check除外) | (deny world) | kube-apiserver, HTTPS 443, kube-apiserver/remote-node/host:50000 (Talos apid — node IP は node identity を持つので toCIDR では一致しない), seaweedfs-filer (seaweedfs):8333 |
-| **pluto-check** (pluto-check=true) | (deny world) | kube-apiserver:6443, seaweedfs-filer (seaweedfs):8333, llm-gateway-envoy (llm-gateway):10080, github.com + api.github.com + discord.com :443 |
+| **pluto-check** (pluto-check=true) | (none) | kube-apiserver:6443, seaweedfs-filer (seaweedfs):8333, llm-gateway-envoy (llm-gateway):10080, github.com + api.github.com + discord.com :443 |
 | **etcd-backup** (backup-workflow=true) | (deny world) | kube-apiserver:6443/50000 (Talos apid), *.r2.cloudflarestorage.com:443, seaweedfs-filer (seaweedfs):8333 |
 | **pxe-sync** (pxe-sync=true) | (deny world) | kube-apiserver, github.com + api.github.com + *.githubusercontent.com + dl-cdn.alpinelinux.org :443, seaweedfs-filer (seaweedfs):8333, QNAP NAS (192.168.5.240):2049 (NFS) |
 | **kanidm-backup** (kanidm-backup=true) | (deny world) | kube-apiserver, *.r2.cloudflarestorage.com:443, seaweedfs-filer (seaweedfs):8333 |

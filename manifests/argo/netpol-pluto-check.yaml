@@ -46,9 +46,13 @@ spec:
             - port: "8333"
               protocol: TCP
     # 推論。in-cluster なので toFQDNs ではなく toEndpoints。対向の ingress は
-    # manifests/llm-gateway/netpol.yaml 側で SA `pluto-checker` に絞ってある
-    # （**こちらはラベルで選ぶ** — onExit の Pod は同じラベルを持つが gateway は要らず、
-    # SA も別になりうるため。狭い方をあちらに置いている）。
+    # manifests/llm-gateway/netpol.yaml 側で SA `pluto-checker` に絞ってある。
+    # **こちらはラベル、あちらは SA** と軸が違うのは、こちらが「この workflow の Pod が
+    # 出られる先」を書くのに対し、あちらが「gateway を呼べる主体」の allowlist だから。
+    # gateway 側は namespace / workflow ではなく SA の粒度で揃えたい（docs の
+    # network-policies.md「絞りたくなったら今すぐできる」の節と同じ方針）。
+    # なお onExit の discord-notify Pod は serviceAccountName を持たず Workflow の
+    # `pluto-checker` を継ぐので、ラベルも SA も共有する（gateway は呼ばないので実害なし）。
     - toEndpoints:
         - matchLabels:
             app.kubernetes.io/managed-by: envoy-gateway

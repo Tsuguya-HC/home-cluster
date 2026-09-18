@@ -166,6 +166,7 @@ Application が Unknown のまま一度もレンダリングされない**（ghc
 | **events-controller** | host → 8081 | kube-apiserver, eventbus:8222 |
 | **eventbus** | eventsource (github-webhook), alertmanager-eventsource (alertmanager-webhook), task-dispatch-eventsource (task-dispatch), task-status-sync-eventsource (task-status-sync), argocd-deployed-eventsource (argocd-deployed), sensors (tofu-cloudflare, tofu-unifi, tofu-harbor, upgrade-k8s, pxe-sync, talos-build, images-build, single-repo-build, alert-investigate, task-dispatch, task-status-sync, talos-extension-bump, renovate-webhook, aqua-checksum, pr-review-dispatch) → 4222; self → 6222/7777; events-controller → 8222 | self:6222/7777 |
 | **workflow-pods** (backup-workflow, pxe-sync, talos-build, kanidm-repl-exchange, kanidm-backup, aqua-checksum除外) | (deny world) | kube-apiserver, HTTPS 443, kube-apiserver/remote-node/host:50000 (Talos apid — node IP は node identity を持つので toCIDR では一致しない), seaweedfs-filer (seaweedfs):8333 |
+| **pluto-check-llm-gateway** (SA `pluto-checker`) | — | llm-gateway-envoy (llm-gateway):10080 |
 | **etcd-backup** (backup-workflow=true) | (deny world) | kube-apiserver:6443/50000 (Talos apid), *.r2.cloudflarestorage.com:443, seaweedfs-filer (seaweedfs):8333 |
 | **pxe-sync** (pxe-sync=true) | (deny world) | kube-apiserver, github.com + api.github.com + *.githubusercontent.com + dl-cdn.alpinelinux.org :443, seaweedfs-filer (seaweedfs):8333, QNAP NAS (192.168.5.240):2049 (NFS) |
 | **kanidm-backup** (kanidm-backup=true) | (deny world) | kube-apiserver, *.r2.cloudflarestorage.com:443, seaweedfs-filer (seaweedfs):8333 |
@@ -487,41 +488,47 @@ CNP を絞って測るときは、apiserver が張り済みの TCP 接続がそ�
 
 | Component | Ingress | Egress |
 |---|---|---|
-| **llm-gateway-envoy** | claude-code-build / claude-code → 10080; host/remote-node → 19003 (probes) | envoy-gateway (envoy-gateway-system):18000, openrouter.ai + api.anthropic.com:443 |
+| **llm-gateway-envoy** | claude-code-build / claude-code → 10080; argo (SA `pluto-checker` のみ) → 10080; host/remote-node → 19003 (probes) | envoy-gateway (envoy-gateway-system):18000, openrouter.ai + api.anthropic.com:443 |
 
 Agent Router のデータプレーン（issue #942）。alias（`x-ai-eg-model`）で上流と実モデルが決まる。
 
 **`claude-code` namespace の handler は全て gateway 経由**（2026-09-18 に達成）。
 `api.anthropic.com` への直行も `claude-code-token` の参照もあの namespace には残っていない。
 
-`argo` の `pluto-check` も 2026-09-18 に gateway 経由へ切り替えた（`workflow-pods` の egress に
-llm-gateway 宛を足し、`llm-gateway` 側の ingress にも `argo` を足してある。`toCIDR: 0.0.0.0/0`:443 は
-他の workflow Pod が使うので残る）。**Anthropic に直行する Pod はもう無い。**
+`argo` の `pluto-check` も 2026-09-18 に gateway 経由へ切り替えた。**Anthropic に直行するよう
+設定された Pod はもう無い。**
+
+ただし `pluto-check` だけは**クラスタが経路を強制していない**。他の 2 namespace は env が壊れて
+直行に倒れると CNP で drop されて落ちる（＝取り違えが緑で通らない）が、argo の `workflow-pods` は
+`toCIDR: 0.0.0.0/0`:443 を持ち、これは他の workflow Pod が使うので外せない。今は資格情報が無いので
+どのみち失敗するが、**「gateway 経由である」ことは設定の話であって到達性の話ではない**。
+揃えるなら `pluto-check` を `workflow-pods` の除外リストへ移して専用 CNP を持たせることになるが、
+exit hook の discord-notify が同じ Pod ラベルを共有する問題を先に片付ける必要がある。
 
 残る外部 LLM への直行は `claude-code-build` の `taskflow-implement` で、openrouter-broker
 サイドカー経由で `openrouter.ai` に出る。それを倒すまで「外部 LLM への egress は llm-gateway
 だけ」とは言えない。
 
-残るのは `claude-code-build` の `taskflow-implement` で、こちらは `openrouter.ai` への直行と
-openrouter-broker サイドカーを持つ。それを倒すまで「外部 LLM への egress は llm-gateway だけ」
-は完成しない。
-
-**ingress は namespace 単位で開けている。つまり `claude-code` / `claude-code-build` に Pod を
-足すと、その Pod は alias を名乗るだけで gateway の上流に到達できる。** #942 の第一段階では
+**ingress は `claude-code` / `claude-code-build` については namespace 単位で開けている。つまり
+この 2 つに Pod を足すと、その Pod は alias を名乗るだけで gateway の上流に到達できる。**
+`argo` だけは SA（`pluto-checker`）で絞ってある — あの namespace には claude CLI 以外の
+ワークロード（renovate / tofu-harbor / 各種 backup）が常駐しており、`workflow-pods` の
+除外リストにも入っていないので、namespace 単位で開けるとそれら全部が Max の alias に届く。 #942 の第一段階では
 その先は OpenRouter だけ（従量課金で、最悪でもコスト増）だったが、Max の alias
 （`review` / `investigate`）を足した時点で、**同じ境界の裏に個人の Max サブスクリプションが入った**
 （アカウント単位の OAuth で、異常な利用パターンは停止のリスクがある）。
 
 Anthropic は subscription OAuth を「Claude Code の system prompt が先頭にあるか」でゲートしており、
 claude CLI 以外がこの alias を叩いても*枠切れを装った 429* になるだけだが、**成否をクラスタ側で
-制御できているわけではない**。この 2 つの namespace に claude CLI 以外のワークロードを足すときは、
-Max の alias に到達できることを承知した上で置くこと。
+制御できているわけではない**。`claude-code` / `claude-code-build` に claude CLI 以外の
+ワークロードを足すときは、Max の alias に到達できることを承知した上で置くこと。
 
 **絞りたくなったら今すぐできる。** Cilium は Pod の ServiceAccount を
 `io.cilium.k8s.policy.serviceaccount` としてアイデンティティラベルに入れており（実測）、
 flow ごとに専用 SA が既に割り当たっている（`agent-pr-reviewer` / `agent-llm-gateway-smoke` 等）。
 namespace 単位の ingress を既知 SA の allowlist に置き換えるのは **CNP 側だけで完結**し、
-taskflow 側の変更は要らない。#942 のフォローアップとして検討する。
+taskflow 側の変更は要らない。`argo` は 2026-09-18 にこの形で入れた（`pluto-checker` のみ）。
+残る 2 namespace も同じ形にできる。
 
 Envoy の Pod がこの namespace に立つのは `helm-values/envoy-gateway/values.yaml` で
 `deploy.type: GatewayNamespace` にしているため。**Envoy Gateway の既定は

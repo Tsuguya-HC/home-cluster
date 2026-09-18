@@ -44,7 +44,10 @@ Application が Unknown のまま止まる形で出る。
 
 - **用途**: `llm-gateway` の `review` / `investigate` alias（Max の OAuth トークンで Anthropic 直）
 - **引く側**: Envoy データプレーン（`manifests/llm-gateway/netpol.yaml`）**だけ**。
-  `claude-code` の handler も `argo` の `pluto-check` も gateway 経由で、直接は出ない
+  `claude-code` の handler も `argo` の `pluto-check` も gateway 経由で、直接は出ない。
+  ただし `claude-code` 側が CNP で直行を塞いでいる（取り違えが drop で落ちる）のに対し、
+  `argo` は `workflow-pods` の `toCIDR: 0.0.0.0/0`:443 が残るので**経路は開いたまま**。
+  あちらは設定で gateway を向けているだけで、到達性で強制してはいない
 - **Port**: 443
 
 | Domain | Required | Notes |

@@ -84,6 +84,10 @@ spec:
           format:
             type: JSON
             json:
+              # どの handler からのリクエストか。claude CLI が ANTHROPIC_CUSTOM_HEADERS で
+              # 送る `x-tf-handler` を、コントローラの requestHeaderAttributes が
+              # dynamic metadata に移したもの。送っていない呼び出しでは空になる。
+              tf.handler: "%DYNAMIC_METADATA(io.envoy.ai_gateway:tf.handler)%"
               gen_ai.request.model: "%REQ(X-AI-EG-MODEL)%"
               gen_ai.response.model: "%DYNAMIC_METADATA(io.envoy.ai_gateway:response_model)%"
               gen_ai.provider.name: "%DYNAMIC_METADATA(io.envoy.ai_gateway:backend_name)%"

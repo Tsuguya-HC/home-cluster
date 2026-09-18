@@ -10,6 +10,15 @@ extProc:
 
 controller:
   logFormat: json
+  # handler 別の帰属をヘッダで取る（#942）。ここに書くと Envoy に header_to_metadata
+  # フィルタが差し込まれ、`x-tf-handler` の値が dynamic metadata の
+  # `io.envoy.ai_gateway:tf.handler` に入る。アクセスログ側は
+  # manifests/llm-gateway/gateway.yaml が %DYNAMIC_METADATA% で引く。
+  #
+  # **alias を handler 数だけ増やさないための仕掛け。** alias を分けても帰属は取れるが、
+  # 同じモデルを指す alias が 11 本できて、モデルを上げるたびに 11 箇所直すことになる。
+  # モデルの管理点は alias（3 本）に集約したまま、帰属だけヘッダで細かくする。
+  requestHeaderAttributes: "x-tf-handler:tf.handler"
   # cache の DefaultNamespaces になる（cmd/controller/main.go の setupCache）。
   # **RBAC を RoleBinding に絞った前提そのもの** — ここが空だとコントローラは
   # Secret / Pod / Gateway をクラスタ全域で LIST しようとして 403 で回らなくなる。

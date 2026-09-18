@@ -194,6 +194,9 @@ spec:
             CNP は api.anthropic.com ではなく gateway 宛に開ける。
             toEndpoints で app.kubernetes.io/managed-by: envoy-gateway かつ
             io.kubernetes.pod.namespace: llm-gateway、ポートは 10080/TCP。
+            **新しい namespace に置く場合は両端が要る** — manifests/llm-gateway/netpol.yaml の
+            ingress fromEndpoints は namespace を列挙しているので、そこにも足す。
+            片側だけだとエラーは出ず、接続がただ失敗する。
 
             ## Git 操作
             - ブランチ名: wf/<workflow-name>

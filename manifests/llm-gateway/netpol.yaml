@@ -26,10 +26,12 @@ spec:
             io.kubernetes.pod.namespace: claude-code
         # argo は claude CLI 以外のワークロード（renovate / tofu-harbor / backup …）が
         # 常駐しているので、namespace 単位では開けない。Cilium の identity は
-        # ServiceAccount を持つので、pluto-check の SA だけに絞る。
+        # ServiceAccount を持つので、gateway を呼ぶステップの SA だけに絞る。
+        # **pluto-checker ではなく pluto-fixer** — 前者は全 Secret を読めるので
+        # claude を走らせる ai-fix には与えていない（pluto-check.yaml の定義を参照）。
         - matchLabels:
             io.kubernetes.pod.namespace: argo
-            io.cilium.k8s.policy.serviceaccount: pluto-checker
+            io.cilium.k8s.policy.serviceaccount: pluto-fixer
       toPorts:
         - ports:
             - port: "10080"

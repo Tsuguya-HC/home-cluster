@@ -488,7 +488,7 @@ CNP を絞って測るときは、apiserver が張り済みの TCP 接続がそ�
 
 | Component | Ingress | Egress |
 |---|---|---|
-| **llm-gateway-envoy** | claude-code-build / claude-code → 10080; argo (SA `pluto-checker` のみ) → 10080; host/remote-node → 19003 (probes) | envoy-gateway (envoy-gateway-system):18000, openrouter.ai + api.anthropic.com:443 |
+| **llm-gateway-envoy** | claude-code-build / claude-code → 10080; argo (SA `pluto-fixer` のみ) → 10080; host/remote-node → 19003 (probes) | envoy-gateway (envoy-gateway-system):18000, openrouter.ai + api.anthropic.com:443 |
 
 Agent Router のデータプレーン（issue #942）。alias（`x-ai-eg-model`）で上流と実モデルが決まる。
 
@@ -499,6 +499,12 @@ Agent Router のデータプレーン（issue #942）。alias（`x-ai-eg-model`�
 設定された Pod はもう無い。**
 
 `pluto-check` は `workflow-pods` の除外リストへ移し、専用の `netpol-pluto-check.yaml` を持たせた。
+**ネットワークだけでは足りない**ことも分かった。`pluto-checker` SA はクラスタ全体の `secrets` に
+get/list を持っており（`detect-helm` が Helm のリリースを Secret から読むため必要）、それを継いだまま
+claude を走らせると、エージェントは `kubectl get secret` で `llm-gateway/claude-max-apikey` にも
+`argo/github-app-private-key` にも届く。**env や `/proc` を塞いでも API 経由でやり直せる。**
+そこで claude を走らせる `ai-fix` ステップだけ `pluto-fixer` SA（Secret 権限なし）に落とした。
+gateway の ingress もこちらの SA で絞ってある。
 狙いは `toCIDR: 0.0.0.0/0`:443 を外すこと — あれが効いていると env が壊れて直行に倒れても
 ネットワーク的には通ってしまい、「gateway 経由である」ことを設定でしか担保できない。
 **これで 3 つの namespace すべてで、直行は drop されて落ちる。**
@@ -515,7 +521,7 @@ pluto の出力と自リポジトリだからで、**論拠が違うだけで無
 
 **ingress は `claude-code` / `claude-code-build` については namespace 単位で開けている。つまり
 この 2 つに Pod を足すと、その Pod は alias を名乗るだけで gateway の上流に到達できる。**
-`argo` だけは SA（`pluto-checker`）で絞ってある — あの namespace には claude CLI 以外の
+`argo` だけは SA（`pluto-fixer`）で絞ってある — あの namespace には claude CLI 以外の
 ワークロード（renovate / tofu-harbor / 各種 backup）が常駐しており、`workflow-pods` の
 除外リストにも入っていないので、namespace 単位で開けるとそれら全部が Max の alias に届く。 #942 の第一段階では
 その先は OpenRouter だけ（従量課金で、最悪でもコスト増）だったが、Max の alias
@@ -531,7 +537,7 @@ claude CLI 以外がこの alias を叩いても*枠切れを装った 429* に�
 `io.cilium.k8s.policy.serviceaccount` としてアイデンティティラベルに入れており（実測）、
 flow ごとに専用 SA が既に割り当たっている（`agent-pr-reviewer` / `agent-llm-gateway-smoke` 等）。
 namespace 単位の ingress を既知 SA の allowlist に置き換えるのは **CNP 側だけで完結**し、
-taskflow 側の変更は要らない。`argo` は 2026-09-18 にこの形で入れた（`pluto-checker` のみ）。
+taskflow 側の変更は要らない。`argo` は 2026-09-18 にこの形で入れた（`pluto-fixer` のみ）。
 残る 2 namespace も同じ形にできる。
 
 Envoy の Pod がこの namespace に立つのは `helm-values/envoy-gateway/values.yaml` で

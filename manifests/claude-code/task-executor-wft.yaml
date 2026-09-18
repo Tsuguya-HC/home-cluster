@@ -94,7 +94,7 @@ spec:
               --output-format stream-json \
               --dangerously-skip-permissions \
               --allowedTools "Bash(readonly=true),Read,Write,Grep,Glob" \
-              --model sonnet \
+              --model review \
               --max-turns 30 \
               "$PROMPT" || true
 
@@ -119,11 +119,23 @@ spec:
         env:
           - name: HOME
             value: /tmp
-          - name: CLAUDE_CODE_OAUTH_TOKEN
-            valueFrom:
-              secretKeyRef:
-                name: claude-code-token
-                key: credential
+          # 推論は llm-gateway 経由（#942）。**この Pod は LLM の資格情報を持たない** —
+          # 実キーは gateway の BackendSecurityPolicy 側にしかなく、gateway が付け直す。
+          - name: ANTHROPIC_BASE_URL
+            value: http://llm-gateway.llm-gateway.svc.cluster.local/anthropic
+          # claude は空だと起動しないので置くが、**これは資格情報ではない**。
+          - name: ANTHROPIC_AUTH_TOKEN
+            value: handled-by-llm-gateway
+          # 空にしないと OAuth 側が優先されて Anthropic 直行になる（CNP で落ちる）。
+          - name: ANTHROPIC_API_KEY
+            value: ""
+          # どの handler からの呼び出しかを gateway に名乗る（アクセスログの tf.handler）。
+          - name: ANTHROPIC_CUSTOM_HEADERS
+            value: "x-tf-handler: task-executor"
+          # サブエージェントは親のモデルを継がない。固定しないと既定（sonnet）に落ち、
+          # gateway にマッチするルートが無くなる。親と同じ alias に括り付ける。
+          - name: CLAUDE_CODE_SUBAGENT_MODEL
+            value: review
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:

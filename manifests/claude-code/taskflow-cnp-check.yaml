@@ -19,7 +19,7 @@
 # 確かめる手段が無い — 裏取りの検査を、プロンプトの約束ではなく到達可能性で支える。
 # 逆に 調査 は Discord を持たない。Cilium の identity は Pod 単位で、通知サイドカーのために
 # 開けた egress はエージェントのコンテナからも使えるため（docs/network-policies.md の
-# taskflow-pr-review の項）、`CLAUDE_CODE_OAUTH_TOKEN` を持つ Pod に webhook 宛の穴を
+# taskflow-pr-review の項）、外向きの webhook に届く Pod にだけ穴を
 # 開ける範囲は狭いほどよい。1 フェーズだった頃は 1 つの Pod が両方を持っていた。
 #
 # ## 語彙と終端
@@ -67,7 +67,7 @@ automountServiceAccountToken: false
 #
 # **Discord をここに開けないのは意図的。** 通知サイドカーは終端の 報告 フェーズにしか無く、
 # Cilium の identity は Pod 単位なので、開けた穴はエージェントのコンテナからも使える。
-# この Pod は CLAUDE_CODE_OAUTH_TOKEN を持つため、webhook 宛の穴は要る Pod にだけ開ける
+# webhook 宛の穴は要る Pod にだけ開ける（#942 以降、この Pod は LLM の資格情報を持たない）
 # （docs/network-policies.md の taskflow-pr-review の項に同じ理由）。
 #
 # DNS は CCNP allow-dns で全 Pod に共通適用済み。ingress は 1 つも書かないので全 deny
@@ -89,7 +89,6 @@ spec:
             - port: "6443"
               protocol: TCP
     - toFQDNs:
-        - matchName: "api.anthropic.com"
         # github.com / api.github.com は init の parts（部品の sparse checkout と App の
         # installation token）のため。init と agent は同じ identity なので agent からも
         # 届くが、GitHub は攻撃者が受信ログを読めない宛先（docs/network-policies.md）。
@@ -98,6 +97,16 @@ spec:
       toPorts:
         - ports:
             - port: "443"
+              protocol: TCP
+    # 推論は llm-gateway 経由（#942）。**api.anthropic.com は書かない** — env が効かず
+    # 直行する取り違えを drop で検出するため。
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/managed-by: envoy-gateway
+            io.kubernetes.pod.namespace: llm-gateway
+      toPorts:
+        - ports:
+            - port: "10080"
               protocol: TCP
     - toEndpoints:
         - matchLabels:
@@ -125,7 +134,6 @@ spec:
       taskflow-cnp-report: "true"
   egress:
     - toFQDNs:
-        - matchName: "api.anthropic.com"
         - matchName: "discord.com"
         # github.com / api.github.com は init の parts のため（上の 調査 側と同じ理由）。
         - matchName: "github.com"
@@ -133,6 +141,16 @@ spec:
       toPorts:
         - ports:
             - port: "443"
+              protocol: TCP
+    # 推論は llm-gateway 経由（#942）。**api.anthropic.com は書かない** — env が効かず
+    # 直行する取り違えを drop で検出するため。
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/managed-by: envoy-gateway
+            io.kubernetes.pod.namespace: llm-gateway
+      toPorts:
+        - ports:
+            - port: "10080"
               protocol: TCP
 ---
 apiVersion: flow.tgy.io/v1alpha1
@@ -258,7 +276,7 @@ spec:
                   --output-format stream-json \
                   --dangerously-skip-permissions \
                   --allowedTools "Bash,Read,Write,Grep,Glob" \
-                  --model sonnet \
+                  --model investigate \
                   --max-turns 80 < /dev/null &
                 pid=$!
                 # activeDeadlineSeconds の TERM は PID1 に飛ぶ。前面で claude を待っていると
@@ -283,11 +301,24 @@ spec:
             env:
               - name: HOME
                 value: /tmp
-              - name: CLAUDE_CODE_OAUTH_TOKEN
-                valueFrom:
-                  secretKeyRef:
-                    name: claude-code-token
-                    key: credential
+              # 推論は llm-gateway 経由（#942）。**この Pod は LLM の資格情報を持たない** —
+              # 実キーは gateway の BackendSecurityPolicy 側にしかなく、gateway が
+              # Authorization を付け直す。
+              - name: ANTHROPIC_BASE_URL
+                value: http://llm-gateway.llm-gateway.svc.cluster.local/anthropic
+              # claude は空だと起動しないので置くが、**これは資格情報ではない**。
+              - name: ANTHROPIC_AUTH_TOKEN
+                value: handled-by-llm-gateway
+              # 空にしないと OAuth 側が優先されて Anthropic 直行になる（そちらは CNP で落ちる）。
+              - name: ANTHROPIC_API_KEY
+                value: ""
+              # どの handler からの呼び出しかを gateway に名乗る。アクセスログの tf.handler に出る。
+              - name: ANTHROPIC_CUSTOM_HEADERS
+                value: "x-tf-handler: cnp-check"
+              # サブエージェントは親のモデルを継がない。固定しないと既定（sonnet）に落ち、
+              # gateway にマッチするルートが無くなる。親と同じ alias に括り付ける。
+              - name: CLAUDE_CODE_SUBAGENT_MODEL
+                value: investigate
             securityContext:
               allowPrivilegeEscalation: false
               capabilities:
@@ -490,7 +521,7 @@ spec:
                   --output-format stream-json \
                   --dangerously-skip-permissions \
                   --allowedTools "Bash,Read,Write,Grep,Glob" \
-                  --model sonnet \
+                  --model investigate \
                   --max-turns 60 < /dev/null &
                 pid=$!
                 # activeDeadlineSeconds の TERM は PID1 に飛ぶ。前面で claude を待っていると
@@ -514,11 +545,24 @@ spec:
             env:
               - name: HOME
                 value: /tmp
-              - name: CLAUDE_CODE_OAUTH_TOKEN
-                valueFrom:
-                  secretKeyRef:
-                    name: claude-code-token
-                    key: credential
+              # 推論は llm-gateway 経由（#942）。**この Pod は LLM の資格情報を持たない** —
+              # 実キーは gateway の BackendSecurityPolicy 側にしかなく、gateway が
+              # Authorization を付け直す。
+              - name: ANTHROPIC_BASE_URL
+                value: http://llm-gateway.llm-gateway.svc.cluster.local/anthropic
+              # claude は空だと起動しないので置くが、**これは資格情報ではない**。
+              - name: ANTHROPIC_AUTH_TOKEN
+                value: handled-by-llm-gateway
+              # 空にしないと OAuth 側が優先されて Anthropic 直行になる（そちらは CNP で落ちる）。
+              - name: ANTHROPIC_API_KEY
+                value: ""
+              # どの handler からの呼び出しかを gateway に名乗る。アクセスログの tf.handler に出る。
+              - name: ANTHROPIC_CUSTOM_HEADERS
+                value: "x-tf-handler: cnp-check"
+              # サブエージェントは親のモデルを継がない。固定しないと既定（sonnet）に落ち、
+              # gateway にマッチするルートが無くなる。親と同じ alias に括り付ける。
+              - name: CLAUDE_CODE_SUBAGENT_MODEL
+                value: investigate
             securityContext:
               allowPrivilegeEscalation: false
               capabilities:

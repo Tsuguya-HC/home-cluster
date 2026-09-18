@@ -49,7 +49,7 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 | Workflow pods (rss) | SeaweedFS filer (seaweedfs) | 8333 | Artifact/log storage |
 | Workflow pods (claude-code) | Loki gateway (monitoring) | 8080 | Log query (logcli) |
 | Workflow pods (claude-code-build) | Envoy data plane (llm-gateway) | 10080 | LLM API（alias 経由）**次段階。handler 側 egress は未実装** |
-| Workflow pods (claude-code) | Envoy data plane (llm-gateway) | 10080 | LLM API（alias 経由）。現状は taskflow-llm-gateway-smoke と taskflow-pr-review |
+| Workflow pods (claude-code) | Envoy data plane (llm-gateway) | 10080 | LLM API（alias 経由）。claude-code の全 handler |
 | Envoy data plane (llm-gateway) | Envoy Gateway (envoy-gateway-system) | 18000 | xDS |
 | Envoy Gateway (envoy-gateway-system) | Agent Router (envoy-ai-gateway-system) | 1063 | extension server gRPC（xDS 変換） |
 | Prometheus (monitoring) | Agent Router (envoy-ai-gateway-system) | 8080 | Metrics scrape |
@@ -202,11 +202,11 @@ Application が Unknown のまま一度もレンダリングされない**（ghc
 
 | Component | Ingress | Egress |
 |---|---|---|
-| **claude-code** (claude-code=true) | (deny world) | kube-apiserver, api.anthropic.com + github.com + api.github.com + *.githubusercontent.com + index.crates.io + static.crates.io + registry.npmjs.org + discord.com + gitmcp.io :443, seaweedfs-filer (seaweedfs):8333, loki-gateway (monitoring):8080, prometheus (monitoring):9090, horenso (horenso):3000, task-dispatch-eventsource (argo):12002, argocd-server (argocd):8080 |
+| **claude-code** (claude-code=true) | (deny world) | kube-apiserver, llm-gateway (llm-gateway):10080, github.com + api.github.com + *.githubusercontent.com + index.crates.io + static.crates.io + registry.npmjs.org + discord.com + gitmcp.io :443, seaweedfs-filer (seaweedfs):8333, loki-gateway (monitoring):8080, prometheus (monitoring):9090, horenso (horenso):3000, task-dispatch-eventsource (argo):12002, argocd-server (argocd):8080 |
 | **task-submitter** (task-submitter=true) | (deny world) | kube-apiserver, discord.com:443, seaweedfs-filer (seaweedfs):8333 |
 | **taskflow-pr-review** (taskflow-pr-review=true) | (書かない = 全 deny) | github.com + api.github.com :443, llm-gateway (llm-gateway):10080 |
-| **taskflow-cnp-check** (taskflow-cnp-check=true) | (書かない = 全 deny) | kube-apiserver:6443, api.anthropic.com + github.com + api.github.com :443, loki-gateway (monitoring):8080 |
-| **taskflow-cnp-report** (taskflow-cnp-report=true) | (書かない = 全 deny) | api.anthropic.com + discord.com + github.com + api.github.com :443 |
+| **taskflow-cnp-check** (taskflow-cnp-check=true) | (書かない = 全 deny) | kube-apiserver:6443, github.com + api.github.com :443, llm-gateway (llm-gateway):10080, loki-gateway (monitoring):8080 |
+| **taskflow-cnp-report** (taskflow-cnp-report=true) | (書かない = 全 deny) | discord.com + github.com + api.github.com :443, llm-gateway (llm-gateway):10080 |
 | **taskflow-openrouter-smoke** (taskflow-openrouter-smoke=true) | (書かない = 全 deny) | openrouter.ai:443 |
 | **taskflow-llm-gateway-smoke** (taskflow-llm-gateway-smoke=true) | (書かない = 全 deny) | llm-gateway (llm-gateway):10080（Service の port は 80、CNP は backend の 10080） |
 
@@ -487,10 +487,13 @@ CNP を絞って測るときは、apiserver が張り済みの TCP 接続がそ�
 
 Agent Router のデータプレーン（issue #942）。alias（`x-ai-eg-model`）で上流と実モデルが決まる。
 
-**「外部 LLM への egress を持つのはこの namespace だけ」は移行完了後の姿であって、現状はまだ
-そうなっていない。** handler 側にも直接の上流 egress が残っている — `claude-code` は
-`api.anthropic.com`、`claude-code-build` は `openrouter.ai`。claude-code namespace の 12 本の切り替えでそれらを落とし、
-資格情報も handler から外して初めて「唯一の口」になる。
+**Anthropic への egress を持つのはこの namespace だけ**（2026-09-18 に達成）。claude-code の
+handler は全て gateway 経由になり、`api.anthropic.com` への直行も `claude-code-token` の参照も
+残っていない。
+
+残るのは `claude-code-build` の `taskflow-implement` で、こちらは `openrouter.ai` への直行と
+openrouter-broker サイドカーを持つ。それを倒すまで「外部 LLM への egress は llm-gateway だけ」
+は完成しない。
 
 **ingress は namespace 単位で開けている。つまり `claude-code` / `claude-code-build` に Pod を
 足すと、その Pod は alias を名乗るだけで gateway の上流に到達できる。** #942 の第一段階では

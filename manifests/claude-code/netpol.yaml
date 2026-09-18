@@ -18,7 +18,6 @@ spec:
             - port: "6443"
               protocol: TCP
     - toFQDNs:
-        - matchName: "api.anthropic.com"
         - matchName: "github.com"
         - matchName: "api.github.com"
         - matchPattern: "*.githubusercontent.com"
@@ -30,6 +29,17 @@ spec:
       toPorts:
         - ports:
             - port: "443"
+              protocol: TCP
+    # 推論は llm-gateway 経由（#942）。**api.anthropic.com は書かない** — env が効かず
+    # Anthropic へ直行する取り違えを drop で検出するため。claude-code: "true" の Pod は
+    # 全て gateway 経由に切り替え済み。
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/managed-by: envoy-gateway
+            io.kubernetes.pod.namespace: llm-gateway
+      toPorts:
+        - ports:
+            - port: "10080"
               protocol: TCP
     - toEndpoints:
         - matchLabels:

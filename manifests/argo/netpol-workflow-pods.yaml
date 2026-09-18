@@ -20,6 +20,8 @@ spec:
         operator: DoesNotExist
       - key: aqua-checksum
         operator: DoesNotExist
+      - key: pluto-check
+        operator: DoesNotExist
   ingressDeny:
     - fromEntities:
         - world

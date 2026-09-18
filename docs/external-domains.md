@@ -43,9 +43,11 @@ Application が Unknown のまま止まる形で出る。
 ## Anthropic（Max の alias）
 
 - **用途**: `llm-gateway` の `review` / `investigate` alias（Max の OAuth トークンで Anthropic 直）
-- **引く側**: Envoy データプレーン（`manifests/llm-gateway/netpol.yaml`）。`claude-code` の
-  handler は gateway 経由なので直接は出ない。ただし `argo` の `pluto-check` は未切り替えで、
-  `manifests/argo/netpol-workflow-pods.yaml` の `toCIDR: 0.0.0.0/0`:443 から直接引いている
+- **引く側**: Envoy データプレーン（`manifests/llm-gateway/netpol.yaml`）**だけ**。
+  `claude-code` の handler も `argo` の `pluto-check` も gateway 経由で、直接は出ない。
+  どれも CNP 側で直行を塞いであるので、env が壊れて直行に倒れたら drop で落ちる。
+  なお `argo` の**他の** workflow Pod は `workflow-pods` の `toCIDR: 0.0.0.0/0`:443 を
+  持つので、ドメイン単位で許可していないだけで到達自体はできる
 - **Port**: 443
 
 | Domain | Required | Notes |

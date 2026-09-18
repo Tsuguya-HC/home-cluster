@@ -1,0 +1,70 @@
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: pluto-check
+  namespace: argo
+# pluto-check は非推奨 API を検出し、claude に直させて署名コミットで PR を出す
+# CronWorkflow。推論は llm-gateway 経由（#942）。
+#
+# **netpol-workflow-pods から除外して専用に持つ理由は `toCIDR: 0.0.0.0/0`:443。**
+# あれが効いていると、env が壊れて api.anthropic.com や openrouter.ai へ直行しても
+# ネットワーク的には通ってしまい、「gateway 経由である」ことを設定でしか担保できない。
+# claude-code / claude-code-build は直行が drop で落ちる形になっているので、それに揃える。
+#
+# 下の 3 つは、この workflow 自身が喋るかどうかとは無関係に **argo の workflow Pod なら
+# 必ず要る**もの（netpol-aqua-checksum.yaml が全部実測で踏んでいる）:
+#   - kube-apiserver:6443 — argo の `wait` サイドカーが各ステップの結果を
+#     workflowtaskresults に POST する。塞ぐとコンテナがリトライし続けて workflow が
+#     timeout する。kube-proxy replacement のため 10.96.0.1:443 ではなく CP の実 IP に出る
+#   - seaweedfs filer:8333 — `wait` が各ステップのログを上げる
+#   - discord.com:443 — podMetadata.labels は onExit の Pod にも乗るので、全 workflow が
+#     走らせる Discord 通知がこのポリシーに選ばれる。入れないと通知がタイムアウトする
+#
+# pluto 本体（detect-all-in-cluster / detect-helm）は apiserver しか見ない。
+# 外部に出るのは ai-fix ステップだけで、github.com（clone と push）、api.github.com
+# （App の installation token、ref 作成、GraphQL の署名コミット、gh pr create）、
+# そして llm-gateway。**`*.githubusercontent.com` は要らない** — raw を引く処理が無い。
+# 増やすときは「宛先が無いと失敗ではなくハングする」ことに注意（aqua-checksum の教訓）。
+spec:
+  endpointSelector:
+    matchLabels:
+      pluto-check: "true"
+  egress:
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "6443"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: seaweedfs
+            app.kubernetes.io/component: filer
+            io.kubernetes.pod.namespace: seaweedfs
+      toPorts:
+        - ports:
+            - port: "8333"
+              protocol: TCP
+    # 推論。in-cluster なので toFQDNs ではなく toEndpoints。対向の ingress は
+    # manifests/llm-gateway/netpol.yaml 側で SA `pluto-fixer` に絞ってある。
+    # **こちらはラベル、あちらは SA** と軸が違うのは、こちらが「この workflow の Pod が
+    # 出られる先」を書くのに対し、あちらが「gateway を呼べる主体」の allowlist だから。
+    # onExit の discord-notify Pod は serviceAccountName を持たず Workflow レベルの
+    # `pluto-checker` を継ぐので、**このラベルには当たる**（discord.com が要る）が
+    # **`pluto-fixer` ではないので gateway には届かない**。軸を分けた結果そうなっている。
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/managed-by: envoy-gateway
+            io.kubernetes.pod.namespace: llm-gateway
+      toPorts:
+        - ports:
+            - port: "10080"
+              protocol: TCP
+    - toFQDNs:
+        - matchName: "github.com"
+        - matchName: "api.github.com"
+        - matchName: "discord.com"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP

@@ -13,6 +13,9 @@ spec:
   endpointSelector:
     matchLabels:
       app.kubernetes.io/managed-by: envoy-gateway
+      # Gateway 名まで見る。これが無いと、この namespace に 2 本目の Gateway を立てたとき
+      # そちらの Envoy にも同じポリシーが当たる — 分離したつもりで分離できない。
+      gateway.networking.k8s.io/gateway-name: llm-gateway
   ingress:
     # handler から。alias ごとに Pod を分けないので namespace 単位で開ける。
     # 対向の egress は claude-code の全 handler と argo の pluto-check が持つ。残るは

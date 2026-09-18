@@ -90,7 +90,15 @@ spec:
               # どの handler からのリクエストか。claude CLI が ANTHROPIC_CUSTOM_HEADERS で
               # 送る `x-tf-handler` を、コントローラの requestHeaderAttributes が
               # dynamic metadata に移したもの。送っていない呼び出しでは空になる。
+              # **これは呼ぶ側の自称**。認可には使われない。
               tf.handler: "%DYNAMIC_METADATA(io.envoy.ai_gateway:tf.handler)%"
+              # **本物の身元。** SecurityPolicy の apiKeyAuth が鍵を照合して付けたもので、
+              # 呼ぶ側は書けない（forwardClientIDHeader が上書きする）。上の自称と並べてある:
+              #   両方あり  … 正常。一致しなければ偽装か設定ミス
+              #   両方 null … 認証前に落ちた（401）か、ルートに乗らない直返し（404）
+              #   自称だけ  … **認証されずに通った** = SecurityPolicy が当たっていない
+              #               （付け忘れ、2 本目が Conflicted で無視された、名前の取り違え）
+              llm.client: "%REQ(X-LLM-CLIENT)%"
               gen_ai.request.model: "%REQ(X-AI-EG-MODEL)%"
               gen_ai.response.model: "%DYNAMIC_METADATA(io.envoy.ai_gateway:response_model)%"
               gen_ai.provider.name: "%DYNAMIC_METADATA(io.envoy.ai_gateway:backend_name)%"

@@ -214,7 +214,10 @@ spec:
               # 空行を「null でない行」として通すので、どちらも空トークンを素通しする
               # （実測）。main へ持ち越すと 2 ステップ先の「clone できない」に化ける。
               grep -qE '^ghs_[A-Za-z0-9]+$' /github-token/token
-              chmod 0400 /github-token/token
+              # 0400 だと init と main の UID が一致し続けることに依存する。
+              # workflowDefaults の fsGroup: 65532 で emptyDir が setgid になり、
+              # 中のファイルはグループを継ぐので、0440 なら UID がずれても読める。
+              chmod 0440 /github-token/token
           securityContext:
             runAsNonRoot: true
             allowPrivilegeEscalation: false

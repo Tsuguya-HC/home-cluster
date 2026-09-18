@@ -143,11 +143,24 @@ spec:
             memory: 1Gi
         command: [sh]
         env:
-          - name: CLAUDE_CODE_OAUTH_TOKEN
-            valueFrom:
-              secretKeyRef:
-                name: claude-code-token
-                key: credential
+          # 推論は llm-gateway 経由（#942）。**この Pod は LLM の資格情報を持たない** —
+          # 実キーは gateway の BackendSecurityPolicy 側にしかなく、gateway が
+          # Authorization を付け直す。
+          - name: ANTHROPIC_BASE_URL
+            value: http://llm-gateway.llm-gateway.svc.cluster.local/anthropic
+          # claude は空だと起動しないので置くが、**これは資格情報ではない**。
+          - name: ANTHROPIC_AUTH_TOKEN
+            value: handled-by-llm-gateway
+          # 空にしないと OAuth 側が優先されて Anthropic 直行になる。
+          - name: ANTHROPIC_API_KEY
+            value: ""
+          # どの呼び出し元かを gateway に名乗る。アクセスログの tf.handler に出る。
+          - name: ANTHROPIC_CUSTOM_HEADERS
+            value: "x-tf-handler: pluto-check"
+          # サブエージェントは親のモデルを継がない。固定しないと既定（sonnet）に落ち、
+          # gateway にマッチするルートが無くなる。
+          - name: CLAUDE_CODE_SUBAGENT_MODEL
+            value: review
           - name: GITHUB_APP_PRIVATE_KEY
             valueFrom:
               secretKeyRef:
@@ -207,6 +220,7 @@ spec:
 
           echo "=== Running Claude Code ==="
           claude --print "$(cat /tmp/prompt.txt)" \
+            --model review \
             --allowedTools Edit,Read,Bash,Glob,Grep,Write
 
           if ! git diff --quiet HEAD || git ls-files --others --exclude-standard | grep -q .; then

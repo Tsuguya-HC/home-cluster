@@ -15,13 +15,17 @@ spec:
       app.kubernetes.io/managed-by: envoy-gateway
   ingress:
     # handler から。alias ごとに Pod を分けないので namespace 単位で開ける。
-    # 対向の egress は claude-code の全 handler が持つ。残るは claude-code-build の
-    # taskflow-implement で、こちらは openrouter-broker サイドカー経由のまま（issue #942）。
+    # 対向の egress は claude-code の全 handler と argo の pluto-check が持つ。残るは
+    # claude-code-build の taskflow-implement で、こちらは openrouter-broker サイドカー
+    # 経由のまま（issue #942）。**新しい namespace から呼ぶときはここにも足すこと** —
+    # 片側だけだとエラーは出ず、接続がただ失敗する。
     - fromEndpoints:
         - matchLabels:
             io.kubernetes.pod.namespace: claude-code-build
         - matchLabels:
             io.kubernetes.pod.namespace: claude-code
+        - matchLabels:
+            io.kubernetes.pod.namespace: argo
       toPorts:
         - ports:
             - port: "10080"

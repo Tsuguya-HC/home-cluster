@@ -494,10 +494,13 @@ Agent Router のデータプレーン（issue #942）。alias（`x-ai-eg-model`�
 **`claude-code` namespace の handler は全て gateway 経由**（2026-09-18 に達成）。
 `api.anthropic.com` への直行も `claude-code-token` の参照もあの namespace には残っていない。
 
-ただし**クラスタで Anthropic に直行する Pod はまだある**。`argo` namespace の `pluto-check`
-（`manifests/argo/pluto-check.yaml`）が `claude-code-token` を持って `claude --print` を叩き、
-`netpol-workflow-pods.yaml` の `toCIDR: 0.0.0.0/0`:443 で外に出る。あれも倒すまで
-「Anthropic への egress を持つのは llm-gateway だけ」とは言えない。
+`argo` の `pluto-check` も 2026-09-18 に gateway 経由へ切り替えた（`workflow-pods` の egress に
+llm-gateway 宛を足し、`llm-gateway` 側の ingress にも `argo` を足してある。`toCIDR: 0.0.0.0/0`:443 は
+他の workflow Pod が使うので残る）。**Anthropic に直行する Pod はもう無い。**
+
+残る外部 LLM への直行は `claude-code-build` の `taskflow-implement` で、openrouter-broker
+サイドカー経由で `openrouter.ai` に出る。それを倒すまで「外部 LLM への egress は llm-gateway
+だけ」とは言えない。
 
 残るのは `claude-code-build` の `taskflow-implement` で、こちらは `openrouter.ai` への直行と
 openrouter-broker サイドカーを持つ。それを倒すまで「外部 LLM への egress は llm-gateway だけ」

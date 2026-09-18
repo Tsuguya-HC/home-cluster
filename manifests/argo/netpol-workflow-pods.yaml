@@ -45,6 +45,17 @@ spec:
         - ports:
             - port: "8333"
               protocol: TCP
+    # llm-gateway. pluto-check の推論はここを通る（#942）。in-cluster なので上の
+    # toCIDR 0.0.0.0/0 では届かない（CIDR ルールは Pod の identity に評価されない）。
+    # 対向の ingress は manifests/llm-gateway/netpol.yaml 側にも argo を足してある。
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/managed-by: envoy-gateway
+            io.kubernetes.pod.namespace: llm-gateway
+      toPorts:
+        - ports:
+            - port: "10080"
+              protocol: TCP
     # Talos apid. A node's IP carries a node identity in Cilium
     # (kube-apiserver for control planes, remote-node for workers, host for the
     # node the pod runs on), and CIDR rules are never evaluated against those

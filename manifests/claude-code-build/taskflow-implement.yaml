@@ -192,6 +192,10 @@ spec:
               # Kata では全コンテナに limits.cpu が無いと Pod レベルの cgroup quota が
               # 確定せず、agent の cpu: "4" が VM サイジングに伝わらない（native sidecar は
               # 通常 init と違い max ではなく合算）。taskflow-pr-review.yaml と同じ形で全部に書く。
+              # **ただしここで書けるのは我々が書くコンテナだけ**で、taskflow が注入する
+              # `flow-publish`（native sidecar、job.go:782）は memory limit しか持たない
+              # （job.go:845）。実際に cargo のビルドは回っているので、この前提は厳密には
+              # 成立していない — それでも足りているというだけ。
               limits: {cpu: 500m, memory: 256Mi}
           # 対象リポ用の installation token。ファイルで渡し、agent 側の入口で消す。
           - name: github-auth

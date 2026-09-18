@@ -498,9 +498,10 @@ Agent Router のデータプレーン（issue #942）。alias（`x-ai-eg-model`�
 `netpol-workflow-pods.yaml` の `toCIDR: 0.0.0.0/0`:443 で外に出る。あれも倒すまで
 「Anthropic への egress を持つのは llm-gateway だけ」とは言えない。
 
-残るのは `claude-code-build` の `taskflow-implement` で、こちらは `openrouter.ai` への直行と
-openrouter-broker サイドカーを持つ。それを倒すまで「外部 LLM への egress は llm-gateway だけ」
-は完成しない。
+`claude-code-build` の `taskflow-implement` も 2026-09-18 に切り替えた（openrouter-broker
+サイドカーごと廃止）。**残る外部 LLM への直行は `claude-code` の `taskflow-openrouter-smoke`
+だけ**（上の表のとおり `openrouter.ai`:443）。gateway を通さない経路を確かめるための smoke で、
+本番の handler では誰も使っていない。畳むかどうかは別途。
 
 **ingress は namespace 単位で開けている。つまり `claude-code` / `claude-code-build` に Pod を
 足すと、その Pod は alias を名乗るだけで gateway の上流に到達できる。** #942 の第一段階では

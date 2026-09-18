@@ -182,9 +182,9 @@ spec:
               # implement のままになる = **親子で上流も課金主体も割れる**
               # （親 → api.anthropic.com / 個人の Max、子 → openrouter.ai / 従量課金）。
               # この smoke は Agent を許可していないので今は起きないが、これをテンプレにして
-              # 本番 handler を切り替えるときは、親に括り付けること
-              # （taskflow-implement.yaml は CLAUDE_CODE_SUBAGENT_MODEL="$OPENROUTER_MODEL" で
-              # そうしている）。
+              # 新しい handler を書くときは、親に括り付けること。本番 handler の切り替えは
+              # 2026-09-18 に完了していて、全て親の alias に括り付けてある
+              # （taskflow-implement.yaml は CLAUDE_CODE_SUBAGENT_MODEL="$LLM_ALIAS"）。
               - name: CLAUDE_CODE_SUBAGENT_MODEL
                 value: implement
             securityContext:

@@ -204,10 +204,16 @@ spec:
           args:
             - |
               GITHUB_TOKEN=$(cat /github-token/token)
-              git clone --depth 1 -b "${BRANCH}" "https://x-access-token:${GITHUB_TOKEN}@github.com/Tsuguya-HC/home-harbor.git" /workspace
+              # Fetch the exact SHA the sensor saw, not the branch tip: the
+              # branch can move between the webhook firing and this clone
+              # running, which would plan a commit other than the one the
+              # status ends up posted against.
+              git clone --depth 1 "https://x-access-token:${GITHUB_TOKEN}@github.com/Tsuguya-HC/home-harbor.git" /workspace
+              git -C /workspace fetch --depth 1 origin "${SHA}"
+              git -C /workspace checkout FETCH_HEAD
           env:
-            - name: BRANCH
-              value: "{{workflow.parameters.branch}}"
+            - name: SHA
+              value: "{{workflow.parameters.sha}}"
           volumeMounts:
             - name: workspace
               mountPath: /workspace
@@ -261,7 +267,9 @@ spec:
               STATE=error
               DESC="tofu init failed"
             else
-              OUTPUT=$(tofu plan -detailed-exitcode -no-color 2>&1) && CODE=0 || CODE=$?
+              # -lock=false: this only ever reads state, and a PR plan must not
+              # block a concurrent apply run (push-triggered or the weekly cron).
+              OUTPUT=$(tofu plan -detailed-exitcode -lock=false -no-color 2>&1) && CODE=0 || CODE=$?
               if [ "$CODE" = "0" ]; then
                 STATE=success
                 DESC="No changes"
@@ -297,17 +305,64 @@ spec:
             # rebased commit was still running CI Gate.
             # See tofu-cloudflare-plan for why the author is matched on
             # numeric user id rather than login.
+            MERGE_OK=1
             if [ "$DESC" = "No changes" ] && { [ "$AUTHOR_ID" = "29139614" ] || [ "$AUTHOR_ID" = "265309552" ]; }; then
+              MERGE_OK=0
               for attempt in 1 2 3 4 5 6 7 8 9 10; do
-                if gh api "repos/$REPO/pulls/$PR/merge" --method PUT -f merge_method=squash; then
+                # sha= pins the merge to the commit that was actually planned. If
+                # the PR head moves while this workflow is running (new push
+                # during plan or during the retry loop below), the endpoint
+                # answers 409 instead of merging an unplanned commit -- the plan
+                # would otherwise prove nothing about what actually got merged.
+                if gh api "repos/$REPO/pulls/$PR/merge" --method PUT -f merge_method=squash -f sha="$SHA"; then
+                  MERGE_OK=1
                   break
                 fi
                 echo "merge attempt $attempt failed; retrying"
                 sleep 30
               done
+              if [ "$MERGE_OK" = "0" ]; then
+                # A failed loop isn't necessarily a failed merge: platformAutomerge
+                # (renovate.jsonc) can land the PR itself in the gap between our
+                # first 405 (the status not yet visible to the merge endpoint --
+                # why this loop exists) and our next attempt, and rebaseWhen:
+                # behind-base-branch can move the head mid-retry (the sha= pin
+                # above then answers 409 on purpose). Neither is a failure of
+                # this workflow -- only a head still on $SHA and still unmerged
+                # after the loop is.
+                if ! STATE_NOW=$(gh api "repos/$REPO/pulls/$PR" --jq '"\(.merged) \(.state) \(.head.sha)"'); then
+                  # Could not confirm PR state (network blip, rate limit, token
+                  # expiry). MERGE_OK stays 0: treating "couldn't check" as
+                  # success would silently reintroduce the exact failure mode
+                  # (a real merge failure reads as green) this block exists
+                  # to catch.
+                  :
+                else
+                  case "$STATE_NOW" in
+                    "true "*)          MERGE_OK=1 ;; # something else already merged it
+                    "false closed "*) MERGE_OK=1 ;; # closed without a push -- not this workflow's failure
+                    "false open $SHA")
+                      : # still open on the exact commit we planned -- real failure
+                      ;;
+                    "false open "?*)
+                      # head moved on; a new plan run for the new head owns the
+                      # merge now. Leave a trail: if that new run never starts
+                      # (sensor/eventbus down), this is the only place that
+                      # recorded the hand-off, and this workflow itself still
+                      # ends green.
+                      MERGE_OK=1
+                      jq -n \
+                        --arg body "Plan for \`$SHA\` posted \`$STATE\`, but the PR head moved before merge. Merge was left to the plan run for the new head. [This run]($RUN_URL)." \
+                        '{body: $body}' \
+                        | gh api "repos/$REPO/issues/$PR/comments" --input - >/dev/null
+                      ;;
+                    *) : ;; # shape we didn't expect -- don't guess, stay red
+                  esac
+                fi
+              fi
             fi
 
-            [ "$STATE" = "success" ]
+            [ "$STATE" = "success" ] && [ "$MERGE_OK" = "1" ]
         volumeMounts:
           - name: workspace
             mountPath: /workspace

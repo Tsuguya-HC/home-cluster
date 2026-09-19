@@ -308,11 +308,24 @@ spec:
       eventName: push
       filters:
         script: |-
-          if event.body == nil or event.body.action == nil then
+          if event.body == nil or event.body.action == nil or event.body.pull_request == nil then
             return false
           end
           local action = event.body.action
-          return action == "opened" or action == "synchronize" or action == "reopened"
+          if action == "opened" or action == "synchronize" or action == "reopened" then
+            return true
+          end
+          -- edited is normally noise (e.g. a Renovate PR body edit), but a
+          -- base branch retarget also lands as edited without changing
+          -- head.sha. Without this, a retarget leaves the required check
+          -- stuck at "Expected -- Waiting for status to be reported" forever.
+          -- Scoped to base changes only: every other edit (e.g. a Renovate PR
+          -- body edit) touches no commit, so an unscoped edited would spawn a
+          -- plan pod for no new commit to plan.
+          if action == "edited" and event.body.changes ~= nil and event.body.changes.base ~= nil then
+            return true
+          end
+          return false
   triggers:
     - template:
         name: tofu-apply
@@ -416,7 +429,20 @@ spec:
             return false
           end
           local action = event.body.action
-          return action == "opened" or action == "synchronize" or action == "reopened"
+          if action == "opened" or action == "synchronize" or action == "reopened" then
+            return true
+          end
+          -- edited is normally noise (e.g. a Renovate PR body edit), but a
+          -- base branch retarget also lands as edited without changing
+          -- head.sha. Without this, a retarget leaves the required check
+          -- stuck at "Expected -- Waiting for status to be reported" forever.
+          -- Scoped to base changes only: every other edit (e.g. a Renovate PR
+          -- body edit) touches no commit, so an unscoped edited would spawn a
+          -- plan pod for no new commit to plan.
+          if action == "edited" and event.body.changes ~= nil and event.body.changes.base ~= nil then
+            return true
+          end
+          return false
   triggers:
     - template:
         name: tofu-plan
@@ -516,7 +542,20 @@ spec:
             return false
           end
           local action = event.body.action
-          return action == "opened" or action == "synchronize" or action == "reopened"
+          if action == "opened" or action == "synchronize" or action == "reopened" then
+            return true
+          end
+          -- edited is normally noise (e.g. a Renovate PR body edit), but a
+          -- base branch retarget also lands as edited without changing
+          -- head.sha. Without this, a retarget leaves the required check
+          -- stuck at "Expected -- Waiting for status to be reported" forever.
+          -- Scoped to base changes only: every other edit (e.g. a Renovate PR
+          -- body edit) touches no commit, so an unscoped edited would spawn a
+          -- plan pod for no new commit to plan.
+          if action == "edited" and event.body.changes ~= nil and event.body.changes.base ~= nil then
+            return true
+          end
+          return false
   triggers:
     - template:
         name: tofu-apply

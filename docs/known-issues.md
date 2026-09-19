@@ -326,3 +326,24 @@ Tetragon の `matchBinaries` はインタプリタにマッチし、**スクリ�
 `manifests/kube-system/tracingpolicy-suspicious-binary.yaml` の Network tool セレクタで 2026-09-15 に実際に踏んだ: `github-auth.sh` / `github-signed-commit.sh`（どちらも `#!/bin/sh`）を `matchBinaries: NotIn` で除外するパッチを入れたが、比較対象は `/bin/sh`（busybox）になるため常に不一致となり、除外は一切効かないまま本番反映された。`kubectl apply --dry-run=server` も CRD スキーマ検証も通るため、**反映して発火が実際に止まるかを Loki で測るまで気づけない**。
 
 ELF の実バイナリ（`argocd-repo-server` / `busybox` / `postgres` 等）を対象にした Shell セレクタの除外は同じ形で問題なく機能している。シェバンスクリプトを対象にする場合、`matchBinaries` では指定できないため、そのプロセスが起動する対象コマンド側（`matchArgs`）で絞るか、除外自体を諦めるしかない。
+
+## `tofu-plan` が報告されないまま PR が固着する
+
+`manifests/argo/tofu-cloudflare.yaml` / `tofu-harbor.yaml` / `tofu-unifi.yaml` の plan WFT は `post_status pending` を最初に打ってから plan を走らせる（意図した fail-closed — ワークフローが起動しない、または途中で死んだ場合に status を未報告のまま残し GitHub にマージをブロックさせるため）。見た目の異なる 2 症状がどちらもこの設計から起きる。`tofu-plan` を必須チェックにすると、どちらも「人間の手動マージも含めて永久にブロックされる」詰みになる。
+
+**(a) pending 固着**: PR の Checks でチェックが黄色のまま回り続ける。`post_status pending` の直後に Pod が異常終了する（OOM / ノード drain による Eviction / ノード再起動）と `success` / `failure` / `error` のどれも書き込まれない。
+
+**(b) 未報告**: PR の Checks に `Expected — Waiting for status to be reported` と出る。plan の Workflow 自体が起動していない（sensor / eventbus / workflow-controller が落ちている）ケース。eventbus の JetStream quorum 喪失で複数の sensor が数時間サイレント停止した前例がある。
+
+**判別**: PR の Checks タブを見る。チェックの行自体が黄色い丸で存在すれば (a)、行が薄いグレーで「Expected」表記なら (b)。
+
+**復旧手順**:
+
+- **bot（Renovate）が作った PR**: PR を close → reopen する。3 sensor すべて `reopened` を受理するので、ブランチに触らずに plan が再走する。**空コミットを積まないこと** — 3 リポとも `rebaseWhen: "behind-base-branch"` で、Renovate は最終コミットの author が自分以外になったブランチを「変更された」と判定して以後の rebase / 更新を止める
+- **人間が作った PR**: 空コミットを積んで push すれば sensor が `synchronize` で plan を再起動する
+- 直ちに解消したい場合は手動で status を確定する:
+  ```sh
+  gh api repos/Tsuguya-HC/<repo>/statuses/<sha> -f state=success -f context=tofu-plan
+  ```
+
+pending / 未報告のまま止まるのは設計どおりであり、**plan を通していないコミットを通さないための fail-closed**。バグではないので、手動確定は「plan の代わりに人間が中身を確認した」ときにだけ行うこと。

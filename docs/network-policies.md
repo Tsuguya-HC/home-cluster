@@ -258,7 +258,8 @@ apiserver・Loki・Discord・GitHub・npm・crates・SeaweedFS・Prometheus・ho
 `taskflow-openrouter-smoke` は api.anthropic.com を書かないので、env が効かず Anthropic に
 飛んだら drop されて落ちる。`taskflow-llm-gateway-smoke`（#942）は **openrouter.ai を書かない**
 ので、gateway を経由せず Pod が直接出ようとしたら落ちる — 「外に出ているのは gateway だけ」を
-緑/赤で判定できる形にしてある。後者の handler は資格情報を一切持たない。
+緑/赤で判定できる形にしてある。後者の handler は LLM の資格情報を持たない
+（gateway のクライアントキーだけを持つ。実キーは gateway 側にしかない）。
 
 ## claude-code-build (1 policy)
 
@@ -519,25 +520,38 @@ pluto の出力と自リポジトリだからで、**論拠が違うだけで無
 サイドカー経由で `openrouter.ai` に出る。それを倒すまで「外部 LLM への egress は llm-gateway
 だけ」とは言えない。
 
-**ingress は `claude-code` / `claude-code-build` については namespace 単位で開けている。つまり
-この 2 つに Pod を足すと、その Pod は alias を名乗るだけで gateway の上流に到達できる。**
+**ingress は `claude-code` / `claude-code-build` については namespace 単位で開けている。**
 `argo` だけは SA（`pluto-fixer`）で絞ってある — あの namespace には claude CLI 以外の
 ワークロード（renovate / tofu-harbor / 各種 backup）が常駐しており、`workflow-pods` の
-除外リストにも入っていないので、namespace 単位で開けるとそれら全部が Max の alias に届く。 #942 の第一段階では
-その先は OpenRouter だけ（従量課金で、最悪でもコスト増）だったが、Max の alias
-（`review` / `investigate`）を足した時点で、**同じ境界の裏に個人の Max サブスクリプションが入った**
-（アカウント単位の OAuth で、異常な利用パターンは停止のリスクがある）。
+除外リストにも入っていないので、namespace 単位で開けるとそれら全部が gateway に届く。
 
-Anthropic は subscription OAuth を「Claude Code の system prompt が先頭にあるか」でゲートしており、
-claude CLI 以外がこの alias を叩いても*枠切れを装った 429* になるだけだが、**成否をクラスタ側で
-制御できているわけではない**。`claude-code` / `claude-code-build` に claude CLI 以外の
-ワークロードを足すときは、Max の alias に到達できることを承知した上で置くこと。
+**ただし「gateway に届く」と「Max の alias を使える」は 2026-09-18 から別のことになった。**
+ルート選択に使われる `x-ai-eg-model` はリクエスト body の `model` から埋まるので、**呼ぶ側が
+自由に選べる**。CNP は namespace / SA の粒度までしか絞れないので、それだけでは
+「untrusted input を実行する handler は従量課金だけ」を書けない。そこで
+`manifests/llm-gateway/securitypolicy.yaml` の `SecurityPolicy.apiKeyAuth` を
+ルートごとに 1 本ずつ掛け、**階層ごとに別の Secret の鍵しか通さない**ようにした。
 
-**絞りたくなったら今すぐできる。** Cilium は Pod の ServiceAccount を
-`io.cilium.k8s.policy.serviceaccount` としてアイデンティティラベルに入れており（実測）、
-flow ごとに専用 SA が既に割り当たっている（`agent-pr-reviewer` / `agent-llm-gateway-smoke` 等）。
-namespace 単位の ingress を既知 SA の allowlist に置き換えるのは **CNP 側だけで完結**し、
-taskflow 側の変更は要らない。`argo` は 2026-09-18 にこの形で入れた（`pluto-fixer` のみ）。
+- `claude-max` ルート（`review` / `investigate`）→ Secret `claude-max-client-keys`
+- `implement` ルート（OpenRouter）→ Secret `implement-client-keys`
+
+鍵は handler ごとに別で、**Secret のキー名がそのままクライアント ID**。認証を通ると
+`forwardClientIDHeader` でヘッダに移り、アクセスログの `llm.client` に出る。自称の
+`tf.handler` と並べてあるので、食い違えば偽装か設定ミス、`llm.client` だけ空なら
+**認証されずに通った**（＝ SecurityPolicy が当たっていない）と読める。
+
+したがって `claude-code` / `claude-code-build` に claude CLI 以外のワークロードを足しても、
+**鍵を渡さない限り Max の alias には届かない**（401）。鍵を渡すかどうかが判断の分かれ目になる。
+
+Anthropic は subscription OAuth を「Claude Code の system prompt が先頭にあるか」でゲートして
+おり、claude CLI 以外がこの alias を叩いても*枠切れを装った 429* になるだけだが、**成否を
+クラスタ側で制御できているわけではない**ので、鍵の側で閉じておく。
+
+`claude-code` / `claude-code-build` の ingress を SA 単位に落とすこともできる。Cilium は Pod の
+ServiceAccount を `io.cilium.k8s.policy.serviceaccount` としてアイデンティティラベルに入れて
+おり（実測）、flow ごとに専用 SA が既に割り当たっている（`agent-pr-reviewer` /
+`agent-llm-gateway-smoke` 等）。**CNP 側だけで完結**し、taskflow 側の変更は要らない。
+`argo` は 2026-09-18 にこの形で入れた（`pluto-fixer` のみ）。
 残る 2 namespace も同じ形にできる。
 
 Envoy の Pod がこの namespace に立つのは `helm-values/envoy-gateway/values.yaml` で

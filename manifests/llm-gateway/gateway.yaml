@@ -90,7 +90,21 @@ spec:
               # どの handler からのリクエストか。claude CLI が ANTHROPIC_CUSTOM_HEADERS で
               # 送る `x-tf-handler` を、コントローラの requestHeaderAttributes が
               # dynamic metadata に移したもの。送っていない呼び出しでは空になる。
+              # **これは呼ぶ側の自称**。認可には使われない。
               tf.handler: "%DYNAMIC_METADATA(io.envoy.ai_gateway:tf.handler)%"
+              # SecurityPolicy の apiKeyAuth が鍵を照合して付けたクライアント ID。
+              # **本物なのは 2xx の行だけ。** Envoy は拒否時に forwarding ヘッダへ触らずに
+              # 返す（api_key_auth.cc:154 で return、:176 の setReferenceKey に到達しない）
+              # ので、**401 の行には呼ぶ側が書いた値がそのまま出る**。inbound の
+              # x-llm-client は落とされない。失敗の帰属をこの欄で読まないこと。
+              #
+              # 2xx の行で上の自称と並べて読む:
+              #   両方あり  … 正常。一致しなければ偽装か設定ミス
+              #   自称だけ  … **認証されずに通った** = SecurityPolicy が当たっていない
+              #               （付け忘れ、2 本目が Conflicted で無視された、名前の取り違え）
+              # これは fail-open 側の唯一の兆候で、Secret の事故（500）と違って
+              # 黙って通る。taskflow-llm-gateway-smoke が否定側の 1 往復で見張っている。
+              llm.client: "%REQ(X-LLM-CLIENT)%"
               gen_ai.request.model: "%REQ(X-AI-EG-MODEL)%"
               gen_ai.response.model: "%DYNAMIC_METADATA(io.envoy.ai_gateway:response_model)%"
               gen_ai.provider.name: "%DYNAMIC_METADATA(io.envoy.ai_gateway:backend_name)%"

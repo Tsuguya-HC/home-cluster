@@ -3,7 +3,6 @@ tempo:
     pullSecrets:
       - name: dockerhub-pull-credentials
   reportingEnabled: false
-  memBallastSizeMbs: 256
   retention: 168h
   receivers:
     otlp:

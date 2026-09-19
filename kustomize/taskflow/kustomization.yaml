@@ -88,7 +88,7 @@ patches:
               - name: manager
                 env:
                   - name: SIDECAR_IMAGE
-                    value: registry.infra.tgy.io/tools/agent-sidecar:latest@sha256:516735061dc2d7077e10613ba53967e7e75b3841c5d9d6e62e549803d617f686
+                    value: registry.infra.tgy.io/tools/agent-sidecar:latest@sha256:86ee2eed8af2b2f0af699cdba41cd0b09051d4dfbf2178cfe29bd8fc18f424c2
 
   # TaskFlow の構造検査 webhook（taskflow #17 / ADR-0006）。taskflow 側は caBundle を
   # 持たない ValidatingWebhookConfiguration を配るだけなので、埋めるのはこちら —

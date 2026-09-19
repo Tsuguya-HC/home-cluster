@@ -409,7 +409,7 @@ openrouter.ai への直接到達があるのか」を漏れと誤診しないた
 | Component | Ingress | Egress |
 |---|---|---|
 | **rss-pg** | self → 5432/8000; rss-server/rss-ui/rss-fetcher/rss-cleaner/rss-migration → 5432; cloudnative-pg (cnpg-system), host → 8000 (probes) | kube-apiserver, self:5432/8000 |
-| **rss-server** | oauth2-proxy-rss (oauth2-proxy) → 80 | rss-pg:5432 |
+| **rss-server** | oauth2-proxy-rss (oauth2-proxy) → 80 | rss-pg:5432, world:443（フィード追加時の即時取得） |
 | **rss-ui** | oauth2-proxy-rss (oauth2-proxy) → 80 | rss-pg:5432 |
 | **rss-fetcher** | rss-cron → 80 | rss-pg:5432, world:443 |
 | **rss-cleaner** | rss-cron → 80 | rss-pg:5432 |

@@ -1,0 +1,53 @@
+# 呼び出し側の認証（issue #942）。**Gateway に付ける。ルートに付けてはいけない。**
+#
+# なぜ Gateway 単位か: 認証フィルタは order 7 で走るが、AIGatewayRoute のルートは
+# `x-ai-eg-model` でマッチし、そのヘッダは extproc（order 100）が body の `model` から
+# 埋める。**認証の時点ではまだモデルヘッダが無く、リクエストは catch-all ルートにいる。**
+# だからルートに付けたポリシーは一度も評価されない（#971 で実際に全 handler が 401 に
+# なった。route_name が `implement/rule/1`（route-not-found）で `unkonwn_api_key`）。
+#
+# Gateway 単位のポリシーは **配下の全ルートに配られる**ので、どのルートにいても走る:
+#
+#   // envoy-gateway v1.9.1 internal/gatewayapi/securitypolicy.go:1683-1691
+#   for _, r := range h.Routes {
+#       if r.Security != nil { continue }   // ルート単位が既にあればそちら優先
+#       r.Security = securityFeatures
+#   }
+#
+# 階層（Max / 従量課金）の分離はここではやらない。認証が付ける `x-llm-client` を
+# AIGatewayRoute のルールがマッチすることで行う — あちらは extproc の
+# `ClearRouteCache: true`（ai-gateway v1.1.0 internal/extproc/processor_impl.go:327）
+# の後のルート再計算で評価されるので、認証の結果を見られる。
+#
+# 効きかたの注意:
+#   - **1 つの対象に掛けられる SecurityPolicy は 1 本。** 2 本目は status に
+#     `Conflicted` が出るだけで **黙って無視される**（apply は通る）
+#   - Secret の参照ミス・鍵の値の重複・Secret 消失は **500 直返し**（fail-closed）。
+#     設定ミスで認証が黙って外れることは無い
+#   - 逆に **ポリシーが付かなくなる側は fail-open**。アクセスログで 2xx なのに
+#     `llm.client` が空、が唯一の兆候。taskflow-llm-gateway-smoke の否定側チェックが
+#     無効な鍵を投げて 401 を確かめている
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: llm-gateway-client-keys
+  namespace: llm-gateway
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: llm-gateway
+  apiKeyAuth:
+    credentialRefs:
+      - name: llm-gateway-client-keys
+    # claude は ANTHROPIC_AUTH_TOKEN を `Authorization: Bearer <値>` として送る。
+    # Envoy は `Bearer ` を明示的に剥がしてから照合するので、Secret には生の鍵を入れる。
+    extractFrom:
+      - headers: [Authorization]
+    # 上流へ転送する前に落とす。この後 BackendSecurityPolicy が実キーを載せ直す。
+    sanitize: true
+    # 認証されたクライアント ID をリクエストヘッダに載せる。呼ぶ側が同じヘッダを
+    # 送っても認証成功時に上書きされる（api_key_auth.cc:176 の setReferenceKey）。
+    # アクセスログの llm.client はこれ。**本物なのは 2xx の行だけ** — 拒否時 Envoy は
+    # このヘッダに触らずに返すので、401 の行には呼ぶ側が書いた値がそのまま出る。
+    forwardClientIDHeader: x-llm-client

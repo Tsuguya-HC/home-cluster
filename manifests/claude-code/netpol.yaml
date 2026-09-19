@@ -30,9 +30,10 @@ spec:
         - ports:
             - port: "443"
               protocol: TCP
-    # 推論は llm-gateway 経由（#942）。**api.anthropic.com は書かない** — env が効かず
-    # Anthropic へ直行する取り違えを drop で検出するため。claude-code: "true" の Pod は
-    # 全て gateway 経由に切り替え済み。
+    # 推論は llm-gateway 経由（#942）。**api.anthropic.com は書かない** — env が効かずに
+    # 直行する取り違えを drop で検出するため。正しく設定していても直行しうるため、handler 側で
+    # env 3 本を入れて直行を止めている（根拠は manifests/claude-code/taskflow-common.yaml）。
+    # claude-code: "true" の Pod は全て gateway 経由に切り替え済み。
     - toEndpoints:
         - matchLabels:
             app.kubernetes.io/managed-by: envoy-gateway

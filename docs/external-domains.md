@@ -45,7 +45,9 @@ Application が Unknown のまま止まる形で出る。
 - **用途**: `llm-gateway` の `review` / `investigate` alias（Max の OAuth トークンで Anthropic 直）
 - **引く側**: Envoy データプレーン（`manifests/llm-gateway/netpol.yaml`）**だけ**。
   `claude-code` の handler も `argo` の `pluto-check` も gateway 経由で、直接は出ない。
-  どれも CNP 側で直行を塞いであるので、env が壊れて直行に倒れたら drop で落ちる。
+  どれも CNP 側で直行を塞いであるので env 取り違えは drop で検出できる。ただし正しく設定して
+  いても直行しうるため、handler 側で env 3 本を入れて止めている
+  （根拠は `manifests/claude-code/taskflow-common.yaml`）。
   なお `argo` の**他の** workflow Pod は `workflow-pods` の `toCIDR: 0.0.0.0/0`:443 を
   持つので、ドメイン単位で許可していないだけで到達自体はできる
 - **Port**: 443
@@ -56,8 +58,10 @@ Application が Unknown のまま止まる形で出る。
 
 **`claude-code` 側の CNP には無い。あちらに `api.anthropic.com` を足してはいけない。**
 handler は全て llm-gateway 経由で、`api.anthropic.com` は 2026-09-18 に 4 箇所とも落とした。
-env が効かず Anthropic に直行したら drop されて落ちる、という形で取り違えを検出している。
+正しく設定していても直行しうるため、handler 側で env 3 本を入れて止めている
+（根拠は `manifests/claude-code/taskflow-common.yaml`）。取り違えが起きれば drop で検出される。
 
 **`claude-code-build` には無い。あちらに `api.anthropic.com` を足してはいけない。**
-`taskflow-implement.yaml` は「書かないこと」を不変条件として持っており、env が効かず
-Anthropic に飛んだら drop されて落ちる、という設計で取り違えを検出している。
+`taskflow-implement.yaml` は「書かないこと」を不変条件として持っている。こちらも同じ理由で
+env 3 本が要る（根拠は `manifests/claude-code/taskflow-common.yaml`）。取り違えが起きれば
+drop で検出される。

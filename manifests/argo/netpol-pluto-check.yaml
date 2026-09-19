@@ -7,9 +7,10 @@ metadata:
 # CronWorkflow。推論は llm-gateway 経由（#942）。
 #
 # **netpol-workflow-pods から除外して専用に持つ理由は `toCIDR: 0.0.0.0/0`:443。**
-# あれが効いていると、env が壊れて api.anthropic.com や openrouter.ai へ直行しても
-# ネットワーク的には通ってしまい、「gateway 経由である」ことを設定でしか担保できない。
-# claude-code / claude-code-build は直行が drop で落ちる形になっているので、それに揃える。
+# あれが効いていると、api.anthropic.com や openrouter.ai への直行がネットワーク的には
+# 通ってしまい、「gateway 経由である」ことを設定でしか担保できない。claude-code /
+# claude-code-build は直行が drop で落ちる形になっているので、それに揃える。正しく設定して
+# いても直行しうるため、下の env 3 本で止めている（根拠は manifests/claude-code/taskflow-common.yaml）。
 #
 # 下の 3 つは、この workflow 自身が喋るかどうかとは無関係に **argo の workflow Pod なら
 # 必ず要る**もの（netpol-aqua-checksum.yaml が全部実測で踏んでいる）:

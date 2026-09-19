@@ -30,3 +30,27 @@ data:
   # renovate: datasource=git-refs depName=https://github.com/Tsuguya-HC/parts
   branch: main
   sha: 7a3ad935ce3c5f83c071612b2428a0f94aa3f36b
+---
+# Claude Code は ANTHROPIC_BASE_URL を向けても api.anthropic.com へ直行する経路を持つ
+# （feature flag fetch / telemetry event logging / fast mode の可否チェック、
+# code.claude.com/docs/en/network-config）。claude-code 系の CNP はどれも api.anthropic.com を
+# 書いていない（env 取り違えを drop で検出するため）ので、この 3 本を入れないと正常時にも
+# drop が出て、検出器として意味を失う。
+# 2026-09-19 実測: 付けた側は Policy denied 0、付けない側は起動直後に 2 件。どちらも推論は正常
+# （同じ prompt に同じ応答）。
+#
+# **この根拠の本文はここだけに置く。** 他の manifests / docs から参照する側はポインタ
+# （「根拠は taskflow-common.yaml 参照」）だけにして、コピーを増やさないこと。
+#
+# **ここに無関係なキーを足さない。** envFrom は ConfigMap の全キーを無差別に注入するので、
+# 追加したキーは確認なしに 15 handler 全部へ伝播する。別の共通 env が要るときは目的別に
+# 別 ConfigMap を切ること。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: claude-code-disable-nonessential-traffic
+  namespace: claude-code
+data:
+  DISABLE_TELEMETRY: "1"
+  DISABLE_ERROR_REPORTING: "1"
+  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"

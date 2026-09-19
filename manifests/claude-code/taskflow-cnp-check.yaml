@@ -98,8 +98,9 @@ spec:
         - ports:
             - port: "443"
               protocol: TCP
-    # 推論は llm-gateway 経由（#942）。**api.anthropic.com は書かない** — env が効かず
-    # 直行する取り違えを drop で検出するため。
+    # 推論は llm-gateway 経由（#942）。**api.anthropic.com は書かない** — env が効かずに
+    # 直行する取り違えを drop で検出するため。正しく設定していても直行しうるため、handler 側で
+    # env 3 本を入れて直行を止めている（根拠は manifests/claude-code/taskflow-common.yaml）。
     - toEndpoints:
         - matchLabels:
             app.kubernetes.io/managed-by: envoy-gateway
@@ -142,8 +143,9 @@ spec:
         - ports:
             - port: "443"
               protocol: TCP
-    # 推論は llm-gateway 経由（#942）。**api.anthropic.com は書かない** — env が効かず
-    # 直行する取り違えを drop で検出するため。
+    # 推論は llm-gateway 経由（#942）。**api.anthropic.com は書かない** — env が効かずに
+    # 直行する取り違えを drop で検出するため。正しく設定していても直行しうるため、handler 側で
+    # env 3 本を入れて直行を止めている（根拠は manifests/claude-code/taskflow-common.yaml）。
     - toEndpoints:
         - matchLabels:
             app.kubernetes.io/managed-by: envoy-gateway
@@ -325,6 +327,10 @@ spec:
               # gateway にマッチするルートが無くなる。親と同じ alias に括り付ける。
               - name: CLAUDE_CODE_SUBAGENT_MODEL
                 value: investigate
+            # api.anthropic.com への直行を止める 3 本。根拠は taskflow-common.yaml 参照。
+            envFrom:
+              - configMapRef:
+                  name: claude-code-disable-nonessential-traffic
             securityContext:
               allowPrivilegeEscalation: false
               capabilities:
@@ -575,6 +581,10 @@ spec:
               # gateway にマッチするルートが無くなる。親と同じ alias に括り付ける。
               - name: CLAUDE_CODE_SUBAGENT_MODEL
                 value: investigate
+            # api.anthropic.com への直行を止める 3 本。根拠は taskflow-common.yaml 参照。
+            envFrom:
+              - configMapRef:
+                  name: claude-code-disable-nonessential-traffic
             securityContext:
               allowPrivilegeEscalation: false
               capabilities:

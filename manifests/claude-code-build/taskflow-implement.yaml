@@ -31,7 +31,9 @@ automountServiceAccountToken: false
 ---
 # 出口は llm-gateway・GitHub・依存の取得先だけ。**api.anthropic.com も openrouter.ai も
 # 書かない** — env が効かずに外部 LLM へ直行する取り違えを、緑で通さないため。上流の選択は
-# gateway の仕事で、この Pod は alias しか知らない（#942）。
+# gateway の仕事で、この Pod は alias しか知らない（#942）。ただし正しく設定されていても
+# 直行しうるため、下の DISABLE_TELEMETRY 等 3 本で止めてある
+# （根拠は manifests/claude-code/taskflow-common.yaml）。
 # DNS は CCNP allow-dns で全 Pod に共通適用済み。ingress は書かないので全 deny。
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
@@ -725,6 +727,15 @@ spec:
               # Authorization を付け直す。openrouter-broker サイドカーはこれで不要になった。
               - name: ANTHROPIC_BASE_URL
                 value: http://llm-gateway.llm-gateway.svc.cluster.local/anthropic
+              # api.anthropic.com 直行を止める 3 本。根拠は manifests/claude-code/taskflow-common.yaml。
+              # parts-ref と違い ConfigMap を複製しない — 値が "1" 固定で Renovate のバンプが
+              # 無いため、複製 + sha 同期と同じコストを払う理由がない。
+              - name: DISABLE_TELEMETRY
+                value: "1"
+              - name: DISABLE_ERROR_REPORTING
+                value: "1"
+              - name: CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC
+                value: "1"
               # gateway のクライアントキー。**LLM の資格情報ではない** — OpenRouter の
               # API キーは gateway 側にしかなく、gateway が Authorization を付け直す。
               # この鍵が示すのは「どの階層を呼んでよいか」だけで、llm-gateway に届く Pod の

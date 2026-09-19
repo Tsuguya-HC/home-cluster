@@ -118,6 +118,31 @@ user_invocable: true
 - `syncPolicy.automated.selfHeal: true`
 - `syncPolicy.syncOptions` に `ServerSideApply=true` が含まれること
 - `metadata.namespace: argocd`（Application リソースは argocd namespace に属する）
+- **`syncPolicy.syncOptions` の各値が下記の既知集合に入っていること**
+
+`syncOptions` は Application CRD 上ただの `[]string` で値が検証されない。**存在しない値を書いても apply は通り、ArgoCD は黙って無視する**（`silent-config-drop` と同型）。2026-03-07 に `apps/kyverno.yaml` へ入れた `ServerSideDiff=true` はこの形で、半年間一度も効かないまま kyverno が OutOfSync を出し続けた（2026-09-19 に判明。詳細は `docs/known-issues.md`）。
+
+既知の値（[sync-options](https://argo-cd.readthedocs.io/en/stable/user-guide/sync-options/)）:
+
+```
+Prune=false / Prune=confirm
+Delete=false / Delete=confirm
+Validate=false
+SkipDryRunOnMissingResource=true
+ApplyOutOfSyncOnly=true
+PrunePropagationPolicy=foreground|background|orphan
+PruneLast=true
+Replace=true
+ServerSideApply=true|false
+ClientSideApplyMigration=false
+FailOnSharedResource=true
+RespectIgnoreDifferences=true
+CreateNamespace=true
+```
+
+**`ServerSideDiff=true` は syncOptions ではない**（よくある取り違え）。per-Application は annotation `argocd.argoproj.io/compare-options: ServerSideDiff=true`、グローバルは `helm-values/argocd/values.yaml` の `configs.params` に `controller.diff.server.side` を置く。`IgnoreExtraneous` も同じ annotation 側。syncOptions に書かれていたら Critical 扱いで報告する。
+
+上の一覧に無い値を見つけたら、**上流の options 定義を確認してから**報告する（ArgoCD のバージョンが上がって値が増えている可能性がある）。
 
 ### Rule 9: CNP ルール品質
 

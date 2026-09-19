@@ -252,7 +252,7 @@ spec:
               # （親 → api.anthropic.com / 個人の Max、子 → openrouter.ai / 従量課金）。
               # この smoke は Agent を許可していないので今は起きないが、これをテンプレにして
               # 本番 handler を切り替えるときは、親に括り付けること
-              # （taskflow-implement.yaml は CLAUDE_CODE_SUBAGENT_MODEL="$OPENROUTER_MODEL" で
+              # （taskflow-implement.yaml は CLAUDE_CODE_SUBAGENT_MODEL="$LLM_ALIAS" で
               # そうしている）。
               - name: CLAUDE_CODE_SUBAGENT_MODEL
                 value: implement

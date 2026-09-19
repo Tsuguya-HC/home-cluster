@@ -82,8 +82,8 @@ spec:
             - port: "443"
               protocol: TCP
     # 推論は llm-gateway 経由（#942）。**api.anthropic.com は書かない** — env が効かずに
-    # Anthropic へ直行する取り違えを、drop で落として検出するため
-    # （manifests/claude-code-build/taskflow-implement.yaml と同じ考え方）。
+    # 直行する取り違えを drop で検出するため。正しく設定していても直行しうるため、handler 側で
+    # env 3 本を入れて直行を止めている（根拠は manifests/claude-code/taskflow-common.yaml）。
     # 10080 は listener 80 に対して Envoy が実際に listen する port。
     - toEndpoints:
         - matchLabels:
@@ -332,6 +332,10 @@ spec:
               # 上流と課金主体が親子で割れないようにする。
               - name: CLAUDE_CODE_SUBAGENT_MODEL
                 value: review
+            # api.anthropic.com への直行を止める 3 本。根拠は taskflow-common.yaml 参照。
+            envFrom:
+              - configMapRef:
+                  name: claude-code-disable-nonessential-traffic
             securityContext:
               # ここだけ readOnlyRootFilesystem を付けていない。claude CLI が rootfs の
               # どこに書くかを確かめていないため（HOME は /tmp に向けてある）。サイドカー 3 つは

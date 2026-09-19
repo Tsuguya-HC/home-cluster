@@ -27,6 +27,8 @@ automountServiceAccountToken: false
 ---
 # 出口は openrouter.ai だけ。api.anthropic.com を**書かない**のがこの CNP の主眼で、
 # 万一 env が効いていなければ Anthropic 直行が drop されて失敗する = 取り違えが緑で通らない。
+# ただし正しく設定していても直行しうるため、env 3 本で止めている
+# （根拠は manifests/claude-code/taskflow-common.yaml）。
 # DNS は CCNP allow-dns で全 Pod に共通適用済み。ingress は書かないので全 deny。
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
@@ -123,6 +125,8 @@ spec:
                 value: /tmp
               - name: ANTHROPIC_BASE_URL
                 value: https://openrouter.ai/api
+              # この handler は gateway を経由せず openrouter.ai に直接出る配線だが、上の CNP が
+              # api.anthropic.com を書いていない点は他の handler と同じ理由（env 取り違えの検出）。
               - name: ANTHROPIC_AUTH_TOKEN
                 valueFrom:
                   secretKeyRef:
@@ -139,6 +143,10 @@ spec:
               # 実行系 handler にそのまま持っていける形にしておく。
               - name: CLAUDE_CODE_SUBAGENT_MODEL
                 value: z-ai/glm-5.3-flash
+            # api.anthropic.com への直行を止める 3 本。根拠は taskflow-common.yaml 参照。
+            envFrom:
+              - configMapRef:
+                  name: claude-code-disable-nonessential-traffic
             securityContext:
               allowPrivilegeEscalation: false
               capabilities:

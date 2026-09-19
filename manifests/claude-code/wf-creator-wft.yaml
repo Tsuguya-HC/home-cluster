@@ -194,6 +194,21 @@ spec:
             - ANTHROPIC_CUSTOM_HEADERS: x-tf-handler に handler 名（アクセスログの帰属に使う）
             - CLAUDE_CODE_SUBAGENT_MODEL: --model と同じ alias（サブエージェントは親のモデルを継がない）
 
+            ANTHROPIC_BASE_URL を正しく設定していても、Claude Code は feature flag fetch /
+            telemetry event logging / fast mode の可否チェックで gateway を経由せず
+            api.anthropic.com に直行する経路を持つ（code.claude.com/docs/en/network-config）。
+            外すと CNP の drop が正常時にも出続け、検出器として機能しなくなるので、これを止める
+            env 3 本（CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC / DISABLE_TELEMETRY /
+            DISABLE_ERROR_REPORTING、いずれも \"1\"）も要る。渡し方は namespace で分岐する:
+            - **claude-code namespace の handler**: 3 本を個別に書かず、コンテナに
+              envFrom: [{configMapRef: {name: claude-code-disable-nonessential-traffic}}] を
+              足す（このファイルの Pod spec が実例。ConfigMap は
+              manifests/claude-code/taskflow-common.yaml）
+            - **claude-code 以外の namespace（argo / claude-code-build 等）の handler**:
+              configMapRef は同一 namespace しか解決できないので、3 本をリテラル env で書く
+              （manifests/argo/pluto-check.yaml、
+              manifests/claude-code-build/taskflow-implement.yaml が実例）
+
             ## クライアントキーの用意（env を書く前に必要）
             上の secretKeyRef が指すキーは自動では生えない。**先に 3 箇所に足すこと。**
             足さないと Pod が CreateContainerConfigError で起動しない。
@@ -261,6 +276,10 @@ spec:
           # gateway にマッチするルートが無くなる。親と同じ alias に括り付ける。
           - name: CLAUDE_CODE_SUBAGENT_MODEL
             value: review
+        # api.anthropic.com への直行を止める 3 本。根拠は taskflow-common.yaml 参照。
+        envFrom:
+          - configMapRef:
+              name: claude-code-disable-nonessential-traffic
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:

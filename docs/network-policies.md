@@ -261,6 +261,9 @@ apiserver・Loki・Discord・GitHub・npm・crates・SeaweedFS・Prometheus・ho
 緑/赤で判定できる形にしてある。後者の handler は LLM の資格情報を持たない
 （gateway のクライアントキーだけを持つ。実キーは gateway 側にしかない）。
 
+ただし env を正しく設定していても直行しうるため、両方の handler に env 3 本を入れて止めて
+ある（根拠は `manifests/claude-code/taskflow-common.yaml`）。
+
 ## claude-code-build (1 policy)
 
 | Component | Ingress | Egress |
@@ -273,6 +276,9 @@ mkfs するため、docs/pod-security.md）にしてあるので CNP も分け�
 取り違えを緑で通さないため。上流の選択は gateway の仕事で、この Pod は alias しか知らない。
 `index.crates.io` / `static.crates.io` / `registry.npmjs.org` は依存の取得用で、対応する言語を
 足すときはここも足す必要がある（宛先が無いと失敗ではなくハングする）。
+
+env を正しく設定していても直行しうるため、handler 側で env 3 本を入れて止めている
+（根拠は `manifests/claude-code/taskflow-common.yaml`）。
 
 2026-09-19 まで `openrouter.ai` への egress と `openrouter-broker` サイドカーを持っていた。
 ブローカーは鍵を `agent` コンテナから隔てるためのもので、**CNP は Pod 単位（同一 identity）なので
@@ -513,6 +519,8 @@ gateway の ingress もこちらの SA で絞ってある。
 狙いは `toCIDR: 0.0.0.0/0`:443 を外すこと — あれが効いていると env が壊れて直行に倒れても
 ネットワーク的には通ってしまい、「gateway 経由である」ことを設定でしか担保できない。
 **これで 3 つの namespace すべてで、直行は drop されて落ちる。**
+ただし env を正しく設定していても直行しうるため、env 3 本を入れていない handler は
+正常時にも drop が出る（根拠は `manifests/claude-code/taskflow-common.yaml`）。
 
 onExit の Discord 通知 Pod にも `podMetadata.labels` が乗るので、専用 CNP には `discord.com` が
 要る（`netpol-aqua-checksum.yaml` が実測で踏んでいる）。同じラベルを共有する以上、ai-fix の

@@ -262,6 +262,15 @@ spec:
           # Authorization を付け直す。
           - name: ANTHROPIC_BASE_URL
             value: http://llm-gateway.llm-gateway.svc.cluster.local/anthropic
+          # api.anthropic.com 直行を止める 3 本。根拠は manifests/claude-code/taskflow-common.yaml。
+          # parts-ref と違い ConfigMap を複製しない — 値が "1" 固定で Renovate のバンプが
+          # 無いため、複製 + sha 同期と同じコストを払う理由がない。
+          - name: DISABLE_TELEMETRY
+            value: "1"
+          - name: DISABLE_ERROR_REPORTING
+            value: "1"
+          - name: CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC
+            value: "1"
           # gateway のクライアントキー。**LLM の資格情報ではない** — Max の OAuth トークンも
           # OpenRouter の API キーも gateway 側にしかなく、gateway が Authorization を付け直す。
           # この鍵が示すのは「どの階層を呼んでよいか」だけで、llm-gateway に届く Pod の

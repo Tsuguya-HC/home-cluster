@@ -256,6 +256,10 @@ spec:
               # そうしている）。
               - name: CLAUDE_CODE_SUBAGENT_MODEL
                 value: implement
+            # api.anthropic.com への直行を止める 3 本。根拠は taskflow-common.yaml 参照。
+            envFrom:
+              - configMapRef:
+                  name: claude-code-disable-nonessential-traffic
             securityContext:
               allowPrivilegeEscalation: false
               capabilities:

@@ -142,6 +142,10 @@ spec:
           # gateway にマッチするルートが無くなる。親と同じ alias に括り付ける。
           - name: CLAUDE_CODE_SUBAGENT_MODEL
             value: review
+        # api.anthropic.com への直行を止める 3 本。根拠は taskflow-common.yaml 参照。
+        envFrom:
+          - configMapRef:
+              name: claude-code-disable-nonessential-traffic
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:

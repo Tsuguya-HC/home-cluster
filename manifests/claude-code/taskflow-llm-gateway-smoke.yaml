@@ -160,6 +160,27 @@ spec:
                   *) escalate "無効な鍵が 401 以外（HTTP $BAD）で通った。**呼び出し側の認証が効いていない** — SecurityPolicy の付け忘れ、targetRefs の外れ、2 本目が Conflicted で無視された等。alias=$ALIAS。" ;;
                 esac
 
+                # --- 階層分離の見張り ---------------------------------------------
+                # 上の否定側は「鍵が無ければ拒まれる」までしか見ない。**鍵さえあれば
+                # どの階層でも通る**状態（Gateway 単位の認証だけで、ルートのクライアント
+                # 条件が外れている状態）はそれでは検出できない。
+                # tier-probe は従量課金ルートにだけ許可してあるクライアントなので、
+                # これで Max（review）を要求して 404 になることを確かめる。
+                # ルートに当たらない＝上流に行かないのでトークンは消費しない。
+                TIER=$(curl -s --max-time 10 -o /dev/null -w '%{http_code}' \
+                  -X POST \
+                  -H "Authorization: Bearer $LLM_KEY_TIER_PROBE" \
+                  -H 'content-type: application/json' \
+                  -H 'anthropic-version: 2023-06-01' \
+                  --data '{"model":"review","max_tokens":1,"messages":[{"role":"user","content":"x"}]}' \
+                  "${ANTHROPIC_BASE_URL}/v1/messages" || true)
+                case "$TIER" in
+                  404) echo "階層分離 OK: 従量課金のクライアントは Max ルートに入れない（404）" ;;
+                  401) escalate "tier-probe の鍵が認証を通らない（401）。llm-gateway 側の llm-gateway-client-keys Secret に tier-probe があるか確認すること。階層分離は確かめられていない。" ;;
+                  000|"") escalate "gateway に接続できない（階層分離の確認が届かなかった）。alias=$ALIAS の確認はしていない。" ;;
+                  *) escalate "**階層分離が効いていない** — 従量課金だけ許可したクライアントが Max ルートに HTTP $TIER で入れた。AIGatewayRoute の x-llm-client 条件が外れている疑い（manifests/llm-gateway/anthropic.yaml）。" ;;
+                esac
+
                 # activeDeadlineSeconds の TERM は PID1 に飛ぶ。前面で待つと POSIX sh は
                 # 前面コマンドの終了まで trap を実行しないので、background + wait にする。
                 claude -p "/workspace/ok/report.md に、いま応答しているモデル名だけを 1 行で書いて終了してください。他のファイルは作らないこと。" \
@@ -209,6 +230,12 @@ spec:
                   secretKeyRef:
                     name: llm-gateway-client-keys
                     key: llm-gateway-smoke
+              # 階層分離の見張り用。従量課金ルートにだけ許可されたクライアント。
+              - name: LLM_KEY_TIER_PROBE
+                valueFrom:
+                  secretKeyRef:
+                    name: llm-gateway-client-keys
+                    key: tier-probe
               # 空にしないと OAuth 側が優先されて Anthropic に飛ぶ（そちらは CNP で落ちる）。
               - name: ANTHROPIC_API_KEY
                 value: ""

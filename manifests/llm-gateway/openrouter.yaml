@@ -38,6 +38,14 @@ spec:
             - type: Exact
               name: x-ai-eg-model
               value: implement
+            # **どのクライアントがこの階層を使ってよいか。** 認証（Gateway 単位の
+            # SecurityPolicy）が付ける x-llm-client を見る。呼ぶ側は偽装できない
+            # （認証成功時に必ず上書きされる）。ここに無いクライアントは**どのルールにも
+            # 当たらず route-not-found → 404**。鍵が無ければその手前で 401。
+            # 新しい handler を足すときはここにも足す。
+            - type: RegularExpression
+              name: x-llm-client
+              value: "^(llm-gateway-smoke|taskflow-implement|tier-probe)$"
       # modelsOwnedBy / weight / priority は CRD の既定値。書かないと apiserver が埋めた値と
       # マニフェストが食い違い、**Application が永久に OutOfSync になる**（2026-09-17 実測）。
       # ignoreDifferences で隠さず明示するのは、upstream が既定値を変えたときに差分として

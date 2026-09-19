@@ -87,6 +87,12 @@ spec:
   type: APIKey
   apiKey:
     secretRef:
+      # group / kind は CRD の default（実測: live に group: "" / kind: Secret が入る）。
+      # 実測ではこの BackendSecurityPolicy 自体は OutOfSync ではなかったが、同一 app 内の
+      # SecurityPolicy と表記を揃えるため合わせて書いた（詳細: docs/known-issues.md
+      # 「CRD の default 値が ArgoCD を OutOfSync にする」）。
+      group: ""
+      kind: Secret
       name: openrouter-apikey
       namespace: llm-gateway
 ---

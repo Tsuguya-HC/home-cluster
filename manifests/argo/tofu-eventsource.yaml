@@ -354,6 +354,8 @@ spec:
                       value: ""
                     - name: branch
                       value: ""
+                    - name: sha
+                      value: ""
                     - name: author-id
                       value: ""
           parameters:
@@ -367,8 +369,12 @@ spec:
               dest: spec.arguments.parameters.1.value
             - src:
                 dependencyName: pull-request
-                dataKey: body.pull_request.user.id
+                dataKey: body.pull_request.head.sha
               dest: spec.arguments.parameters.2.value
+            - src:
+                dependencyName: pull-request
+                dataKey: body.pull_request.user.id
+              dest: spec.arguments.parameters.3.value
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Sensor
@@ -552,6 +558,8 @@ spec:
                       value: ""
                     - name: branch
                       value: ""
+                    - name: sha
+                      value: ""
                     - name: author-id
                       value: ""
           parameters:
@@ -565,5 +573,9 @@ spec:
               dest: spec.arguments.parameters.1.value
             - src:
                 dependencyName: pull-request
-                dataKey: body.pull_request.user.id
+                dataKey: body.pull_request.head.sha
               dest: spec.arguments.parameters.2.value
+            - src:
+                dependencyName: pull-request
+                dataKey: body.pull_request.user.id
+              dest: spec.arguments.parameters.3.value

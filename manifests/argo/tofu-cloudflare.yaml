@@ -164,13 +164,16 @@ metadata:
   name: tofu-cloudflare-plan
   namespace: argo
 spec:
-  activeDeadlineSeconds: 600
+  # 600s covered plan alone. The merge now waits out the required
+  # checks on the PR head (up to 10 x 30s) before giving up.
+  activeDeadlineSeconds: 1200
   serviceAccountName: tofu-executor
   entrypoint: main
   arguments:
     parameters:
       - name: pr-number
       - name: branch
+      - name: sha
       - name: author-id
         default: ""
   templates:
@@ -267,27 +270,68 @@ spec:
             export GITHUB_TOKEN=$(cat /github-token/token)
             export PATH="/tools:$PATH"
 
-            cd /workspace
-            tofu init -input=false
-            PLAN_OUTPUT=$(tofu plan -detailed-exitcode -no-color 2>&1) && EXIT_CODE=0 || EXIT_CODE=$?
-            PR="{{workflow.parameters.pr-number}}"
             REPO="Tsuguya-HC/home-cloudflare"
-            if [ "$EXIT_CODE" = "0" ]; then
-              TITLE="Tofu Plan: No Changes"
-              MSG="Infrastructure is up-to-date."
-            elif [ "$EXIT_CODE" = "2" ]; then
-              TITLE="Tofu Plan: Changes Detected"
-              MSG="Review required before merge."
+            PR="{{workflow.parameters.pr-number}}"
+            SHA="{{workflow.parameters.sha}}"
+            AUTHOR_ID="{{workflow.parameters.author-id}}"
+            RUN_URL="https://argo.infra.tgy.io/workflows/argo/{{workflow.name}}"
+
+            # The commit status is the merge gate, so it is posted as pending
+            # before anything else can fail. A workflow that never starts, or
+            # one that dies mid-run, leaves the check unreported and GitHub
+            # blocks the merge -- the whole point of using a status here rather
+            # than only a PR comment. Without it the plan proved nothing to
+            # branch protection: any commit whose CI Gate was green could merge
+            # having never been planned.
+            post_status() {
+              gh api "repos/$REPO/statuses/$SHA" \
+                -f state="$1" \
+                -f context=tofu-plan \
+                -f description="$2" \
+                -f target_url="$RUN_URL" >/dev/null
+            }
+
+            post_status pending "Running tofu plan"
+
+            cd /workspace
+            if ! OUTPUT=$(tofu init -input=false -no-color 2>&1); then
+              STATE=error
+              DESC="tofu init failed"
             else
-              TITLE="Tofu Plan: Error"
-              MSG="Plan failed with exit code $EXIT_CODE."
+              OUTPUT=$(tofu plan -detailed-exitcode -no-color 2>&1) && CODE=0 || CODE=$?
+              if [ "$CODE" = "0" ]; then
+                STATE=success
+                DESC="No changes"
+              elif [ "$CODE" = "2" ]; then
+                # A diff is the normal case for a hand-written change, so it
+                # stays green. The gate exists to prove the plan ran, not to
+                # forbid changes.
+                STATE=success
+                DESC="Changes detected - review the plan before merging"
+              else
+                STATE=error
+                DESC="tofu plan failed (exit $CODE)"
+              fi
             fi
-            BODY=$(jq -n \
-              --arg title "$TITLE" \
-              --arg msg "$MSG" \
-              --arg output "$PLAN_OUTPUT" \
-              '{body: ("### " + $title + "\n" + $msg + "\n\n<details>\n<summary>Plan Output</summary>\n\n```\n" + $output + "\n```\n\n</details>")}')
-            echo "$BODY" | gh api "repos/$REPO/issues/$PR/comments" --input -
+
+            jq -n \
+              --arg desc "$DESC" \
+              --arg output "$OUTPUT" \
+              '{body: ("### Tofu Plan: " + $desc + "\n\n<details>\n<summary>Plan Output</summary>\n\n```\n" + $output + "\n```\n\n</details>")}' \
+              | gh api "repos/$REPO/issues/$PR/comments" --input -
+
+            post_status "$STATE" "$DESC"
+
+            # Provider and lockfile bumps are only merged unattended when the
+            # plan is empty; anything with a diff waits for a human.
+            #
+            # The merge is retried because the required checks are not always
+            # visible to the merge endpoint the moment they settle -- the
+            # endpoint answers 405 "Required status check is expected" and the
+            # PR then sits green and unmerged, which reads as "automerge is
+            # broken" rather than as a race. 2026-09-19: home-cloudflare#51
+            # failed exactly this way when a sibling PR merged first and the
+            # rebased commit was still running CI Gate.
             # Matched on the PR author's numeric user id, not the login:
             # a login can be released and re-registered, and the previous
             # `AUTHOR = "renovate[bot]"` silently stopped matching when
@@ -298,10 +342,17 @@ spec:
             # which bot actually appears varies per repo.
             #   29139614  renovate[bot]              (Mend-hosted)
             #   265309552 tsuguya-home-cluster[bot]  (self-hosted App)
-            AUTHOR_ID="{{workflow.parameters.author-id}}"
-            if [ "$EXIT_CODE" = "0" ] && { [ "$AUTHOR_ID" = "29139614" ] || [ "$AUTHOR_ID" = "265309552" ]; }; then
-              gh api "repos/$REPO/pulls/$PR/merge" --method PUT -f merge_method=squash
+            if [ "$DESC" = "No changes" ] && { [ "$AUTHOR_ID" = "29139614" ] || [ "$AUTHOR_ID" = "265309552" ]; }; then
+              for attempt in 1 2 3 4 5 6 7 8 9 10; do
+                if gh api "repos/$REPO/pulls/$PR/merge" --method PUT -f merge_method=squash; then
+                  break
+                fi
+                echo "merge attempt $attempt failed; retrying"
+                sleep 30
+              done
             fi
+
+            [ "$STATE" = "success" ]
         volumeMounts:
           - name: workspace
             mountPath: /workspace

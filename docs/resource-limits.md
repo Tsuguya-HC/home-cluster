@@ -138,6 +138,8 @@
 |---|---|---|---|
 | tofu-cloudflare | main (opentofu) | 50m / 128Mi | 512Mi |
 | tofu-cloudflare-plan | main (opentofu) | 50m / 128Mi | 512Mi |
+| tofu-harbor-plan | main (opentofu) | 50m / 128Mi | 512Mi |
+| tofu-unifi-plan | main (opentofu) | 50m / 128Mi | 512Mi |
 | pluto-check | detect-in-cluster | 10m / 32Mi | 128Mi |
 | pluto-check | detect-helm | 10m / 32Mi | 128Mi |
 | pluto-check | ai-fix (node + claude) | 100m / 256Mi | 1Gi |

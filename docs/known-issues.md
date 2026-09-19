@@ -347,3 +347,34 @@ ELF の実バイナリ（`argocd-repo-server` / `busybox` / `postgres` 等）を
   ```
 
 pending / 未報告のまま止まるのは設計どおりであり、**plan を通していないコミットを通さないための fail-closed**。バグではないので、手動確定は「plan の代わりに人間が中身を確認した」ときにだけ行うこと。
+
+## CRD の default 値が ArgoCD を OutOfSync にする（`ServerSideDiff` は syncOptions に書いても効かない）
+
+**症状**: ArgoCD の sync operation は Succeeded（`serverside-applied`）なのに Application が OutOfSync のまま。selfHeal が空回りし、`status.operationState.operation.sync.autoHealAttemptsCount` が増え続ける（実測値の例: kyverno=12、llm-gateway=13）。再試行は指数バックオフで、既定の上限 5 分に張り付く（実測: attempt 4→5 が 54 秒、5→6 が 162 秒、6→7 以降は 300 秒固定。手前には 12 秒 / 17 秒間隔の再試行もある）。壊した直後は数十秒間隔に見えるので、5 分間隔だけを期待して見ていると別事象だと誤判定しかねない。この再試行間隔は `argocd-cm` の reconciliation 間隔（このクラスタでは 120s + jitter 60s）とは別系統。
+
+**原因**: live にだけ存在する CRD スキーマの default 値を git のマニフェストが持たず、ArgoCD の既定（クライアントサイド diff）がこれをドリフトと見なす。Server-Side Apply で apply しても API サーバが同じ default を再び埋めるため、差分は永久に消えない。**ただし「live-only の CRD default なら必ずドリフトする」わけではない**（下記の反例を参照）。どちらに転ぶかの線引きは未解明。
+
+**調べ方（陰性検査）**:
+
+```sh
+kubectl diff --server-side --field-manager=argocd-controller -f <manifest>
+```
+
+これは「**差分が出ないことを確認する**」ための検査で、壊れている状態でも壊れていない状態でも同じ結果（無差分、または tracking-id annotation の差分のみ）を返す。spec に差分が無いのに Application が OutOfSync なら本件と分かるが、このコマンド自体は live-only フィールドの場所を教えてくれない。
+
+陽性所見（live にだけ存在するフィールド）を特定するには、`kubectl get <kind> <name> -o yaml` の出力と git のマニフェストを並べて比較し、live にしか無いキーを拾う。
+
+**対処**: その default 値を git のマニフェストに明記する。
+
+**`ServerSideDiff` について**: Application の `spec.syncPolicy.syncOptions` に `ServerSideDiff=true` と書いても**効かない**。ArgoCD の Server-Side Diff を有効にする方法はドキュメント上 2 つだけ（[diff-strategies](https://argo-cd.readthedocs.io/en/stable/user-guide/diff-strategies/)）:
+
+- per-Application: annotation `argocd.argoproj.io/compare-options: ServerSideDiff=true`。`apps/*.yaml` は素の Application マニフェストなので、このリポジトリではそのまま Application に annotation を足すだけで成立する
+- グローバル: `argocd-cmd-params-cm` の `controller.diff.server.side: "true"`。**ただしこの ConfigMap は `argocd` Application（Helm 管理、selfHeal: true）が追跡するオブジェクトなので、ConfigMap を直接編集すると selfHeal に巻き戻される。** このリポジトリで変更する先は `helm-values/argocd/values.yaml` の `configs.params`（`server.insecure` 等が既にある場所）にキーを足すこと
+
+`syncOptions` は CRD 上ただの `[]string` で値が検証されないため、存在しない値を書いても apply は通り、黙って無視される。2026-03-07 の commit `201bf21` で `apps/kyverno.yaml` に入れた `syncOptions: [ServerSideDiff=true]` はこの形で、最初から一度も効いていなかった。
+
+**先回りして全部書く必要はない**: 同条件（live のみに存在する CRD default）でも Synced のままのものが、実測スイープで数十件規模ある。CRD に限っても TracingPolicy（実在の schema default 109 件）、TaskFlow（`.spec.ttl` 等、3 件）、CNPG Cluster（41 件）、SpinApp（11 件）、ExternalSecret（14 件）などが該当し Synced のまま。実測で OutOfSync になったものだけ git に写す。
+
+**実績（実測で OutOfSync だったもの）**: 2026-03-07 `clusterpolicy-verify-images.yaml`、2026-09-19 `clusterpolicy-require-kata-runtime.yaml` + `manifests/llm-gateway/securitypolicy.yaml`（`SecurityPolicy/llm-gateway-client-keys`）。
+
+**表記を揃えるために合わせて書いたもの（OutOfSync ではない）**: `manifests/llm-gateway/anthropic.yaml` / `openrouter.yaml` の `BackendSecurityPolicy`（`claude-max` / `openrouter`）は実測では常に Synced だったが、同一 app 内の `SecurityPolicy` と同じ default ペア（`group: ""` / `kind: Secret`）を持つため、片方だけ書くと読めなくなる。OutOfSync 実績ではなく表記統一の追記であることに注意。

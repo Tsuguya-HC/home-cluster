@@ -28,7 +28,11 @@ spec:
   emitWarning: false
   validationFailureAction: Enforce
   rules:
+    # skipBackgroundRequests / allowExistingViolations は CRD の default。実測で ArgoCD が
+    # OutOfSync を出したので git に写した（詳細: docs/known-issues.md「CRD の default 値が
+    # ArgoCD を OutOfSync にする」）。
     - name: privileged-requires-kata
+      skipBackgroundRequests: true
       match:
         any:
           - resources:
@@ -47,6 +51,8 @@ spec:
             operator: GreaterThan
             value: 0
       validate:
+        # skipBackgroundRequests と同じ理由（CRD の default）。docs/known-issues.md 参照。
+        allowExistingViolations: true
         message: >-
           A privileged container here must run under kata — set
           spec.runtimeClassName: kata. This namespace is PSA-privileged, so on

@@ -38,8 +38,12 @@ spec:
       kind: Gateway
       name: llm-gateway
   apiKeyAuth:
+    # group / kind は CRD の default。実測で ArgoCD が OutOfSync を出したので git に写した
+    # （詳細: docs/known-issues.md「CRD の default 値が ArgoCD を OutOfSync にする」）。
     credentialRefs:
-      - name: llm-gateway-client-keys
+      - group: ""
+        kind: Secret
+        name: llm-gateway-client-keys
     # claude は ANTHROPIC_AUTH_TOKEN を `Authorization: Bearer <値>` として送る。
     # Envoy は `Bearer ` を明示的に剥がしてから照合するので、Secret には生の鍵を入れる。
     extractFrom:

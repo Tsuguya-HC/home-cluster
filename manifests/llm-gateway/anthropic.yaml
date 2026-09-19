@@ -32,6 +32,14 @@ spec:
             - type: Exact
               name: x-ai-eg-model
               value: review
+            # **どのクライアントがこの階層を使ってよいか。** 認証（Gateway 単位の
+            # SecurityPolicy）が付ける x-llm-client を見る。呼ぶ側は偽装できない
+            # （認証成功時に必ず上書きされる）。ここに無いクライアントは**どのルールにも
+            # 当たらず route-not-found → 404**。鍵が無ければその手前で 401。
+            # 新しい handler を足すときはここにも足す。
+            - type: RegularExpression
+              name: x-llm-client
+              value: "^(adjudicator|alert-investigate|claude-code-agent|claude-code-generic|cnp-planner|cnp-reporter|implement|implement-verify|pluto-check|pr-review|task-executor|task-executor-write|wf-creator|wf-improver|llm-gateway-smoke)$"
       modelsOwnedBy: Envoy AI Gateway
       backendRefs:
         - name: claude-max
@@ -45,6 +53,14 @@ spec:
             - type: Exact
               name: x-ai-eg-model
               value: investigate
+            # **どのクライアントがこの階層を使ってよいか。** 認証（Gateway 単位の
+            # SecurityPolicy）が付ける x-llm-client を見る。呼ぶ側は偽装できない
+            # （認証成功時に必ず上書きされる）。ここに無いクライアントは**どのルールにも
+            # 当たらず route-not-found → 404**。鍵が無ければその手前で 401。
+            # 新しい handler を足すときはここにも足す。
+            - type: RegularExpression
+              name: x-llm-client
+              value: "^(adjudicator|alert-investigate|claude-code-agent|claude-code-generic|cnp-planner|cnp-reporter|implement|implement-verify|pluto-check|pr-review|task-executor|task-executor-write|wf-creator|wf-improver|llm-gateway-smoke)$"
       modelsOwnedBy: Envoy AI Gateway
       backendRefs:
         - name: claude-max

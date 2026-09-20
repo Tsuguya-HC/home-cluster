@@ -36,7 +36,7 @@ spec:
       emptyDir: {}
     - name: github-app-secret
       secret:
-        secretName: github-app-private-key
+        secretName: tf-coder-github-app-private-key
   affinity:
     nodeAffinity:
       preferredDuringSchedulingIgnoredDuringExecution:
@@ -70,7 +70,7 @@ spec:
           command: [github-auth.sh]
           env:
             - name: GITHUB_APP_ID
-              value: "2998228"
+              value: "5009499"
             - name: GITHUB_REPO
               value: "{{workflow.parameters.repo}}"
           securityContext:
@@ -137,7 +137,7 @@ spec:
           command: [github-auth.sh]
           env:
             - name: GITHUB_APP_ID
-              value: "2998228"
+              value: "5009499"
             - name: GITHUB_REPO
               value: "{{workflow.parameters.repo}}"
           securityContext:
@@ -273,7 +273,7 @@ spec:
           command: [github-auth.sh]
           env:
             - name: GITHUB_APP_ID
-              value: "2998228"
+              value: "5009499"
             - name: GITHUB_REPO
               value: "{{workflow.parameters.repo}}"
           securityContext:

@@ -150,7 +150,7 @@ spec:
           # マウントする（agent には見せない。取得内容の symlink は parts が拒否する）。
           - name: github-app
             secret:
-              secretName: github-app-private-key
+              secretName: tf-reviewer-github-app-private-key
               # Secret volume のファイルは root 所有。fsGroup を使えない（上）ので other-read で
               # 読ませる。この volume をマウントするのは init の parts だけで、agent には無い。
               defaultMode: 0444
@@ -172,7 +172,7 @@ spec:
                     name: parts-ref
                     key: sha
               - name: GITHUB_APP_ID
-                value: "2998228"
+                value: "5009543"
             securityContext:
               allowPrivilegeEscalation: false
               readOnlyRootFilesystem: true

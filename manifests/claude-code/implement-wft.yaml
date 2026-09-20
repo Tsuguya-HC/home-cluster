@@ -46,7 +46,7 @@ spec:
       emptyDir: {}
     - name: github-app-secret
       secret:
-        secretName: github-app-private-key
+        secretName: tf-coder-github-app-private-key
     - name: verdict
       emptyDir: {}
     - name: helpers
@@ -157,7 +157,7 @@ spec:
           command: [github-auth.sh]
           env:
             - name: GITHUB_APP_ID
-              value: "2998228"
+              value: "5009499"
             - name: GITHUB_REPO
               value: "{{workflow.parameters.repo}}"
           securityContext:
@@ -353,7 +353,7 @@ spec:
           image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:0b658d03cee98b3118622d47d07950b5dc5dd8ef73689bab68ff28c00299f296
           command: [github-auth.sh]
           env:
-            - {name: GITHUB_APP_ID, value: "2998228"}
+            - {name: GITHUB_APP_ID, value: "5009499"}
             - {name: GITHUB_REPO, value: "{{workflow.parameters.repo}}"}
           securityContext:
             runAsUser: 65532
@@ -499,7 +499,7 @@ spec:
           image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:0b658d03cee98b3118622d47d07950b5dc5dd8ef73689bab68ff28c00299f296
           command: [github-auth.sh]
           env:
-            - {name: GITHUB_APP_ID, value: "2998228"}
+            - {name: GITHUB_APP_ID, value: "5009499"}
             - {name: GITHUB_REPO, value: "{{workflow.parameters.repo}}"}
           securityContext:
             runAsUser: 65532
@@ -689,7 +689,7 @@ spec:
           image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:0b658d03cee98b3118622d47d07950b5dc5dd8ef73689bab68ff28c00299f296
           command: [github-auth.sh]
           env:
-            - {name: GITHUB_APP_ID, value: "2998228"}
+            - {name: GITHUB_APP_ID, value: "5009499"}
             - {name: GITHUB_REPO, value: "{{workflow.parameters.repo}}"}
           securityContext:
             runAsUser: 65532
@@ -736,7 +736,7 @@ spec:
           image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:0b658d03cee98b3118622d47d07950b5dc5dd8ef73689bab68ff28c00299f296
           command: [github-auth.sh]
           env:
-            - {name: GITHUB_APP_ID, value: "2998228"}
+            - {name: GITHUB_APP_ID, value: "5009499"}
             - {name: GITHUB_REPO, value: "{{workflow.parameters.repo}}"}
           securityContext:
             runAsUser: 65532

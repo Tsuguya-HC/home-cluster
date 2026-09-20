@@ -157,7 +157,7 @@ spec:
                       storage: 20Gi
           - name: github-app
             secret:
-              secretName: github-app-private-key
+              secretName: tf-coder-github-app-private-key
               defaultMode: 0444
               items:
                 - key: private-key
@@ -178,7 +178,7 @@ spec:
                     name: parts-ref
                     key: sha
               - name: GITHUB_APP_ID
-                value: "2998228"
+                value: "5009499"
             securityContext:
               runAsUser: 65532
               runAsNonRoot: true
@@ -223,7 +223,7 @@ spec:
                 GITHUB_REPO="$REPO" github-auth.sh
             env:
               - name: GITHUB_APP_ID
-                value: "2998228"
+                value: "5009499"
               - name: HOME
                 value: /tmp
             securityContext:

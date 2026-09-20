@@ -28,7 +28,7 @@ spec:
       emptyDir: {}
     - name: github-app-secret
       secret:
-        secretName: github-app-private-key
+        secretName: wf-authoring-github-app-private-key
   affinity:
     nodeAffinity:
       preferredDuringSchedulingIgnoredDuringExecution:
@@ -57,7 +57,7 @@ spec:
           command: [github-auth.sh]
           env:
             - name: GITHUB_APP_ID
-              value: "2998228"
+              value: "5009512"
             - name: GITHUB_REPO
               value: "Tsuguya-HC/home-cluster"
           securityContext:

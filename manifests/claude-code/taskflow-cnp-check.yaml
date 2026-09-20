@@ -222,7 +222,7 @@ spec:
           # マウントする（root 所有なので 0444 で other-read なので fsGroup は要らない）。
           - name: github-app
             secret:
-              secretName: github-app-private-key
+              secretName: tf-reviewer-github-app-private-key
               defaultMode: 0444
               items:
                 - key: private-key
@@ -241,7 +241,7 @@ spec:
                     name: parts-ref
                     key: sha
               - name: GITHUB_APP_ID
-                value: "2998228"
+                value: "5009543"
             securityContext:
               allowPrivilegeEscalation: false
               readOnlyRootFilesystem: true
@@ -406,7 +406,7 @@ spec:
           # マウントする（root 所有なので 0444 で other-read なので fsGroup は要らない）。
           - name: github-app
             secret:
-              secretName: github-app-private-key
+              secretName: tf-reviewer-github-app-private-key
               defaultMode: 0444
               items:
                 - key: private-key
@@ -425,7 +425,7 @@ spec:
                     name: parts-ref
                     key: sha
               - name: GITHUB_APP_ID
-                value: "2998228"
+                value: "5009543"
             securityContext:
               allowPrivilegeEscalation: false
               readOnlyRootFilesystem: true

@@ -389,13 +389,6 @@ Bash を回す handler を、個人の Max サブスクリプションから切�
 | **trivy-server** | scan-jobs, trivy-operator → 4954; host → 4954 (probes) | mirror.gcr.io:443 (vuln DB) |
 | **node-collector** (app: node-collector) | deny world | kube-apiserver |
 
-operator 自身はレジストリに出ない（2026-09-20 実測: 7 日稼働の endpoint で toFQDNs 由来の
-egress は全て 0 バイト、FQDN キャッシュにレジストリ名なし、ログにもレジストリ関連のエラーなし）。
-イメージを引くのは trivy-system で走る scan job のほうで、そちらは 0.0.0.0/0:443 を持つ。
-**operator の CNP にレジストリの FQDN を足さないこと** — 2026-02 に推測で足され、
-`production.cloudfront.docker.com` を `cloudflare` と綴り誤ったまま 7 か月誰も気づかなかった（#947）。
-必要になったら hubble の DROPPED に出るので、そこで実測してから足す。
-
 ## nfs-provisioner (1 policy)
 
 | Component | Ingress | Egress |

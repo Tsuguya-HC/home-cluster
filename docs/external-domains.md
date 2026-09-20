@@ -30,10 +30,6 @@ CNP egress (`toFQDNs`) 設定時のリファレンス。各外部サービスが
 Docker Hub は 3 つに割れており、**欠けても「認証エラー」ではなく単に引けない**ので、
 Application が Unknown のまま止まる形で出る。
 
-CDN 名の綴りを 1 文字間違えても静的検査は全て緑のまま通る（実例は
-docs/network-policies.md の trivy-system 節）。この表をコピーするときは
-1 文字ずつ確かめ、足す前に「本当にその Pod が引くのか」を実測する。
-
 ## OpenRouter
 
 - **用途**: 実行系 handler の LLM 呼び出し。今は `llm-gateway`（Agent Router のデータプレーン）と

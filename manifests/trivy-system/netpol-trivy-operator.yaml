@@ -23,8 +23,10 @@ spec:
             - port: "9090"
               protocol: TCP
   egress:
-    # レジストリへの egress はここには要らない（operator 自身はレジストリに
-    # 出ない）。根拠と実測は docs/network-policies.md の trivy-system 節。
+    # レジストリへの egress は要らない。イメージを引くのは scan job
+    # (netpol-trivy-scan-jobs) で、operator 自身はレジストリに出ない
+    # （2026-09-20 実測: `cilium-dbg endpoint get <id>` の
+    # allowed-egress-identities が null）。
     - toEndpoints:
         - matchLabels:
             app.kubernetes.io/name: trivy-server

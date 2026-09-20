@@ -20,7 +20,8 @@ spec:
               protocol: TCP
     # apiserver からの admission（topologyInjector の MutatingWebhook、:9443）。
     # taskflow-system と同じく実際に届くのは remote-node のことが多いが、他の webhook と
-    # 書き方を揃えて 3 つ並べる（docs/network-policies.md）。
+    # 書き方を揃えて 3 つ並べる（実測は manifests/taskflow-system/netpol.yaml の
+    # コメント）。
     - fromEntities:
         - kube-apiserver
         - host

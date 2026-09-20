@@ -20,7 +20,7 @@ docs/              # 運用ドキュメント
 
 - **新サービス**: `apps/` に Application YAML + `helm-values/` に values.yaml
 - **Secrets**: `manifests/secrets/` に ExternalSecret YAML → External Secrets Operator が 1Password Connect Server 経由で Secret 自動生成（専用 `secrets` app で他 app の reconcile から隔離）
-- **CNP 変更**: `manifests/<namespace>/netpol-*.yaml` + `docs/network-policies.md` を同時に更新。作業前に `docs/network-policies.md` を読んで通信の全体像を把握すること
+- **CNP 変更**: `manifests/<namespace>/netpol-*.yaml` + `docs/network-policies.md` を同時に更新。作業前に `docs/network-policies.md` で通信の全体像を掴み、**書くときの落とし穴は触る CNP の隣のコメント**を読むこと
 - **SSO 追加**: `docs/sso.md` の手順に従う
 - **新サービス（AppProject）**: `docs/argocd-projects.md` を参照。クラスタスコープリソースを使う場合は AppProject の `clusterResourceWhitelist` への追加を忘れないこと
 
@@ -59,6 +59,14 @@ egress:
 - `hubble observe --verdict DROPPED` で Policy denied を確認
 - `http-request DROPPED` = L7 proxy drop（`toPorts` 起因）
 - `Policy denied DROPPED` = L3/L4 drop
+
+### docs/network-policies.md
+
+**英語で、表だけ。** 各ポリシーが誰に何を許すかのカタログで、それ以外は書かない。
+
+- 理由・経緯・落とし穴・実測の記録は書かない。それらは定義の隣（CNP のコメント）に置く
+- 他の docs にある内容を写さない。ポインタも要らない
+- 表のセルに収まらない説明が要るなら、それは表に書くことではない
 
 ## Helm values 規約
 

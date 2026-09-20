@@ -32,8 +32,8 @@ Application が Unknown のまま止まる形で出る。
 
 ## OpenRouter
 
-- **用途**: 実行系 handler の LLM 呼び出し。今は `llm-gateway`（Agent Router のデータプレーン）と
-  `claude-code-build` の openrouter-broker サイドカーの 2 経路があり、handler の切り替えが済めば前者だけになる
+- **用途**: 実行系 handler の LLM 呼び出し。経路は `llm-gateway`（Agent Router のデータプレーン）
+  だけ。例外は `taskflow-openrouter-smoke` で、配線の対照実験としてここだけ意図的に直行する
 - **Port**: 443
 
 | Domain | Required | Notes |

@@ -18,6 +18,10 @@ config:
         # watch を絞ると、チャートが secrets / configmaps / pods を**クラスタ全域に**
         # 与える ClusterRole をやめ、この 2 namespace の Role に分割する
         # （templates/envoy-gateway-rbac.yaml の分岐）。
+        # 代わりに、**ここに無い namespace の Gateway / HTTPRoute / EnvoyProxy は
+        # エラーも出さずに無視される**（Cache.DefaultNamespaces に代入されるだけで、
+        # コントローラ namespace も自動では足されない）。別の namespace に Gateway を
+        # 置くときはここに足すこと。足し忘れは「作ったのに何も起きない」になる。
         watch:
           type: Namespaces
           namespaces:

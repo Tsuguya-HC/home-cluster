@@ -167,7 +167,7 @@ ping -c3 -I <PREFIX>:4::1 <HGW の LAN GUA>          # → 0/3
 
 TaskFlow の ValidatingWebhookConfiguration（taskflow #17 / ADR-0006）は `failurePolicy: Fail`。以下 2 つの窓で TaskFlow の CREATE/UPDATE が一時的に拒否されうる。**どちらも 2026-09-07 に意図的に起こして測った**（taskflow #107）。それまでは「初回投入で 1 回通った」以外の根拠が無かった。
 
-taskflow #107 で測ったのはこの 2 つと、**admission リクエストがどの Cilium identity で届くか**の計 3 点。3 点目（`remote-node` だけで届き、`kube-apiserver` だけに絞ると drop される）は通信の話なので [network-policies.md の taskflow-system 節](network-policies.md) と `manifests/taskflow-system/netpol.yaml` のコメントにある。
+taskflow #107 で測ったのはこの 2 つと、**admission リクエストがどの Cilium identity で届くか**の計 3 点。3 点目（`remote-node` だけで届き、`kube-apiserver` だけに絞ると drop される）は通信の話なので `manifests/taskflow-system/netpol.yaml` のコメントにある。
 
 1. **cainjector の caBundle 注入レース**: `cert-manager.io/inject-ca-from`（`kustomize/taskflow/kustomization.yaml`）は cainjector の非同期パッチで、ArgoCD の sync-wave はこれを待たない（VWC の生成完了 ≠ caBundle が埋まったこと。ArgoCD に VWC の health check は無い）。sync 直後や Certificate の定期更新直後、caBundle が空のまま webhook が有効になり、apiserver が TLS を検証できず拒否されることがある。
 

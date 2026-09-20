@@ -2,21 +2,6 @@
 
 All policies are CiliumNetworkPolicy (CNP) and CiliumClusterwideNetworkPolicy (CCNP). Pods with `hostNetwork: true` are not subject to network policies and are excluded.
 
-**Enforcement mode: `always`** (`helm-values/cilium/values.yaml`, since 2026-08-29). Every endpoint is default-deny in both directions even if no policy selects it. Consequences:
-- A CNP that only writes `egress` leaves the pod's ingress fully denied (not open, as it was in `default` mode). Pods that must receive traffic need an explicit `ingress` allow.
-- The `ingressDeny: [{fromEntities: [world]}]` marker on older sensor/job policies was only needed to enable ingress enforcement in `default` mode; it is now redundant but harmless.
-- Cilium-internal identities need their own CCNPs (`cilium-health-checks`, `allow-gateway-ingress` below). Without `allow-gateway-ingress` every HTTPRoute is dropped.
-- kubelet probes from the local host stay allowed (`allow-localhost=auto`).
-- The chart does not restart agents on ConfigMap changes; `rollOutCiliumPods` / `operator.rollOutPods` / `envoy.rollOutPods` are enabled so Helm value changes actually reach the running pods. Verify with `cilium-dbg config | grep PolicyEnforcement`, not with the ConfigMap.
-
-**Caveats:**
-- Do NOT add L7 HTTP rules (`rules.http`) to ingress of services using TLS passthrough (TLSRoute). Cilium attempts to parse encrypted traffic as HTTP, breaking the connection.
-- The `cluster` entity in `ingressDeny` includes `host` and `remote-node`. Since deny rules take precedence over allow rules, this blocks kubelet probes. Never use `cluster` in `ingressDeny` — use `world` only. For pods with probes, prefer ingress allow-only policies (implicit default deny) over `ingressDeny`.
-- **L7 method/path allow-list as a stand-in for authorization**: if a backend has no auth/authz of its own, put oauth2-proxy in front for authentication, and use CNP L7 (`rules.http` with a `method` allow-list and a `path` regex anchored with `^...$` for a full match) to cover authorization — restrict which endpoints an authenticated user can reach (example: `manifests/monitoring/netpol-prometheus.yaml`, oauth2-proxy-prometheus ingress). Two things regularly trip people up when writing these:
-  - Cilium's `path`/`method` are matched via Envoy's RE2 engine, which has **no negative lookahead**. "Everything except X" has to be spelled out as an explicit alternation over where the string diverges from X, not `(?!X)`. Keep this alternation as short as possible (see next point) — prefer excluding by a short, verified-unique prefix over spelling out the whole literal one character at a time (see the `/debug` exclusion in netpol-prometheus.yaml, which excludes by the single leading `d` rather than the full word, because that Prometheus version registers no other route starting with `d`).
-  - Envoy's `RegexMatcher` fails to compile once RE2's `programsize` exceeds the default `re2.max_program_size.error_level` of **100**, and Cilium does not raise this limit. There is no admission webhook for this in this cluster, so `kubectl apply --dry-run=server` / kubeconform / CI all pass even when a rule is over the limit — the failure only shows up when cilium-agent turns the CNP into Envoy xDS config, silently leaving the L7 block non-functional. Character-by-character negation alternations (see previous point) blow through this fast; measure `programsize` with the `google-re2` Python binding (`re2.compile(pattern).programsize`) before relying on a hand-written negation, especially before adding `(?i)`, which also costs program size.
-  - Envoy's `:path` is the path **and query string together**. A `path` regex anchored with `$` that doesn't allow for a trailing `?...` will reject every request that carries query parameters — which is most real UI traffic, for both GET and POST.
-
 ## Cluster-Wide Policies (CCNP)
 
 | Policy | Selector | Ingress | Egress |
@@ -24,8 +9,6 @@ All policies are CiliumNetworkPolicy (CNP) and CiliumClusterwideNetworkPolicy (C
 | **allow-dns** | all pods (`io.cilium.k8s.policy.cluster: default`) | — | kube-dns:53 (UDP/TCP) with L7 DNS proxy (`matchPattern: "*"`) |
 | **cilium-health-checks** | `reserved:health` (cilium-health endpoint) | remote-node | remote-node |
 | **allow-gateway-ingress** | `reserved:ingress` (Gateway API Envoy) | world, cluster | cluster (per-backend restriction is each backend CNP's job) |
-
-All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do not repeat this rule. The selector excludes Cilium internal endpoints (e.g. Gateway) to avoid breaking `enforce_policy_on_l7lb`. L7 DNS rules enable Cilium DNS proxy for Hubble DNS metrics visibility.
 
 ## Cross-Namespace Communication
 
@@ -48,10 +31,10 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 | Workflow pods (claude-code) | SeaweedFS filer (seaweedfs) | 8333 | Artifact/log storage |
 | Workflow pods (rss) | SeaweedFS filer (seaweedfs) | 8333 | Artifact/log storage |
 | Workflow pods (claude-code) | Loki gateway (monitoring) | 8080 | Log query (logcli) |
-| Workflow pods (claude-code-build) | Envoy data plane (llm-gateway) | 10080 | LLM API（alias 経由）**次段階。handler 側 egress は未実装** |
-| Workflow pods (claude-code) | Envoy data plane (llm-gateway) | 10080 | LLM API（alias 経由）。claude-code の全 handler |
+| Workflow pods (claude-code-build) | Envoy data plane (llm-gateway) | 10080 | LLM API (via alias). **Next stage; handler-side egress not implemented** |
+| Workflow pods (claude-code) | Envoy data plane (llm-gateway) | 10080 | LLM API (via alias); all claude-code handlers |
 | Envoy data plane (llm-gateway) | Envoy Gateway (envoy-gateway-system) | 18000 | xDS |
-| Envoy Gateway (envoy-gateway-system) | Agent Router (envoy-ai-gateway-system) | 1063 | extension server gRPC（xDS 変換） |
+| Envoy Gateway (envoy-gateway-system) | Agent Router (envoy-ai-gateway-system) | 1063 | extension server gRPC (xDS translation) |
 | Prometheus (monitoring) | Agent Router (envoy-ai-gateway-system) | 8080 | Metrics scrape |
 | taskflow-cnp-check (claude-code) | Loki gateway (monitoring) | 8080 | Log query (cnp-check investigation) |
 | PXE sync pods (argo) | SeaweedFS filer (seaweedfs) | 8333 | Artifact/log storage |
@@ -121,8 +104,8 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 | Namespace | Pod | Reason |
 |---|---|---|
 | monitoring | node-exporter | Host metrics collection |
-| monitoring | blackbox-exporter | IPv6 egress probe（ノードの VLAN 10 GUA を送信元にする必要がある。詳細は [IPv6](ipv6.md)） |
-| kube-system | Cilium agent | CNI / networking（`kubeProxyReplacement: true` のため kube-proxy Pod は存在しない） |
+| monitoring | blackbox-exporter | IPv6 egress probe (must be sourced from the node's VLAN 10 GUA; see [IPv6](ipv6.md)) |
+| kube-system | Cilium agent | CNI / networking (no kube-proxy pod exists; `kubeProxyReplacement: true`) |
 | kube-system | Tetragon agent | eBPF runtime security (hostNetwork DaemonSet) |
 | kube-system | kube-apiserver, etcd, scheduler, controller-manager | Control plane static pods |
 | trident | trident-node-linux | CSI node plugin |
@@ -142,11 +125,6 @@ All regular pods can reach kube-dns for DNS resolution. Individual CNPs below do
 | **redis-secret-init** (Job) | (deny world) | kube-apiserver |
 | **cloudflared** | (deny world) | *.v2.argotunnel.com + cftunnel.com + h2.cftunnel.com + quic.cftunnel.com:443/7844 (7844 TCP+UDP), server:8080, eventsource (argo):12000, kanidm (kanidm):8443, nextcloud (nextcloud):80, harbor-nginx (harbor):8443, oauth2-proxy-rss (oauth2-proxy):4180 |
 
-Docker Hub の 3 ホスト（`registry-1` / `auth` / `production.cloudfront`）は `oci://docker.io/envoyproxy` の
-チャート（Agent Router / Envoy Gateway）用。Docker Hub は API・トークン・blob が別ホストに割れており、
-blob は 307 で cloudfront に飛ぶ（2026-09-17 実測）。**1 つでも欠けるとチャートを引けず、
-Application が Unknown のまま一度もレンダリングされない**（ghcr.io は単一ホストで済むので前例が無い）。
-
 ## argo (24 policies)
 
 | Component | Ingress | Egress |
@@ -165,7 +143,7 @@ Application が Unknown のまま一度もレンダリングされない**（ghc
 | **talos-extension-bump-sensor** | (deny world) | kube-apiserver, eventbus:4222 |
 | **events-controller** | host → 8081 | kube-apiserver, eventbus:8222 |
 | **eventbus** | eventsource (github-webhook), alertmanager-eventsource (alertmanager-webhook), task-dispatch-eventsource (task-dispatch), task-status-sync-eventsource (task-status-sync), argocd-deployed-eventsource (argocd-deployed), sensors (tofu-cloudflare, tofu-unifi, tofu-harbor, upgrade-k8s, pxe-sync, talos-build, images-build, single-repo-build, alert-investigate, task-dispatch, task-status-sync, talos-extension-bump, renovate-webhook, aqua-checksum, pr-review-dispatch) → 4222; self → 6222/7777; events-controller → 8222 | self:6222/7777 |
-| **workflow-pods** (backup-workflow, pxe-sync, talos-build, kanidm-repl-exchange, kanidm-backup, aqua-checksum, pluto-check除外) | (deny world) | kube-apiserver, HTTPS 443, kube-apiserver/remote-node/host:50000 (Talos apid — node IP は node identity を持つので toCIDR では一致しない), seaweedfs-filer (seaweedfs):8333 |
+| **workflow-pods** (backup-workflow, pxe-sync, talos-build, kanidm-repl-exchange, kanidm-backup, aqua-checksum, pluto-check excluded) | (deny world) | kube-apiserver, HTTPS 443, kube-apiserver/remote-node/host:50000 (Talos apid — node IPs carry node identity, so toCIDR does not match), seaweedfs-filer (seaweedfs):8333 |
 | **pluto-check** (pluto-check=true) | (none) | kube-apiserver:6443, seaweedfs-filer (seaweedfs):8333, llm-gateway-envoy (llm-gateway):10080, github.com + api.github.com + discord.com :443 |
 | **etcd-backup** (backup-workflow=true) | (deny world) | kube-apiserver:6443/50000 (Talos apid), *.r2.cloudflarestorage.com:443, seaweedfs-filer (seaweedfs):8333 |
 | **pxe-sync** (pxe-sync=true) | (deny world) | kube-apiserver, github.com + api.github.com + *.githubusercontent.com + dl-cdn.alpinelinux.org :443, seaweedfs-filer (seaweedfs):8333, QNAP NAS (192.168.5.240):2049 (NFS) |
@@ -180,7 +158,7 @@ Application が Unknown のまま一度もレンダリングされない**（ghc
 
 | Component | Ingress | Egress |
 |---|---|---|
-| **prometheus** | grafana, tempo, claude-code (claude-code), kube-apiserver/remote-node (service proxy, RBAC services/proxy で制御) → 9090; oauth2-proxy-prometheus (oauth2-proxy) → 9090 (L7 HTTP: GET は `/debug`（大文字小文字を無視、programsize 24/100）を除いて許可、POST は query/query_range/query_exemplars/series/labels/format_query/parse_query のみ許可の allowlist（クエリ文字列付きも可、programsize 74/100）。他の POST・`/-/reload`・`/-/quit`・`/api/v1/write`・`/api/v1/admin/*`・`/debug/pprof/*` は拒否。allowlist は Prometheus のバージョンに紐づく手書きリストなので chart 更新時に見直すこと。見直しの合図は Renovate 側から出る — renovate.jsonc の packageRule が kube-prometheus-stack の minor/major 更新 PR の本文に確認事項を出す（chart patch は Prometheus の patch しか運ばない実測に基づき対象外）。緊急切り戻し手順は known-issues.md 参照) | kube-apiserver, alertmanager:9093/8080, kube-state-metrics:8080, operator:10250, grafana:3000, smartctl-exporter:9633, argo-workflows-controller (argo):9090, taskflow-controller (taskflow-system):8443, cert-manager controller/webhook/cainjector (cert-manager):9402, tempo:3200 (scrape), coredns (kube-system):9153, tetragon-operator (kube-system):2113, seaweedfs (seaweedfs):9327, trivy-operator (trivy-system):8080, ai-gateway-controller (envoy-ai-gateway-system):8080, harbor (harbor):8001, host/remote-node:10250/9100/9115/2379/2381/10257/10259/9965/2112 |
+| **prometheus** | grafana, tempo, claude-code (claude-code), kube-apiserver/remote-node (service proxy, controlled by RBAC services/proxy) → 9090; oauth2-proxy-prometheus (oauth2-proxy) → 9090 (L7 HTTP: GET allowed except `/debug` (case-insensitive); POST allowed only for query/query_range/query_exemplars/series/labels/format_query/parse_query. Other POSTs, `/-/reload`, `/-/quit`, `/api/v1/write`, `/api/v1/admin/*` and `/debug/pprof/*` are denied) | kube-apiserver, alertmanager:9093/8080, kube-state-metrics:8080, operator:10250, grafana:3000, smartctl-exporter:9633, argo-workflows-controller (argo):9090, taskflow-controller (taskflow-system):8443, cert-manager controller/webhook/cainjector (cert-manager):9402, tempo:3200 (scrape), coredns (kube-system):9153, tetragon-operator (kube-system):2113, seaweedfs (seaweedfs):9327, trivy-operator (trivy-system):8080, ai-gateway-controller (envoy-ai-gateway-system):8080, harbor (harbor):8001, host/remote-node:10250/9100/9115/2379/2381/10257/10259/9965/2112 |
 | **alertmanager** | prometheus → 9093/8080 | discord.com:443, discordapp.com:443, alertmanager-eventsource (argo):12001 |
 | **grafana** | ingress → 3000 (L7 HTTP); prometheus → 3000 | kube-apiserver, prometheus:9090, loki-gateway:8080, tempo:3200, shared-pg (database):5432, kanidm (kanidm):8443 |
 | **kube-state-metrics** | prometheus → 8080 | kube-apiserver |
@@ -190,7 +168,7 @@ Application が Unknown のまま一度もレンダリングされない**（ghc
 | **loki-canary** | host → 3500 | loki-gateway:8080, loki:3100 |
 | **alloy** | host → 12345 | kube-apiserver, loki-gateway:8080 |
 | **tempo** | grafana, prometheus → 3200 | seaweedfs-filer (seaweedfs):8333, prometheus:9090 (metrics remote_write) |
-| **smartctl-exporter** | prometheus → 9633 | (none, ローカルの /dev のみ参照) |
+| **smartctl-exporter** | prometheus → 9633 | (none; reads local /dev only) |
 | **prometheus-admission** (Job) | (deny world) | kube-apiserver |
 
 ## talos-build (1 policy)
@@ -205,101 +183,24 @@ Application が Unknown のまま一度もレンダリングされない**（ghc
 |---|---|---|
 | **claude-code** (claude-code=true) | (deny world) | kube-apiserver, llm-gateway (llm-gateway):10080, github.com + api.github.com + *.githubusercontent.com + index.crates.io + static.crates.io + registry.npmjs.org + discord.com + gitmcp.io :443, seaweedfs-filer (seaweedfs):8333, loki-gateway (monitoring):8080, prometheus (monitoring):9090, horenso (horenso):3000, task-dispatch-eventsource (argo):12002, argocd-server (argocd):8080 |
 | **task-submitter** (task-submitter=true) | (deny world) | kube-apiserver, discord.com:443, seaweedfs-filer (seaweedfs):8333 |
-| **taskflow-pr-review** (taskflow-pr-review=true) | (書かない = 全 deny) | github.com + api.github.com :443, llm-gateway (llm-gateway):10080 |
-| **taskflow-cnp-check** (taskflow-cnp-check=true) | (書かない = 全 deny) | kube-apiserver:6443, github.com + api.github.com :443, llm-gateway (llm-gateway):10080, loki-gateway (monitoring):8080 |
-| **taskflow-cnp-report** (taskflow-cnp-report=true) | (書かない = 全 deny) | discord.com + github.com + api.github.com :443, llm-gateway (llm-gateway):10080 |
-| **taskflow-openrouter-smoke** (taskflow-openrouter-smoke=true) | (書かない = 全 deny) | openrouter.ai:443 |
-| **taskflow-llm-gateway-smoke** (taskflow-llm-gateway-smoke=true) | (書かない = 全 deny) | llm-gateway (llm-gateway):10080（Service の port は 80、CNP は backend の 10080） |
-
-`task-submitter` は Task を 1 つ作るだけの CronWorkflow の Pod。apiserver のほかに要る 2 つは
-コントローラの workflowDefaults が全 Workflow に注入するもの（archiveLogs の保存先と
-discord-notify の exit hook）で、これが無いと起票自体は通っても Workflow が Error になる。
-
-`taskflow-pr-review` は**攻撃者が書ける入力（PR の diff）を読む** Pod なので、`claude-code=true` の
-共有ポリシーには相乗りさせない（設計 §8）。apiserver も Loki も store も開いておらず、
-到達できるのは GitHub と llm-gateway だけ（推論は gateway 経由。この Pod は LLM の
-資格情報を持たない）。
-
-**この Pod にだけ `discord.com` を開けていない**のは意図的で、他の claude-code Pod との違いはここ。
-Cilium の identity は Pod 単位なので、通知サイドカーのために開けた egress はエージェントの
-コンテナからも到達できる。Discord の webhook は誰でも作れて誰でも読めるため、開いていれば
-注入されたエージェントが**攻撃者自身が受信ログを読める宛先**を手に入れる。initContainer の
-`parts` が作る GitHub App の installation token や、読んだ private リポの中身がそこへ出ていく。
-LLM の資格情報を handler から外した（#942）後もこの理由は変わらない — 抜ける物が
-`CLAUDE_CODE_OAUTH_TOKEN` から他の資格情報とデータに移っただけで、`github.com` /
-llm-gateway は攻撃者が受信ログを読めないのでこの性質が無い。
-この flow は通知サイドカーを持たず、人間への通知は framework が終端で出す Warning Event /
-`Ready=False` / metric から引く。
-
-`taskflow-cnp-check` / `taskflow-cnp-report` は cnp-check flow の 2 フェーズに 1 枚ずつ。
-割った理由は工程ではなく**到達範囲**で、フェーズごとに要るものだけを開ける。
-
-- **調査**（`taskflow-cnp-check`）は点検対象を読むので apiserver と Loki が要る。
-  **Discord は開けない** — 通知サイドカーは終端の 報告 にしかなく、Cilium の identity は
-  Pod 単位なので、開けた穴はエージェントのコンテナからも使える（上の taskflow-pr-review と
-  同じ理由。攻撃者が受信ログを読める宛先を与えないという話で、LLM トークンの有無ではない）
-- **報告**（`taskflow-cnp-report`）は材料を workspace PVC 越しに受け取るので、
-  ネットワークで要るのは推論 API と通知先だけ。**apiserver も Loki も開けない** —
-  「材料に無いことは確かめようがない」を、プロンプトの約束ではなく到達可能性で支えている
-- どちらも `github.com` / `api.github.com` を持つ。initContainer の `parts` が private の
-  parts リポから skill / CLAUDE.md 断片を引き、GitHub App の installation token を作るため。
-  init と agent は同じ identity なので agent からも届くが、GitHub は攻撃者が受信ログを
-  読めない宛先（上の taskflow-pr-review と同じ整理）。**残存リスク**: agent 自身は GitHub を
-  使わないのに到達できるので、攻撃者が用意した public な GitHub コンテンツを追加の指示として
-  読み込める経路（fetch 方向）が残る。特に 報告 は前フェーズの LLM 出力＝信頼できない入力を
-  材料にする Pod。これは pr-review で受容済みのパターンの拡張として受け入れる。狭めるなら
-  init と agent の identity を分ける（Pod を分ける）しかなく、今はやらない
-
-1 フェーズだった頃は共有の `claude-code=true` に相乗りしており、1 つの Pod が
-apiserver・Loki・Discord・GitHub・npm・crates・SeaweedFS・Prometheus・horenso・ArgoCD を
-まとめて持っていた。
-
-2 つの smoke はどちらも「配管だけを確かめる」flow で、**出口に書かないもの**が主眼。
-`taskflow-openrouter-smoke` は api.anthropic.com を書かないので、env が効かず Anthropic に
-飛んだら drop されて落ちる。`taskflow-llm-gateway-smoke`（#942）は **openrouter.ai を書かない**
-ので、gateway を経由せず Pod が直接出ようとしたら落ちる — 「外に出ているのは gateway だけ」を
-緑/赤で判定できる形にしてある。後者の handler は LLM の資格情報を持たない
-（gateway のクライアントキーだけを持つ。実キーは gateway 側にしかない）。
-
-ただし env を正しく設定していても直行しうるため、両方の handler に env 3 本を入れて止めて
-ある（根拠は `manifests/claude-code/taskflow-common.yaml`）。
+| **taskflow-pr-review** (taskflow-pr-review=true) | (none written = all denied) | github.com + api.github.com :443, llm-gateway (llm-gateway):10080 |
+| **taskflow-cnp-check** (taskflow-cnp-check=true) | (none written = all denied) | kube-apiserver:6443, github.com + api.github.com :443, llm-gateway (llm-gateway):10080, loki-gateway (monitoring):8080 |
+| **taskflow-cnp-report** (taskflow-cnp-report=true) | (none written = all denied) | discord.com + github.com + api.github.com :443, llm-gateway (llm-gateway):10080 |
+| **taskflow-openrouter-smoke** (taskflow-openrouter-smoke=true) | (none written = all denied) | openrouter.ai:443 |
+| **taskflow-llm-gateway-smoke** (taskflow-llm-gateway-smoke=true) | (none written = all denied) | llm-gateway (llm-gateway):10080 (the service port is 80; the CNP uses the backend port 10080) |
 
 ## claude-code-build (1 policy)
 
 | Component | Ingress | Egress |
 |---|---|---|
-| **taskflow-implement** (taskflow-implement=true) | (書かない = 全 deny) | llm-gateway-envoy (llm-gateway):10080, github.com + api.github.com + *.githubusercontent.com + index.crates.io + static.crates.io + registry.npmjs.org :443 |
-
-`claude-code` とは別 namespace（PSA が `privileged`。Kata ゲスト内で `volumeMode: Block` を
-mkfs するため、docs/pod-security.md）にしてあるので CNP も分けて持つ。推論は llm-gateway 経由で、
-**`api.anthropic.com` も `openrouter.ai` も開けていない** — env が効かず外部 LLM へ直行する
-取り違えを緑で通さないため。上流の選択は gateway の仕事で、この Pod は alias しか知らない。
-`index.crates.io` / `static.crates.io` / `registry.npmjs.org` は依存の取得用で、対応する言語を
-足すときはここも足す必要がある（宛先が無いと失敗ではなくハングする）。
-
-env を正しく設定していても直行しうるため、handler 側で env 3 本を入れて止めている
-（根拠は `manifests/claude-code/taskflow-common.yaml`）。
-
-2026-09-19 まで `openrouter.ai` への egress と `openrouter-broker` サイドカーを持っていた。
-ブローカーは鍵を `agent` コンテナから隔てるためのもので、**CNP は Pod 単位（同一 identity）なので
-同じ Pod 内のコンテナを分離できない**という制約への対処だった。鍵が gateway へ移った今は
-ブローカーごと不要になり、この Pod からの外部 LLM 到達性そのものが無くなっている。
-
-**この handler は従量課金（`implement`）階層にしか入れない。** gateway のクライアントキーが
-`manifests/llm-gateway/openrouter.yaml` の `x-llm-client` 条件にしか載っていないので、
-`review` を名乗っても `route-not-found` で 404 になる。untrusted input（issue 本文）を読んで
-Bash を回す handler を、個人の Max サブスクリプションから切り離すのが #942 の動機の半分。
+| **taskflow-implement** (taskflow-implement=true) | (none written = all denied) | llm-gateway-envoy (llm-gateway):10080, github.com + api.github.com + *.githubusercontent.com + index.crates.io + static.crates.io + registry.npmjs.org :443 |
 
 ## image-build (2 policies)
 
 | Component | Ingress | Egress |
 |---|---|---|
 | **image-build** (image-build=true) | (deny world) | kube-apiserver, 0.0.0.0/0:443, harbor-nginx (harbor):8443 (internal push), seaweedfs-filer (seaweedfs):8333 |
-| **workflow-pods** (workflows.argoproj.io/workflow が付き image-build=true が付かない Pod) | (deny world) | kube-apiserver, seaweedfs-filer (seaweedfs):8333, discord.com:443 |
-
-`workflow-pods` は「ラベルを持たないまま投入されたワークフローが**自分の失敗を報告できる**」ための
-最小限であって、任意のワークフローを動かすためのものではない。ビルドに要る egress は
-`image-build` 側にある。
+| **workflow-pods** (pods carrying workflows.argoproj.io/workflow without image-build=true) | (deny world) | kube-apiserver, seaweedfs-filer (seaweedfs):8333, discord.com:443 |
 
 ## seaweedfs (4 policies)
 
@@ -325,7 +226,7 @@ Bash を回す handler を、個人の Max サブスクリプションから切�
 
 | Component | Ingress | Egress |
 |---|---|---|
-| **shared-pg** | grafana (monitoring), argo-workflows-controller (argo), argo-workflows-server (argo), nextcloud (nextcloud), harbor-core (harbor), harbor-exporter (harbor), harbor-jobservice (harbor), seaweedfs-filer (seaweedfs), horenso (horenso), trading (collector), trading (reporter) → 5432; ingress (pg-gateway: pg.infra.tgy.io TLS passthrough, 192.168.10.193:443 → shared-pg-rw:5432, direct-TLS clients only。**注意**: `pg_hba` の既定は `host all all all scram-sha-256` で、Envoy 中継のためクライアントの送信元 IP が見えず経路を区別できない。この ingress ルールは shared-pg の全ロール（grafana / argo / nextcloud / seaweedfs / horenso / trading / app）に到達可能にする。段階 2（クライアント証明書）までの暫定であり、反映後に `pg_stat_activity.client_addr` で Envoy 側の送信元アドレスを実測し、`pg_hba` で経路を分けられるか確認すること) → 5432; self → 5432/8000 (replication); cloudnative-pg (cnpg-system), host → 8000 (probes) | kube-apiserver, self:5432/8000, *.r2.cloudflarestorage.com:443 (backup) |
+| **shared-pg** | grafana (monitoring), argo-workflows-controller (argo), argo-workflows-server (argo), nextcloud (nextcloud), harbor-core (harbor), harbor-exporter (harbor), harbor-jobservice (harbor), seaweedfs-filer (seaweedfs), horenso (horenso), trading (collector), trading (reporter) → 5432; ingress (pg-gateway: pg.infra.tgy.io TLS passthrough, 192.168.10.193:443 → shared-pg-rw:5432, direct-TLS clients only; reaches every shared-pg role) → 5432; self → 5432/8000 (replication); cloudnative-pg (cnpg-system), host → 8000 (probes) | kube-apiserver, self:5432/8000, *.r2.cloudflarestorage.com:443 (backup) |
 
 ## cert-manager (4 policies)
 
@@ -420,7 +321,7 @@ Bash を回す handler を、個人の Max サブスクリプションから切�
 | Component | Ingress | Egress |
 |---|---|---|
 | **rss-pg** | self → 5432/8000; rss-server/rss-ui/rss-fetcher/rss-cleaner/rss-migration → 5432; cloudnative-pg (cnpg-system), host → 8000 (probes) | kube-apiserver, self:5432/8000 |
-| **rss-server** | oauth2-proxy-rss (oauth2-proxy) → 80 | rss-pg:5432, world:443（フィード追加時の即時取得） |
+| **rss-server** | oauth2-proxy-rss (oauth2-proxy) → 80 | rss-pg:5432, world:443 (immediate fetch when a feed is added) |
 | **rss-ui** | oauth2-proxy-rss (oauth2-proxy) → 80 | rss-pg:5432 |
 | **rss-fetcher** | rss-cron → 80 | rss-pg:5432, world:443 |
 | **rss-cleaner** | rss-cron → 80 | rss-pg:5432 |
@@ -471,114 +372,11 @@ Bash を回す handler を、個人の Max サブスクリプションから切�
 |---|---|---|
 | **taskflow-controller** | host/remote-node → 8081 (probes); kube-apiserver/host/remote-node → 9443 (TaskFlow admission webhook); prometheus (monitoring) → 8443 (metrics, TLS + authn/authz) | kube-apiserver |
 
-9443 は TaskFlow の構造検査 webhook（taskflow #17 / ADR-0006）。`fromEntities` に
-`kube-apiserver` / `host` / `remote-node` の 3 つを並べているのは、このクラスタの他の
-admission webhook（kyverno / cnpg / spin-operator、いずれも 9443）と同じ書き方に揃えているため。
-この webhook は `failurePolicy: Fail` なので、
-**ここを閉じると TaskFlow の作成・更新が全部拒否され、ArgoCD の sync が止まる**。
-
-**どの identity で届くかは 2026-09-07 に実測した**（taskflow #107）。admission リクエストは
-identity 6 = `reserved:remote-node` **だけ**で届き、`reserved:kube-apiserver` を持つ identity 7
-では一度も来ない（hostNetwork の apiserver が CP ノードの cilium_host に SNAT され、
-`kube-apiserver` ラベルが落ちるため）。外して確かめた結果、`remote-node` だけなら書き込みは
-全部通り、`kube-apiserver` だけにすると `POLICY_DENIED` で drop されて書き込みは
-`context deadline exceeded` で失敗する。**この行を支えているのは `remote-node`** で、
-`kube-apiserver` はその部分集合なので残しても境界は広がらない。
-
-`host` は Pod が CP ノードに乗る場合のための行だが、CP には `node-role.kubernetes.io/control-plane:NoSchedule`
-taint があり taskflow-controller に toleration が無いので、現状は効いていない。
-
-CNP を絞って測るときは、apiserver が張り済みの TCP 接続がそのまま通り続けることに注意する。
-絞った直後に通っても許可の証拠にならない。Pod を入れ替えて接続を張り直させてから測ること
-（2026-09-07 の実測でこれを踏み、`kube-apiserver` だけでも足りていると一度誤結論を出しかけた）。
-
-この webhook が拒否側に倒れたときの症状と切り分けは [known-issues.md](known-issues.md) の
-「TaskFlow 構造検査 webhook」節にある（caBundle 注入窓とコントローラ不在の 2 つ）。
-
 ## llm-gateway (1 policy)
 
 | Component | Ingress | Egress |
 |---|---|---|
-| **llm-gateway-envoy** | claude-code-build / claude-code → 10080; argo (SA `pluto-fixer` のみ) → 10080; host/remote-node → 19003 (probes) | envoy-gateway (envoy-gateway-system):18000, openrouter.ai + api.anthropic.com:443 |
-
-Agent Router のデータプレーン（issue #942）。alias（`x-ai-eg-model`）で上流と実モデルが決まる。
-
-**`claude-code` namespace の handler は全て gateway 経由**（2026-09-18 に達成）。
-`api.anthropic.com` への直行も `claude-code-token` の参照もあの namespace には残っていない。
-
-`argo` の `pluto-check` も 2026-09-18 に gateway 経由へ切り替えた。**Anthropic に直行するよう
-設定された Pod はもう無い。**
-
-`pluto-check` は `workflow-pods` の除外リストへ移し、専用の `netpol-pluto-check.yaml` を持たせた。
-**ネットワークだけでは足りない**ことも分かった。`pluto-checker` SA はクラスタ全体の `secrets` に
-get/list を持っており（`detect-helm` が Helm のリリースを Secret から読むため必要）、それを継いだまま
-claude を走らせると、エージェントは `kubectl get secret` で `llm-gateway/claude-max-apikey` にも
-`argo/github-app-private-key` にも届く。**env や `/proc` を塞いでも API 経由でやり直せる。**
-そこで claude を走らせる `ai-fix` ステップだけ `pluto-fixer` SA（Secret 権限なし）に落とした。
-gateway の ingress もこちらの SA で絞ってある。
-狙いは `toCIDR: 0.0.0.0/0`:443 を外すこと — あれが効いていると env が壊れて直行に倒れても
-ネットワーク的には通ってしまい、「gateway 経由である」ことを設定でしか担保できない。
-**これで 3 つの namespace すべてで、直行は drop されて落ちる。**
-ただし env を正しく設定していても直行しうるため、env 3 本を入れていない handler は
-正常時にも drop が出る（根拠は `manifests/claude-code/taskflow-common.yaml`）。
-
-onExit の Discord 通知 Pod にも `podMetadata.labels` が乗るので、専用 CNP には `discord.com` が
-要る（`netpol-aqua-checksum.yaml` が実測で踏んでいる）。同じラベルを共有する以上、ai-fix の
-エージェントからも discord.com に届く — `taskflow-pr-review` で開けていない理由がここには
-当てはまらないのは、あの flow が読むのが攻撃者の書ける PR diff なのに対し、こちらが読むのは
-pluto の出力と自リポジトリだからで、**論拠が違うだけで無害だからではない**。
-
-残る外部 LLM への直行は `claude-code-build` の `taskflow-implement` で、openrouter-broker
-サイドカー経由で `openrouter.ai` に出る。それを倒すまで「外部 LLM への egress は llm-gateway
-だけ」とは言えない。
-
-**ingress は `claude-code` / `claude-code-build` については namespace 単位で開けている。**
-`argo` だけは SA（`pluto-fixer`）で絞ってある — あの namespace には claude CLI 以外の
-ワークロード（renovate / tofu-harbor / 各種 backup）が常駐しており、`workflow-pods` の
-除外リストにも入っていないので、namespace 単位で開けるとそれら全部が gateway に届く。
-
-**ただし「gateway に届く」と「Max の alias を使える」は 2026-09-18 から別のことになった。**
-ルート選択に使われる `x-ai-eg-model` はリクエスト body の `model` から埋まるので、**呼ぶ側が
-自由に選べる**。CNP は namespace / SA の粒度までしか絞れないので、それだけでは
-「untrusted input を実行する handler は従量課金だけ」を書けない。そこで
-`manifests/llm-gateway/securitypolicy.yaml` の `SecurityPolicy.apiKeyAuth` を
-ルートごとに 1 本ずつ掛け、**階層ごとに別の Secret の鍵しか通さない**ようにした。
-
-- `claude-max` ルート（`review` / `investigate`）→ Secret `claude-max-client-keys`
-- `implement` ルート（OpenRouter）→ Secret `implement-client-keys`
-
-鍵は handler ごとに別で、**Secret のキー名がそのままクライアント ID**。認証を通ると
-`forwardClientIDHeader` でヘッダに移り、アクセスログの `llm.client` に出る。自称の
-`tf.handler` と並べてあるので、食い違えば偽装か設定ミス、`llm.client` だけ空なら
-**認証されずに通った**（＝ SecurityPolicy が当たっていない）と読める。
-
-したがって `claude-code` / `claude-code-build` に claude CLI 以外のワークロードを足しても、
-**鍵を渡さない限り Max の alias には届かない**（401）。鍵を渡すかどうかが判断の分かれ目になる。
-
-Anthropic は subscription OAuth を「Claude Code の system prompt が先頭にあるか」でゲートして
-おり、claude CLI 以外がこの alias を叩いても*枠切れを装った 429* になるだけだが、**成否を
-クラスタ側で制御できているわけではない**ので、鍵の側で閉じておく。
-
-`claude-code` / `claude-code-build` の ingress を SA 単位に落とすこともできる。Cilium は Pod の
-ServiceAccount を `io.cilium.k8s.policy.serviceaccount` としてアイデンティティラベルに入れて
-おり（実測）、flow ごとに専用 SA が既に割り当たっている（`agent-pr-reviewer` /
-`agent-llm-gateway-smoke` 等）。**CNP 側だけで完結**し、taskflow 側の変更は要らない。
-`argo` は 2026-09-18 にこの形で入れた（`pluto-fixer` のみ）。
-残る 2 namespace も同じ形にできる。
-
-Envoy の Pod がこの namespace に立つのは `helm-values/envoy-gateway/values.yaml` で
-`deploy.type: GatewayNamespace` にしているため。**Envoy Gateway の既定は
-`ControllerNamespace`** で、そのままだとデータプレーンが `envoy-gateway-system` 側に立ち、
-この CNP は何も選択しない（＝ Pod は Running のまま外に出られない）。
-
-同じ values の `watch.namespaces` は `envoy-gateway-system` と `llm-gateway` の 2 つだけで、
-**この Envoy Gateway は他の namespace の Gateway / HTTPRoute / EnvoyProxy をエラーも出さずに
-無視する**（`Cache.DefaultNamespaces` に代入されるだけで、コントローラ namespace も自動では
-足されない）。別の namespace に Gateway を足すときは、ここに namespace を追加しないと
-「作ったのに何も起きない」になる。
-
-`10080` は listener port 80 に対して Envoy Gateway が実際に listen する port（特権 port を
-避けて 1xxxx へずらす）。Service の port は 80 なので、CNP だけ数字が食い違って見える。
+| **llm-gateway-envoy** | claude-code-build / claude-code → 10080; argo (SA `pluto-fixer` only) → 10080; host/remote-node → 19003 (probes) | envoy-gateway (envoy-gateway-system):18000, openrouter.ai + api.anthropic.com:443 |
 
 ## envoy-gateway-system (2 policies)
 
@@ -587,22 +385,8 @@ Envoy の Pod がこの namespace に立つのは `helm-values/envoy-gateway/val
 | **envoy-gateway** | llm-gateway → 18000 (xDS); kube-apiserver/host/remote-node → 9443 (topologyInjector webhook) | kube-apiserver, agent-router (envoy-ai-gateway-system):1063 |
 | **envoy-gateway-certgen** | (none) | kube-apiserver |
 
-`certgen` は chart の pre-install / pre-upgrade フック Job（ArgoCD の PreSync）で、Pod ラベルが
-`app: certgen` しかないためコントローラ用の CNP では選択されない。policy enforcement が always の
-このクラスタでは **選択されないエンドポイントは egress も deny** なので、専用の CNP が無いと
-PreSync が落ちて Application が一度も sync しない。
-
-**この CNP 自身も `argocd.argoproj.io/hook: PreSync` + `sync-wave: "-2"` で PreSync フック
-として入れている。** 通常リソースとして置くと適用が Sync フェーズ＝ Job より後になり、
-初回は永久に収束しない。kyverno / seaweedfs の hook Job 用 CNP は post-install（PostSync）
-なので通常リソースで足りており、**そのまま真似ると成立しない**。
-
 ## envoy-ai-gateway-system (1 policy)
 
 | Component | Ingress | Egress |
 |---|---|---|
-| **agent-router-controller** | kube-apiserver/host/remote-node → 9443 (Pod mutator webhook); envoy-gateway (envoy-gateway-system) → 1063 (extension server gRPC); prometheus (monitoring) → 8080 (metrics, 素の HTTP) | kube-apiserver |
-
-9443 の Pod mutator が届かないと Envoy の Pod に extproc が注入されず、**AI のルートを
-持たないまま起動する**（Pod は Running なので気づきにくい）。taskflow-system と同じく、
-実際にどの identity で届くかは hubble で確かめること。
+| **agent-router-controller** | kube-apiserver/host/remote-node → 9443 (Pod mutator webhook); envoy-gateway (envoy-gateway-system) → 1063 (extension server gRPC); prometheus (monitoring) → 8080 (metrics, plain HTTP) | kube-apiserver |

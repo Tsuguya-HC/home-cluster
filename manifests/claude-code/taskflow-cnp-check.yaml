@@ -18,8 +18,8 @@
 # 報告 は apiserver も Loki も持たない。だから「材料に無いことを書く」には、書いた本人が
 # 確かめる手段が無い — 裏取りの検査を、プロンプトの約束ではなく到達可能性で支える。
 # 逆に 調査 は Discord を持たない。Cilium の identity は Pod 単位で、通知サイドカーのために
-# 開けた egress はエージェントのコンテナからも使えるため（docs/network-policies.md の
-# taskflow-pr-review の項）、外向きの webhook に届く Pod にだけ穴を
+# 開けた egress はエージェントのコンテナからも使えるため（taskflow-pr-review.yaml の
+# 冒頭コメントに同じ理由）、外向きの webhook に届く Pod にだけ穴を
 # 開ける範囲は狭いほどよい。1 フェーズだった頃は 1 つの Pod が両方を持っていた。
 #
 # ## 語彙と終端
@@ -68,7 +68,7 @@ automountServiceAccountToken: false
 # **Discord をここに開けないのは意図的。** 通知サイドカーは終端の 報告 フェーズにしか無く、
 # Cilium の identity は Pod 単位なので、開けた穴はエージェントのコンテナからも使える。
 # webhook 宛の穴は要る Pod にだけ開ける（#942 以降、この Pod は LLM の資格情報を持たない）
-# （docs/network-policies.md の taskflow-pr-review の項に同じ理由）。
+# （taskflow-pr-review.yaml の冒頭コメントに同じ理由）。
 #
 # DNS は CCNP allow-dns で全 Pod に共通適用済み。ingress は 1 つも書かないので全 deny
 # （policyEnforcementMode: always なので、書かない = 遮断される）。
@@ -91,7 +91,8 @@ spec:
     - toFQDNs:
         # github.com / api.github.com は init の parts（部品の sparse checkout と App の
         # installation token）のため。init と agent は同じ identity なので agent からも
-        # 届くが、GitHub は攻撃者が受信ログを読めない宛先（docs/network-policies.md）。
+        # 届くが、GitHub は攻撃者が受信ログを読めない宛先（taskflow-pr-review.yaml の
+        # 冒頭コメント）。
         - matchName: "github.com"
         - matchName: "api.github.com"
       toPorts:
@@ -122,8 +123,13 @@ spec:
 # 報告 フェーズ専用 CNP。材料は PVC 越しに来るので、ネットワークで要るのは推論 API と、
 # notify サイドカーの Discord と、init の parts が部品を引く GitHub だけ。apiserver も Loki も
 # 開けない — 「材料に無いことは確かめようがない」をプロンプトの約束ではなく到達可能性で
-# 支えるのがこのフェーズの主旨。GitHub は agent からも届く（残存リスクは
-# docs/network-policies.md）。
+# 支えるのがこのフェーズの主旨。GitHub は agent からも届く（宛先としての整理は
+# taskflow-pr-review.yaml の冒頭コメント）。
+#
+# **受容済みの残存リスク**: agent 自身は GitHub を使わないのに到達できるので、攻撃者が
+# 用意した public な GitHub コンテンツを追加の指示として読み込める経路（fetch 方向）が
+# 残る。特にこの 報告 フェーズは前フェーズの LLM 出力＝信頼できない入力を材料にする。
+# 狭めるには init と agent の identity を分ける（Pod を分ける）しかなく、今はやらない。
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:

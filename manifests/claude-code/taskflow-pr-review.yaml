@@ -27,7 +27,7 @@
 #
 # §8 が求める 2 つのうち、**ネットワーク隔離は満たしている**: claude-code=true の共有 CNP には
 # 相乗りせず、専用ラベル + 専用 CNP を立てて apiserver も Loki も store も閉じてある。この Pod
-# が到達できるのは GitHub と Anthropic API だけで、クラスタには一切触れない。
+# が到達できるのは GitHub と llm-gateway だけで、クラスタには一切触れない。
 # **終端へ直行しない制約は満たしていない** — `untrusted` プロファイル属性も人間承認ゲートも
 # taskflow にまだ実装されていないため（design.md §13 の未決事項として書かれているだけで、
 # これを追跡する専用の issue はまだ無い）。

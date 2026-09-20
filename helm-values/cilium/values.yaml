@@ -59,6 +59,9 @@ envoy:
 # Pod は ingress が静かに開いたままだった（2026-08-29 cnp-check が argo/rss で検出）。
 # always なら書き忘れは「開く」でなく「閉じる」側に倒れる。
 # cilium-health の疎通は manifests/infra/ccnp-health.yaml で許可している。
+# kubelet の probe は allow-localhost=auto で許可されたままなので、CNP 側で開ける必要はない。
+# 古い CNP に残る `ingressDeny: [{fromEntities: [world]}]` は default モードで ingress の
+# enforcement を有効にするための目印だったもので、always の今は冗長（無害）。
 policyEnforcementMode: always
 
 # ConfigMap を変えても chart は既定で Pod を巻き直さない。policyEnforcementMode を

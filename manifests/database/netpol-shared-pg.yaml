@@ -76,7 +76,12 @@ spec:
             - port: "8000"
               protocol: TCP
     # pg.infra.tgy.io（pg-gateway、TLS パススルー）からの流入。Envoy が中継するので送信元は
-    # reserved:ingress になり、クライアントの IP はここでは見えない。
+    # reserved:ingress になり、クライアントの IP はここでは見えない。`pg_hba` の既定は
+    # `host all all all scram-sha-256` なので、この 1 行が shared-pg の**全ロール**
+    # （grafana / argo / nextcloud / seaweedfs / horenso / trading / app）を外から
+    # 到達可能にする。クライアント証明書（段階 2）までの暫定。
+    # **未消化**: `pg_stat_activity.client_addr` で Envoy 側の送信元アドレスを実測し、
+    # `pg_hba` で経路を分けられるか確かめること。
     - fromEntities:
         - ingress
       toPorts:

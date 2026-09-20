@@ -7,6 +7,9 @@ spec:
   endpointSelector:
     matchLabels:
       app: cloudflared
+  # **`ingressDeny` に `cluster` を書かないこと。** `cluster` は host と remote-node を
+  # 含み、deny は allow に優先するので kubelet の probe まで落ちる。probe がある Pod は
+  # `ingressDeny` を使わず、ingress の allow だけ書く（書かない先は暗黙で deny される）。
   ingressDeny:
     - fromEntities:
         - world

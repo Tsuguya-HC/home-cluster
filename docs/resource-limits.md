@@ -167,7 +167,6 @@ taskflow の TaskHandler（`kind: Job`）。WorkflowTemplate とは別物なの�
 | implementer | parts (init) | 50m / 64Mi | 256Mi |
 | implementer | github-auth (init) | 10m / 32Mi | 64Mi |
 | implementer | helpers (init) | 10m / 16Mi | 64Mi |
-| implementer | openrouter-broker (native sidecar) | 50m / 64Mi | 256Mi |
 | implementer | agent (main) | 1 / 2Gi | 8Gi |
 
 ### QNAP CSI (trident)

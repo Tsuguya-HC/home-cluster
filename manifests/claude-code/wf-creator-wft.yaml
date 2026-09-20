@@ -216,9 +216,9 @@ spec:
                handler 名のラベルで新しいフィールドを作る（48 文字程度のランダム英数）
             2. manifests/secrets/claude-code-llm-gateway-client-keys.yaml の data に
                `secretKey: <handler 名>` / `property: <handler 名>` を追加
-            3. manifests/secrets/llm-gateway-claude-max-client-keys.yaml（alias が review /
-               investigate の場合）または llm-gateway-implement-client-keys.yaml（implement の
-               場合）にも同じ handler 名で追加。**gateway 側に無い鍵は 401 になる。**
+            3. manifests/secrets/llm-gateway-client-keys.yaml にも同じ handler 名で追加。
+               **gateway 側に無い鍵は 401 になる。** 階層（Max / 従量課金）でこの Secret は
+               分けない。階層は AIGatewayRoute のルールが x-llm-client をマッチして決まる。
                鍵の値は階層ごとに別のものを使う — 同じ Secret の中で値が重複すると
                SecurityPolicy 全体が翻訳エラーになる
             人手が要るのは 1 だけなので、そこは escalate して人に頼むこと。

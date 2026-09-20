@@ -29,9 +29,8 @@ spec:
     # 取得。無効化する公式フラグが無い）はこの新しい経路だけで絞る。上の
     # ブロックに混ぜて L7 を足すと tempo の remote-write まで塞いでしまう
     # ので、専用の ingress ルールに分離している。
-    # 一般指針は docs/network-policies.md の Caveats、この L7 ルールが
-    # 誤って正当なリクエストまで弾いた場合の緊急切り戻し手順（セキュリティ
-    # 低下を伴う一時措置）は docs/known-issues.md 参照。
+    # この L7 ルールが誤って正当なリクエストまで弾いた場合の緊急切り戻し
+    # 手順（セキュリティ低下を伴う一時措置）は docs/known-issues.md 参照。
     - fromEndpoints:
         - matchLabels:
             app.kubernetes.io/instance: oauth2-proxy-prometheus
@@ -49,7 +48,13 @@ spec:
               # 綴りを1文字ずつ分岐させる」必要はなく、先頭が 'd'/'D' で
               # 始まるパスをまとめて拒否するだけで足りる（program size:
               # 24。Envoy の RegexMatcher は re2.max_program_size.error_level
-              # の既定値 100 を超えると compile 失敗するため、最初は
+              # の既定値 100 を超えると compile 失敗し、**その失敗は
+              # kubectl apply --dry-run=server も kubeconform も CI も
+              # 全部緑のまま通る**（cilium-agent が xDS に変換する段階で
+              # しか出ず、L7 ブロックが黙って無効になる）。書く前に
+              # google-re2 の re2.compile(pattern).programsize で測ること。
+              # RE2 には否定先読みが無いので「X 以外」は分岐で書くしかなく、
+              # これが programsize を一気に食う。最初は
               # debug を1文字ずつ分岐させる式で書いていたが programsize が
               # 100 ちょうどで余裕が無く書き直した）。(?i) で大文字小文字を
               # 無視する。将来 Prometheus が 'd' 始まりのルートを増やしたら

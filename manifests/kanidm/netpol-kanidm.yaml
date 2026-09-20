@@ -8,6 +8,9 @@ spec:
     matchLabels:
       app.kubernetes.io/name: kanidm
   ingress:
+    # 8443 は TLSRoute（TLS passthrough）で入ってくる。**ここに L7 の rules.http を
+    # 足さないこと** — Cilium が暗号化されたままのトラフィックを HTTP として
+    # パースしようとして接続が壊れる。絞るなら L4 の fromEndpoints で。
     - fromEntities:
         - ingress
       toPorts:

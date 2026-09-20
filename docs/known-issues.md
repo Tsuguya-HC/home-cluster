@@ -339,7 +339,7 @@ ELF の実バイナリ（`argocd-repo-server` / `busybox` / `postgres` 等）を
 
 **復旧手順**:
 
-- **bot（Renovate）が作った PR**: PR を close → reopen する。3 sensor すべて `reopened` を受理するので、ブランチに触らずに plan が再走する。**空コミットを積まないこと** — 3 リポとも `rebaseWhen: "behind-base-branch"` で、Renovate は最終コミットの author が自分以外になったブランチを「変更された」と判定して以後の rebase / 更新を止める
+- **bot（Renovate）が作った PR**: PR を close → reopen する。3 sensor すべて `reopened` を受理するので、ブランチに触らずに plan が再走する。**空コミットを積まないこと** — 3 リポとも `rebaseWhen: "behind-base-branch"` で、Renovate はベースブランチから分岐して以降の**いずれかのコミット**の author または committer が自分以外になった時点で「変更された」と判定し以後の rebase / 更新を止める。一度この判定が付くと、後から Renovate 名義のコミットを積んで最新コミットを自分に戻しても解消しない（判定対象は最新コミットではなく分岐後の全コミット）
 - **人間が作った PR**: 空コミットを積んで push すれば sensor が `synchronize` で plan を再起動する
 - 直ちに解消したい場合は手動で status を確定する:
   ```sh

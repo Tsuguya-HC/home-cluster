@@ -329,16 +329,19 @@ ELF の実バイナリ（`argocd-repo-server` / `busybox` / `postgres` 等）を
 
 ## `tofu-plan` が報告されないまま PR が固着する
 
-`manifests/argo/tofu-cloudflare.yaml` / `tofu-harbor.yaml` / `tofu-unifi.yaml` の plan WFT は `post_status pending` を最初に打ってから plan を走らせる（意図した fail-closed — ワークフローが起動しない、または途中で死んだ場合に status を未報告のまま残し GitHub にマージをブロックさせるため）。見た目の異なる 2 症状がどちらもこの設計から起きる。`tofu-plan` を必須チェックにすると、どちらも「人間の手動マージも含めて永久にブロックされる」詰みになる。
+`manifests/argo/tofu-cloudflare.yaml` / `tofu-harbor.yaml` / `tofu-unifi.yaml` の plan WFT は `post_status pending` を最初に打ってから plan を走らせる（意図した fail-closed — ワークフローが起動しない、または途中で死んだ場合に status を未報告のまま残し GitHub にマージをブロックさせるため）。見た目の異なる 3 症状がどれもこの設計から起きる。3 リポとも `tofu-plan` は既に必須チェックであり、下記の復旧手順があるため詰みにはならない。
 
 **(a) pending 固着**: PR の Checks でチェックが黄色のまま回り続ける。`post_status pending` の直後に Pod が異常終了する（OOM / ノード drain による Eviction / ノード再起動）と `success` / `failure` / `error` のどれも書き込まれない。
 
 **(b) 未報告**: PR の Checks に `Expected — Waiting for status to be reported` と出る。plan の Workflow 自体が起動していない（sensor / eventbus / workflow-controller が落ちている）ケース。eventbus の JetStream quorum 喪失で複数の sensor が数時間サイレント停止した前例がある。
 
-**判別**: PR の Checks タブを見る。チェックの行自体が黄色い丸で存在すれば (a)、行が薄いグレーで「Expected」表記なら (b)。
+**(c) Workflow は起動したが initContainer で死ぬ**: `post_status pending` は main コンテナの先頭にあるため、initContainer（`github-auth` / `copy-tools` / `git-clone`）が失敗すると status が一切打たれない。PR の Checks タブの見え方は (b) と区別がつかない。実例（2026-09-20）: workflow `tofu-plan-8qxdl` / `tofu-plan-f7fww` がどちらも `git-clone` initContainer で `Error (exit code 128)`、ログは `fatal: detected dubious ownership in repository at '/workspace'`。plan / apply とも clone 先を `/workspace/repo`（git 自身が作るディレクトリ）にして対処済み。
+
+**判別**: PR の Checks タブを見る。チェックの行自体が黄色い丸で存在すれば (a)。薄いグレーで「Expected」表記なら (b) と (c) のどちらかで、Checks タブだけでは区別できない。より速いのは Discord 通知を見ること — `workflowDefaults.spec.hooks.exit`（`helm-values/argo-workflows/values.yaml`）が全 Workflow に `manifests/argo/cluster-discord-notify-wft.yaml` の exit hook を付けており、Workflow が失敗すると `Workflow Failed: <workflow名>` が届く。(c) は届くが、(b) は Workflow が作られず exit hook も動かないので届かない — **声が出ないのが (b)**。
 
 **復旧手順**:
 
+- **(c) の場合**: close→reopen や空コミットで再トリガする前に、まず Argo で該当 Workflow の失敗ノードを見て WFT 側の不具合を直す。WFT が壊れたままでは、何度再トリガしても同じ initContainer で死に続ける
 - **bot（Renovate）が作った PR**: PR を close → reopen する。3 sensor すべて `reopened` を受理するので、ブランチに触らずに plan が再走する。**空コミットを積まないこと** — 3 リポとも `rebaseWhen: "behind-base-branch"` で、Renovate はベースブランチから分岐して以降の**いずれかのコミット**の author または committer が自分以外になった時点で「変更された」と判定し以後の rebase / 更新を止める。一度この判定が付くと、後から Renovate 名義のコミットを積んで最新コミットを自分に戻しても解消しない（判定対象は最新コミットではなく分岐後の全コミット）
 - **人間が作った PR**: 空コミットを積んで push すれば sensor が `synchronize` で plan を再起動する
 - 直ちに解消したい場合は手動で status を確定する:
@@ -346,7 +349,7 @@ ELF の実バイナリ（`argocd-repo-server` / `busybox` / `postgres` 等）を
   gh api repos/Tsuguya-HC/<repo>/statuses/<sha> -f state=success -f context=tofu-plan
   ```
 
-pending / 未報告のまま止まるのは設計どおりであり、**plan を通していないコミットを通さないための fail-closed**。バグではないので、手動確定は「plan の代わりに人間が中身を確認した」ときにだけ行うこと。
+**(a) / (b) は**設計どおりであり、**plan を通していないコミットを通さないための fail-closed**。バグではないので、手動確定は「plan の代わりに人間が中身を確認した」ときにだけ行うこと。**(c) は設計どおりではなく実際のバグ** — 手動確定や再トリガの前に WFT 側を直すこと。
 
 ## CRD の default 値が ArgoCD を OutOfSync にする（`ServerSideDiff` は syncOptions に書いても効かない）
 

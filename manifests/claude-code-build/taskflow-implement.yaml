@@ -484,13 +484,17 @@ spec:
                 # 防ぐための下限。exec するので timeout の終了コードがそのまま run_agent の
                 # 戻り値になり、claude 自身の非ゼロ終了と呼び出し側で区別できる。
                 #
-                # イメージの timeout は GNU coreutils ではなく BusyBox の applet で、打ち切り時
-                # の終了コードは 124 ではなく **143**（SIGTERM）・KILL まで行けば 137（実測）。
+                # イメージの timeout は GNU coreutils。打ち切り時の終了コードは 124 で、TERM を
+                # 無視されて -k の KILL まで行けば 137（2026-09-20 実測。イメージ内で
+                # `timeout -k 10 1 sleep 30` → 124、`timeout -k 2 1 bash -c 'trap "" TERM; sleep 30'`
+                # → 137）。下の判定が 143 も受け続けるのは、このイメージが alpine だった頃の
+                # BusyBox applet が SIGTERM の 143 を返していたため（同じ実測で確認）。イメージを
+                # 旧 digest に戻したときに、打ち切りを claude 自身の失敗と取り違えないようにする。
                 # 143 は supervise() の trap が Job の TERM（activeDeadlineSeconds 到達）を
                 # 受けたときの exit コードでもあるが、その経路では trap が直接 exit するので
                 # このあと CLAUDE_RC を読む行に到達すること自体がない。つまり CLAUDE_RC の
-                # 比較まで来ている時点で 143 なら、それは run_agent 内の timeout が出したもの
-                # と確定できる（実測で「その行に到達しない」ことを確認済み）。
+                # 比較まで来ている時点で 124 / 143 なら、それは run_agent 内の timeout が出した
+                # ものと確定できる（実測で「その行に到達しない」ことを確認済み）。
                 run_agent() {
                   log="$1"; timeout_dur="$2"; shift 2
                   supervise as_agent sh -c "cd /scratch/src && exec timeout -k 10 '$timeout_dur' claude \"\$@\"" claude "$@" < /dev/null > "$log" 2>&1
@@ -561,9 +565,8 @@ spec:
                   --max-turns 60 || CLAUDE_RC=$?
                 # 終了コードを握り潰すと、モデル slug 無効・認証失敗・クレジット切れが
                 # 全部「テストが 1 行も書かれなかった」に化ける。実態を先に報告する。
-                # 124/143 は run_agent 内の timeout 由来（打ち切り。BusyBox の timeout は 124
-                # ではなく SIGTERM の 143、KILL まで行けば 137 を返す）で、claude 自身の失敗
-                # ではない。
+                # 124/143 は run_agent 内の timeout 由来（打ち切り）で、claude 自身の失敗では
+                # ない。どちらの値がどのイメージから出るかは run_agent の定義側に書いてある。
                 if [ "$CLAUDE_RC" -eq 124 ] || [ "$CLAUDE_RC" -eq 143 ]; then
                   { echo "テストの回の claude が 15m で打ち切られた（timeout の exit ${CLAUDE_RC}。claude 自身の失敗ではない）。llm-gateway の疎通を確認すること。実装には進んでいない。"
                     echo

@@ -133,7 +133,7 @@ spec:
             requests: {cpu: 10m, memory: 32Mi}
             limits: {memory: 64Mi}
       container:
-        image: registry.infra.tgy.io/tools/claude-code:latest@sha256:f4bf69bfa990c3ebfbcc23fe666005a56377b5dc2a2ee1919dca5e54e31f174e
+        image: registry.infra.tgy.io/tools/claude-code:latest@sha256:a1a12fe81f5ab7ad1335bbd10d2faa2e152332d0185a93d348552e616760fc5f
         command: [sh, /scripts/verify.sh]
         env:
           - {name: HOME, value: /tmp}

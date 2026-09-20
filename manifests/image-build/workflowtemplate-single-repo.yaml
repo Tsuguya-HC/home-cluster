@@ -108,7 +108,7 @@ spec:
           command: [github-auth.sh]
           env:
             - name: GITHUB_APP_ID
-              value: "2998228"
+              value: "5008613"
             - name: GITHUB_REPO
               value: "{{=sprig.trimPrefix('github.com/', workflow.parameters['repo-url'])}}"
           securityContext:

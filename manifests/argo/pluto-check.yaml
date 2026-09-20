@@ -183,10 +183,10 @@ spec:
             - name: GITHUB_APP_PRIVATE_KEY
               valueFrom:
                 secretKeyRef:
-                  name: github-app-private-key
+                  name: pluto-check-github-app-private-key
                   key: private-key
             - name: GITHUB_APP_ID
-              value: "2998228"
+              value: "5008662"
             - name: GITHUB_REPO
               value: "Tsuguya-HC/home-cluster"
           args:

@@ -262,7 +262,7 @@ spec:
           command: [github-auth.sh]
           env:
             - name: GITHUB_APP_ID
-              value: "2998228"
+              value: "5008621"
             - name: GITHUB_REPO
               value: "Tsuguya-HC/talos-custom-build"
           securityContext:
@@ -400,7 +400,7 @@ spec:
           command: [github-auth.sh]
           env:
             - name: GITHUB_APP_ID
-              value: "2998228"
+              value: "5008621"
             - name: GITHUB_REPO
               value: "Tsuguya-HC/talos-custom-build"
           securityContext:
@@ -574,7 +574,7 @@ spec:
           command: [github-auth.sh]
           env:
             - name: GITHUB_APP_ID
-              value: "2998228"
+              value: "5008621"
             - name: GITHUB_REPO
               value: "Tsuguya-HC/talos-custom-build"
           securityContext:

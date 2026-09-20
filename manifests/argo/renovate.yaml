@@ -58,7 +58,10 @@ spec:
           emptyDir: {}
         - name: github-app-secret
           secret:
-            secretName: github-app-private-key
+            # Renovate's own App, not the all-purpose tgy-cluster-bot one: it is
+            # the only consumer that needs workflows:write, and every repository
+            # at that. See #925.
+            secretName: renovate-github-app-private-key
         - name: workdir
           emptyDir: {}
       initContainers:
@@ -67,7 +70,7 @@ spec:
           command: [github-auth.sh]
           env:
             - name: GITHUB_APP_ID
-              value: "2998228"
+              value: "5001062"
             - name: GITHUB_REPO
               value: "{{=jsonpath(workflow.parameters.repositories, '$[0]')}}"
           securityContext:

@@ -65,14 +65,14 @@ spec:
           emptyDir: {}
         - name: github-app-secret
           secret:
-            secretName: github-app-private-key
+            secretName: aqua-checksum-github-app-private-key
       initContainers:
         - name: github-auth
           image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:0b658d03cee98b3118622d47d07950b5dc5dd8ef73689bab68ff28c00299f296
           command: [github-auth.sh]
           env:
             - name: GITHUB_APP_ID
-              value: "2998228"
+              value: "5008624"
             - name: GITHUB_REPO
               value: "{{workflow.parameters.repository}}"
           securityContext:

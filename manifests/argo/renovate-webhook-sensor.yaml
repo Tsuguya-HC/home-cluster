@@ -61,14 +61,15 @@ spec:
           local function checked(body)
             return body ~= nil and string.find(body, "%[[xX]%]") ~= nil
           end
-          -- Both first-party Renovate bot ids (Mend-hosted and self-hosted
-          -- App) are accepted so a Mend <-> self-host move cannot silently
-          -- disarm this filter again -- a login check already did once.
+          -- Every first-party Renovate bot id is accepted (Mend-hosted, the
+          -- all-purpose App, and the Renovate-only App) so moving Renovate
+          -- between them cannot silently disarm this filter again -- a login
+          -- check already did once.
           -- See tofu-cloudflare-plan for why the author is matched on
           -- numeric user id rather than login.
           local function byRenovate(u)
             return u ~= nil and u.type == "Bot"
-              and (u.id == 29139614 or u.id == 265309552)
+              and (u.id == 29139614 or u.id == 265309552 or u.id == 331287159)
           end
           if event.body.issue ~= nil then
             local issue = event.body.issue

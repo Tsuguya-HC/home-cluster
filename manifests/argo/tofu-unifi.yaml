@@ -190,7 +190,7 @@ spec:
             # See tofu-cloudflare-plan for why the author is matched on
             # numeric user id rather than login.
             MERGE_OK=1
-            if [ "$DESC" = "No changes" ] && { [ "$AUTHOR_ID" = "29139614" ] || [ "$AUTHOR_ID" = "265309552" ]; }; then
+            if [ "$DESC" = "No changes" ] && { [ "$AUTHOR_ID" = "29139614" ] || [ "$AUTHOR_ID" = "265309552" ] || [ "$AUTHOR_ID" = "331287159" ]; }; then
               MERGE_OK=0
               for attempt in 1 2 3 4 5 6 7 8 9 10; do
                 # sha= pins the merge to the commit that was actually planned. If

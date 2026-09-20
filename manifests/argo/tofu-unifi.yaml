@@ -15,6 +15,7 @@ spec:
   arguments:
     parameters:
       - name: pr-number
+      # branch is unused here, but the sensor writes trigger parameters by index (tofu-eventsource.yaml) -- removing it would shift sha into this slot.
       - name: branch
       - name: sha
       - name: author-id
@@ -88,9 +89,11 @@ spec:
               # branch can move between the webhook firing and this clone
               # running, which would plan a commit other than the one the
               # status ends up posted against.
-              git clone --depth 1 "https://x-access-token:${GITHUB_TOKEN}@github.com/Tsuguya-HC/home-unifi.git" /workspace
-              git -C /workspace fetch --depth 1 origin "${SHA}"
-              git -C /workspace checkout FETCH_HEAD
+              # Clone into a subdirectory rather than onto the mount point itself.
+              # See docs/known-issues.md, tofu-plan section, for why.
+              git clone --depth 1 "https://x-access-token:${GITHUB_TOKEN}@github.com/Tsuguya-HC/home-unifi.git" /workspace/repo
+              git -C /workspace/repo fetch --depth 1 origin "${SHA}"
+              git -C /workspace/repo checkout FETCH_HEAD
           env:
             - name: SHA
               value: "{{workflow.parameters.sha}}"
@@ -140,7 +143,7 @@ spec:
 
             post_status pending "Running tofu plan"
 
-            cd /workspace
+            cd /workspace/repo
 
             if ! OUTPUT=$(tofu fmt -check -recursive 2>&1); then
               STATE=failure

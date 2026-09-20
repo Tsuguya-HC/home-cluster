@@ -104,9 +104,17 @@ kube-state-metrics:
   # status が空になるだけでエラーは出ない。2026-09-14 はこれで 21 時間
   # 気づけなかった（docs/known-issues.md）。
   #
-  # status.parents は配列だが、CustomResourceState のパスは [key=value] で
-  # 要素を選べるので controllerName で引く（添字 "0" だと parentRef が
-  # 増えたときに別のものを見る）。
+  # status.parents は配列。controllerName で決め打ちすると、その値を持たない
+  # コントローラ（Envoy Gateway 等）の status を拾えない（経緯は
+  # docs/known-issues.md の #952）。parents をそのまま展開して controllerName
+  # をラベルに出し、条件の値は valueFrom で conditions の中から引く。
+  # 2026-09-20 実測（upstream の pkg/customresourcestate を実クラスタの
+  # HTTPRoute オブジェクトに対して compile → generate して確認）。多段
+  # valueFrom は解決される。status 自体が無いオブジェクトは今までどおり
+  # 0 件 + ログ 1 行で、そちらは info との引き算＝HTTPRouteNotAccepted が拾う。
+  #
+  # conditions は配列なので 1 メトリクスで type ラベルを回すことはできない。
+  # 見たい条件ごとにメトリクスを分ける。
   customResourceState:
     enabled: true
     config:
@@ -122,7 +130,7 @@ kube-state-metrics:
               httproute: [metadata, name]
             metrics:
               # オブジェクトの存在。status の有無に関わらず必ず出るので、
-              # 下の status_condition が「出ない」ことを検出する土台になる。
+              # 下の accepted が「出ない」ことを検出する土台になる。
               #
               # KSM (v2.20.0) は type: Info でも labelsFromPath がリソース
               # レベルではなく each.info 側にないと eachValue を1件も返さない
@@ -138,15 +146,24 @@ kube-state-metrics:
                     path: [metadata]
                     labelsFromPath:
                       uid: [uid]
-              - name: status_condition
-                help: "HTTPRoute status conditions reported by the Cilium gateway controller"
+              - name: accepted
+                help: "HTTPRoute Accepted condition, per gateway controller"
                 each:
                   type: Gauge
                   gauge:
-                    path: [status, parents, "[controllerName=io.cilium/gateway-controller]", conditions]
+                    path: [status, parents]
                     labelsFromPath:
-                      type: ["type"]
-                    valueFrom: ["status"]
+                      controller: [controllerName]
+                    valueFrom: [conditions, "[type=Accepted]", status]
+              - name: resolvedrefs
+                help: "HTTPRoute ResolvedRefs condition, per gateway controller"
+                each:
+                  type: Gauge
+                  gauge:
+                    path: [status, parents]
+                    labelsFromPath:
+                      controller: [controllerName]
+                    valueFrom: [conditions, "[type=ResolvedRefs]", status]
 
 prometheus-node-exporter:
   resources:

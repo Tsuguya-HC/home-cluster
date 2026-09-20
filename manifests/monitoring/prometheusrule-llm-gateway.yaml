@@ -83,8 +83,9 @@ spec:
         # データプレーンは replicas 1 で自然な入れ替わりが無いので、RBAC が壊れても
         # 次に Pod が作り直されるまで（ローリング更新・ノード再起動・退避）鳴らない。
         # 閾値では埋まらない、シグナルの性質そのものの遅延。継続的に見たいなら
-        # kube-state-metrics の復旧後に `kube_pod_init_container_info{namespace="llm-gateway",
-        # container="ai-gateway-extproc"}` の有無を見る手がある（KSM は現在 OOM で停止中）。
+        # `kube_pod_init_container_info{namespace="llm-gateway",
+        # container="ai-gateway-extproc"}` の有無を見る手がある（KSM は #953/#956 で
+        # 解決済み。アラート化はここでは行わない）。
         #
         # 疎通失敗（TLS / 接続断）まで覆えるのは **failurePolicy が Fail である間だけ**。
         # apiserver 側は `ErrCallingWebhook` の rejected=true を `if !ignoreClientCallFailures`

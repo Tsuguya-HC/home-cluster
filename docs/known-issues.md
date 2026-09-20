@@ -260,7 +260,19 @@ echo | openssl s_client -connect 192.168.10.193:443 -servername pg.infra.tgy.io 
 
 Gateway API のコントローラは cilium-operator の中で動き、起動時に必須 GVK の存在チェックをする。ここで失敗すると **コントローラを起動しないまま operator は通常運転に入る**。
 
-**症状の出方（外からは健全に見える）**:
+**この節は cilium-operator 内蔵の Gateway API コントローラに限る。** クラスタには Envoy Gateway（`llm-gateway` の GatewayClass、コントローラ名は `gateway.envoyproxy.io/gatewayclass-controller`）管轄の HTTPRoute もあり、`HTTPRouteNotAccepted` はどちらの管轄でも同じ式で鳴る。鳴ったら復旧に入る前に管轄コントローラを確認する:
+
+```bash
+kubectl -n <namespace> get httproute <name> -o jsonpath='{.status.parents[*].controllerName}'
+```
+
+`io.cilium/gateway-controller` ならこの節の手順に進む。`gateway.envoyproxy.io/gatewayclass-controller` なら status を書いているのは `envoy-gateway-system` の `deploy/envoy-gateway` で、下の cilium-operator 再起動では直らない。`kubectl logs -n envoy-gateway-system deploy/envoy-gateway` と `kubectl -n llm-gateway get gateway llm-gateway -o yaml` を見る。**envoy-gateway は ServiceMonitor も PrometheusRule も持たない（実測）ので、ログが唯一の手がかりになる。**
+
+二次容疑として `envoy-ai-gateway-system` の ai-gateway-controller もある。`llm-gateway` の HTTPRoute は `AIGatewayRoute` から生成される派生物なので、ai-gateway-controller が壊れていると HTTPRoute 自体が作られず `gatewayapi_httproute_info` も出ない（このアラート経路では第一容疑にはならない）。HTTPRoute は存在するのに Accepted が付かない場合にだけ、`manifests/monitoring/prometheusrule-llm-gateway.yaml` の `AgentRouterReconcileErrors` / `AgentRouterWebhookRejections` を確認する。
+
+**#952 の偽陽性（2026-09-17 から 3 日間 firing）**: `accepted`（旧 `status_condition`）の CustomResourceState 定義が `io.cilium/gateway-controller` の path 決め打ちだったため、Envoy Gateway 管轄の `llm-gateway/claude-max` と `llm-gateway/implement` は該当ラベルが 0 件のままで、`HTTPRouteNotAccepted` が 3 日間 firing し続けていた（実際は両方 Accepted=True）。修正は `parents` をそのまま展開して `controllerName` をラベルに出す形（`helm-values/kube-prometheus-stack/values.yaml`）。
+
+**症状の出方（外からは健全に見える。以下は cilium-operator 管轄の場合）**:
 
 - `Gateway` は `Accepted=True` / `Programmed=True` のまま
 - **既存の HTTPRoute はトラフィックが流れ続ける**（Envoy 設定がプログラム済みのため）。古い `status` もそのまま残る
@@ -298,12 +310,27 @@ kubectl -n kube-system rollout restart deploy/cilium-operator
 
 再起動後、`initGatewayAPIController` が短時間で完了していることと、詰まっていた HTTPRoute に `Accepted=True` が付くことを確認する。
 
-**監視**: `manifests/monitoring/prometheusrule-gateway-api.yaml` に2本のアラートがある。メトリクスは kube-state-metrics の CustomResourceState（`helm-values/kube-prometheus-stack/values.yaml`）で出している。
+**監視**: `manifests/monitoring/prometheusrule-gateway-api.yaml` にこの状態を検知する2本のアラートがある（同じファイルの `HTTPRouteRefsNotResolved` は対象の失敗モードが別なので、下の「HTTPRoute の ResolvedRefs=False は HTTPRouteNotAccepted では拾えない」節を参照）。メトリクスは kube-state-metrics の CustomResourceState（`helm-values/kube-prometheus-stack/values.yaml`）で出している。
 
 - `HTTPRouteNotAccepted` — HTTPRoute に `Accepted=True` の status が 15 分以上付いていない状態を検知する。status が空のケースと `Accepted=False` のケースの両方が引っかかる
-- `HTTPRouteInfoMissing` — 上の入力である `gatewayapi_httproute_info` メトリクス自体が来ていない状態を検知する番犬。`HTTPRouteNotAccepted` は差分を取る式（`count(info) unless on(...) count(status_condition)`）なので、**`info` が1件も無いと左辺が空ベクタになり、恒久的に発火しないまま沈黙する**
+- `HTTPRouteInfoMissing` — 上の入力である `gatewayapi_httproute_info` メトリクス自体が来ていない状態を検知する番犬。`HTTPRouteNotAccepted` は差分を取る式（`count(gatewayapi_httproute_info) unless on(...) count(gatewayapi_httproute_accepted == 1)`）なので、**`info` が1件も無いと左辺が空ベクタになり、恒久的に発火しないまま沈黙する**
 
 番犬が本体アラートと別建てで要る理由は実例で判明した: この監視を作った当初、CustomResourceState の `info` メトリクス定義（`type: Info`）に `each.info.labelsFromPath` が無く、KSM がラベル無しの値を1件も返さない実装だったため、**`gatewayapi_httproute_info` が実在する HTTPRoute 11本のうち1本も出力されない状態のまま `helm template` / `unread-values.py` / `kubectl apply --dry-run=server` / kubeconform が全部通っていた**。レンダリングや静的検証が緑でも、実クラスタで `/metrics` を採取するまで気づけなかった。**この監視を入れるまでは、新しい HTTPRoute を作らない限り誰も気づけなかった。**
+
+## HTTPRoute の ResolvedRefs=False は HTTPRouteNotAccepted では拾えない
+
+`Accepted=True` のまま backendRef の参照先だけが壊れることがある（Service 側の変更に HTTPRoute 側が追従していない等）。`HTTPRouteNotAccepted` は Accepted の有無しか見ないので、この状態は素通りする。
+
+`manifests/monitoring/prometheusrule-gateway-api.yaml` の `HTTPRouteRefsNotResolved` が検知する。ResolvedRefs=True が付いていないこと（False / Unknown / 条件そのものの欠落のいずれも）を見る式。
+
+**切り分け**:
+
+```bash
+kubectl -n <namespace> get httproute <name> -o jsonpath='{.status.parents[*].conditions}'
+```
+
+- `io.cilium/gateway-controller` 管轄: backendRef が指す **Service** の名前・ポートを確認する
+- `gateway.envoyproxy.io/gatewayclass-controller`（`llm-gateway`）管轄: backendRef が指すのは Service ではなく、`AIServiceBackend` から生成される Envoy Gateway の **Backend CR**。`kubectl -n llm-gateway get backend` で存在を確認する
 
 ## Tetragon export サイドカーが権限不足でファイルを書けず 185 日サイレント停止（解決済み）
 

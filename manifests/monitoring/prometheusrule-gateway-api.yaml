@@ -26,6 +26,12 @@ spec:
         # info は status の有無に関わらず出るので、それに対して
         # Accepted=True の条件が「無い」ことを引き算で見る。status が空の
         # ケースと Accepted=False のケースの両方が引っかかる。
+        #
+        # accepted は parents ごと（= Gateway コントローラごと）に出るので、
+        # Cilium 以外のコントローラが付けた status もこの式で見える
+        # （経緯は docs/known-issues.md の #952）。parent が複数あって
+        # 一方だけ Accepted のケースは、引き算の性質上ここでは鳴らない
+        # （現状そのような HTTPRoute は無い）。
         - alert: HTTPRouteNotAccepted
           expr: |
             count by (namespace, httproute) (
@@ -33,14 +39,14 @@ spec:
             )
             unless on (namespace, httproute)
             count by (namespace, httproute) (
-              gatewayapi_httproute_status_condition{type="Accepted"} == 1
+              gatewayapi_httproute_accepted == 1
             )
           for: 15m
           labels:
             severity: warning
           annotations:
             summary: "HTTPRoute が Gateway に受理されていない ({{ $labels.namespace }}/{{ $labels.httproute }})"
-            description: "{{ $labels.namespace }}/{{ $labels.httproute }} に Accepted=True の status が 15 分以上付いていない。status が空なら Gateway API コントローラ（cilium-operator）が起動に失敗している疑いがある。既存のルートは流れ続けるため他の経路では気づけない。復旧は docs/known-issues.md を参照。"
+            description: "{{ $labels.namespace }}/{{ $labels.httproute }} に Accepted=True の status が 15 分以上付いていない。まず `kubectl -n {{ $labels.namespace }} get httproute {{ $labels.httproute }} -o jsonpath='{.status.parents[*].controllerName}'` で管轄コントローラを確認する（cilium-operator と Envoy Gateway では原因も復旧手順も別）。既存のルートは流れ続けるため他の経路では気づけない。復旧は docs/known-issues.md を参照。"
 
         # 上の HTTPRouteNotAccepted は gatewayapi_httproute_info が入力。
         # KSM の CustomResourceState 設定が壊れる・バージョンアップで仕様が
@@ -61,3 +67,38 @@ spec:
               CustomResourceState 設定（httproutes）が壊れているか収集が
               止まっている。この状態では HTTPRouteNotAccepted が発火せず
               Gateway API コントローラの障害を検知できない。
+
+        # ResolvedRefs=False は Accepted=True のまま起こりうる（backendRef の
+        # 参照先変更・削除等。Cilium 管轄は Service、llm-gateway は Envoy
+        # Gateway の Backend CR が対象）。上の HTTPRouteNotAccepted は
+        # Accepted の有無しか見ないのでこのケースを拾えない。
+        #
+        # accepted を土台にした引き算にする（resolvedrefs == 1 が「無い」
+        # ことを見る）。土台を info ではなく accepted に取るのは、status が
+        # まるごと無い parent は accepted 自体も無いので左辺ごと消え、
+        # HTTPRouteNotAccepted 側の担当のまま残って二重発火しないため。
+        # controller ラベルは引き算後も残るので、どのコントローラ管轄かが
+        # アラートに出る。
+        #
+        # 却下: `gatewayapi_httproute_resolvedrefs == 0` の直接比較。
+        # ResolvedRefs 条件を書かないコントローラ実装や収集の一時的な欠落で
+        # メトリクス自体が 0 件になるケースを拾えず、その場合ベクタが空に
+        # なって恒久的に沈黙する（2026-09-20、KSM upstream の
+        # pkg/customresourcestate に ResolvedRefs 条件を抜いた HTTPRoute
+        # オブジェクトを食わせて compile → generate で確認。系列が1件も
+        # 出ず、`== 0` の直接比較では沈黙することを確かめた）。
+        - alert: HTTPRouteRefsNotResolved
+          expr: |
+            count by (namespace, httproute, controller) (
+              gatewayapi_httproute_accepted
+            )
+            unless on (namespace, httproute, controller)
+            count by (namespace, httproute, controller) (
+              gatewayapi_httproute_resolvedrefs == 1
+            )
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "HTTPRoute の backendRef が解決できていない ({{ $labels.namespace }}/{{ $labels.httproute }})"
+            description: "{{ $labels.namespace }}/{{ $labels.httproute }}（コントローラ: {{ $labels.controller }}）に ResolvedRefs=True の status が 15 分以上付いていない。backendRef（Cilium 管轄は Service、llm-gateway は Envoy Gateway の Backend CR）が解決できていないか、ResolvedRefs 条件そのものが付いていない疑いがある。`kubectl -n {{ $labels.namespace }} get httproute {{ $labels.httproute }} -o jsonpath='{.status.parents[*].conditions}'` で確認する。"

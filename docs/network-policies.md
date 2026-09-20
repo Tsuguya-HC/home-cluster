@@ -384,10 +384,17 @@ Bash を回す handler を、個人の Max サブスクリプションから切�
 
 | Component | Ingress | Egress |
 |---|---|---|
-| **trivy-operator** | prometheus (monitoring) → 8080; host → 9090 (probes) | trivy-server:4954 (readiness check before creating scan jobs), kube-apiserver, mirror.gcr.io + registry-1.docker.io + auth.docker.io + production.cloudflare.docker.com + ghcr.io + registry.k8s.io + *.pkg.dev + quay.io + *.quay.io + public.ecr.aws :443 |
+| **trivy-operator** | prometheus (monitoring) → 8080; host → 9090 (probes) | trivy-server:4954 (readiness check before creating scan jobs), kube-apiserver |
 | **scan-jobs** (managed-by: trivy-operator) | deny world | 0.0.0.0/0:443 — registry CDN backends (S3, R2, CloudFront, etc.) are too numerous and dynamic for toFQDNs. Ephemeral pods, HTTPS only; harbor-nginx (harbor):8443; trivy-server:4954 |
 | **trivy-server** | scan-jobs, trivy-operator → 4954; host → 4954 (probes) | mirror.gcr.io:443 (vuln DB) |
 | **node-collector** (app: node-collector) | deny world | kube-apiserver |
+
+operator 自身はレジストリに出ない（2026-09-20 実測: 7 日稼働の endpoint で toFQDNs 由来の
+egress は全て 0 バイト、FQDN キャッシュにレジストリ名なし、ログにもレジストリ関連のエラーなし）。
+イメージを引くのは trivy-system で走る scan job のほうで、そちらは 0.0.0.0/0:443 を持つ。
+**operator の CNP にレジストリの FQDN を足さないこと** — 2026-02 に推測で足され、
+`production.cloudfront.docker.com` を `cloudflare` と綴り誤ったまま 7 か月誰も気づかなかった（#947）。
+必要になったら hubble の DROPPED に出るので、そこで実測してから足す。
 
 ## nfs-provisioner (1 policy)
 

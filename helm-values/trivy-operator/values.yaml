@@ -7,10 +7,13 @@
 targetWorkloads: "replicaset,statefulset,daemonset,cronjob"
 
 operator:
-  # `scanJobNamespace: trivy-system` がここにあったが、このチャート
-  # (0.35.0) の values にもテンプレートにもそのキーは存在せず、operator の
-  # env にも対応するものが無い。scan job は対象 workload と同じ namespace で
-  # 走る仕様で、集約する設定は用意されていない。
+  # scan job の namespace を決めるのはここではなくトップレベルの
+  # `trivyOperator.scanJobsInSameNamespace`（既定 false）。true に倒すと
+  # scan job が対象 workload の namespace に散り、trivy-system スコープの
+  # netpol-trivy-scan-jobs と Kyverno の trivy-scanjob-tmpdir が両方とも
+  # 黙って対象外になる（前者は CNP のデフォルト deny で scan job が全断、
+  # 後者は /tmp 衝突の再発）。
+
   # SBOMReport が 491件/246MB で etcd の大半を占めていたため無効化 (2026-08-08)
   # ClusterVulnerabilityReport も併せて無効になるが、workload 単位の
   # VulnerabilityReport は影響なし。SBOM が必要なら Harbor 側で保管する
@@ -28,7 +31,8 @@ operator:
   # Standalone では job ごとに DB (+ Java DB) をダウンロードして捨てていたので、
   # job が増えるほど wn-03 の NVMe 書き込みとレジストリ往復が比例して増えていた。
   # trivy.mode / trivy.serverURL はこのフラグが上書きする（values に書いても無視）。
-  # trivy.clientServerSkipUpdate もこの分岐では出力されない (0.35.0 の templates/configmaps/trivy.yaml)
+  # trivy.clientServerSkipUpdate もこの分岐では出力されない（チャートの
+  # templates/configmaps/trivy.yaml）
   builtInTrivyServer: true
 
 resources:

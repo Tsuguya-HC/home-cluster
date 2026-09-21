@@ -51,6 +51,8 @@ data:
     pr-review ro -
     implement rw -
     task-executor-write rw claude-code/github-gateway-client-keys/task-executor-write
+    wf-creator rw claude-code/github-gateway-client-keys/wf-creator
+    wf-improver rw claude-code/github-gateway-client-keys/wf-improver
 ---
 apiVersion: v1
 kind: ConfigMap

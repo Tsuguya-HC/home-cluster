@@ -23,6 +23,13 @@ serviceMonitor:
   enabled: true
   extraLabels:
     release: kube-prometheus-stack
+  # ノード名を載せる。付けないと、この exporter のメトリクスでノードを指す唯一の
+  # ラベルが `instance`（Pod IP）になり、アラートが鳴っても人が IP からノードを
+  # 引き直すことになる。加えて Pod が作り直されると系列の同一性が切れるので、
+  # 過去と比較するアラートがそのノードについて黙る。
+  relabelings:
+    - sourceLabels: [__meta_kubernetes_pod_node_name]
+      targetLabel: node
 
 # chart 同梱のアラート (キーは複数形の prometheusRules)。
 # ただし media_errors / available_spare は NVMe 用メトリクスで SATA では発火しない。

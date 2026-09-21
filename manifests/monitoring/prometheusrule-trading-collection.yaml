@@ -14,31 +14,45 @@ spec:
         #
         # 「Job が失敗した」ではなく「成功した実行が無い」で見るのは、
         # そもそも起動しなかった場合（スケジューラ異常・ノード逼迫・suspend）も拾うため。
-        # 閾値は CronJob ごとに変える —— webull-snapshot / webull-universe は平日のみなので、
-        # 金曜の実行から月曜の実行まで正常に 72 時間空く。
+        #
+        # **閾値を CronJob 名で書き分けない。** 名前で絞ると、Stale に名前を足し忘れた
+        # CronJob は「一度成功した後に静かに止まる」を誰にも見られないまま通る（#1039）。
+        # 期待間隔は kube-state-metrics が cron 式から計算した次回予定との差で出す
+        # （next_schedule_time = cron.Next(last_schedule_time)）ので、「平日のみ」も
+        # 「月次」もここに既に入っている。
+        #
+        # **max_over_time は省けない。** この差は実行のたびに次の周期の値へ飛ぶ。1 日に
+        # 複数回スケジュールされる CronJob では、次の 1 本までの間隔が前回からの間隔より
+        # 短くなるので、瞬間値を閾値にすると健全な実行の直後に必ず一度発火する。
+        # 窓は週跨ぎの間隔を含められる長さが要る。
+        #
+        # 猶予 6h はジョブ自体の実行時間と遅延の分。日次に当てると 30h になり、
+        # 名前で書き分けていた頃の手当ての値と一致する。
+        #
+        # **右辺は窓の分だけ過去を引きずる。** suspend すると next_schedule_time は消えるが
+        # （2026-09-21 実測）、窓に残った値で右辺は生き続けるので suspend 中も鳴り、窓を
+        # 抜けてから黙る。cron 式を短い周期へ変えたときも、古い長い間隔が窓を抜けるまで
+        # 閾値は緩いままになる。
         - alert: TradingCollectionStale
           expr: |
-            time() - max by (cronjob) (
-              kube_cronjob_status_last_successful_time{namespace="trading", cronjob="sec-universe"}
-            ) > 30 * 3600
+            (
+              time() - max by (cronjob) (kube_cronjob_status_last_successful_time{namespace="trading"})
+            )
+            > on (cronjob)
+            (
+              max_over_time(
+                (
+                  max by (cronjob) (kube_cronjob_next_schedule_time{namespace="trading"})
+                  - max by (cronjob) (kube_cronjob_status_last_schedule_time{namespace="trading"})
+                )[7d:5m]
+              ) + 6 * 3600
+            )
           for: 10m
           labels:
             severity: warning
           annotations:
-            summary: "収集が 30 時間成功していない ({{ $labels.cronjob }})"
-            description: "trading/{{ $labels.cronjob }} の最後の成功から {{ $value | humanizeDuration }} 経過。日次実行なので 1 回以上落ちている。収集対象は遡れないため、その間のデータは失われる。"
-
-        - alert: TradingCollectionStale
-          expr: |
-            time() - max by (cronjob) (
-              kube_cronjob_status_last_successful_time{namespace="trading", cronjob=~"webull-snapshot|webull-universe"}
-            ) > 80 * 3600
-          for: 10m
-          labels:
-            severity: warning
-          annotations:
-            summary: "収集が 80 時間成功していない ({{ $labels.cronjob }})"
-            description: "trading/{{ $labels.cronjob }} の最後の成功から {{ $value | humanizeDuration }} 経過。平日のみの実行で週末は 72 時間空くため、これを超えるのは異常。"
+            summary: "収集が期待間隔を超えて成功していない ({{ $labels.cronjob }})"
+            description: "trading/{{ $labels.cronjob }} の最後の成功から {{ $value | humanizeDuration }} 経過。CronJob の cron 式から導いた実行間隔 + 6h を超えている。収集対象は遡れないため、その間のデータは失われる。"
 
         # **`== 0` では一度も発火しない。** kube-state-metrics は
         # `.status.lastSuccessfulTime` が未設定の間このメトリクスを値 0 としてではなく
@@ -79,7 +93,7 @@ spec:
             summary: "収集ジョブが失敗している (trading)"
             description: "失敗した Job が {{ $value }} 件。失敗の内訳は Loki の構造化ログ（collector フィールド）に出ている。"
 
-        # suspend したまま忘れると、上の 2 つが発火しないまま静かに欠け続ける。
+        # suspend したまま忘れると、収集が静かに欠け続ける。
         - alert: TradingCollectionSuspended
           expr: |
             max by (cronjob) (kube_cronjob_spec_suspend{namespace="trading"}) == 1

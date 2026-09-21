@@ -1,0 +1,42 @@
+# github-token-rotator が起動自体できないまま（apiserver 到達不能で
+# startingDeadlineSeconds を超える等）だと Job も Pod もログも残らず、
+# handler の GitHub アクセスが 1 時間後（token 寿命）に全部 401 化する。
+#
+# 閾値 45m の根拠: schedule は 30 分間隔・token 寿命は 1 時間。1 回分の取りこぼしを
+# 待っても 30 分後には次が走るはずなので、それでも成功が無ければ異常。45 分にして
+# いるのは、1 回のリトライ（backoffLimit: 2）が終わる猶予を見込んだため。
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: github-auth
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: github-auth
+      rules:
+        - alert: GithubTokenRotatorStale
+          expr: |
+            time() - max by (cronjob) (
+              kube_cronjob_status_last_successful_time{namespace="github-auth", cronjob="github-token-rotator"}
+            ) > 45 * 60
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "github-token-rotator が 45 分成功していない"
+            description: "github-auth/github-token-rotator の最後の成功から {{ $value | humanizeDuration }} 経過。installation token の寿命は 1 時間なので、このまま失敗が続くと handler の GitHub アクセスが全部 401 になる。"
+
+        - alert: GithubTokenRotatorNeverSucceeded
+          # kube-state-metrics は CronJob の status.lastSuccessfulTime が未設定の間、
+          # このメトリクスを値 0 としてではなくシリーズごと出さない。`== 0` は
+          # 一致するシリーズが無いので発火しない。`absent()` でシリーズの不在を見る。
+          expr: |
+            absent(kube_cronjob_status_last_successful_time{namespace="github-auth", cronjob="github-token-rotator"})
+          for: 45m
+          labels:
+            severity: warning
+          annotations:
+            summary: "github-token-rotator に成功実行の記録が無い"
+            description: "github-auth/{{ $labels.cronjob }} に成功実行の記録が無い。追加直後か、初回から失敗し続けている。"

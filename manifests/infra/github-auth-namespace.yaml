@@ -1,0 +1,25 @@
+# GitHub App の秘密鍵から installation token を発行し、gateway が使う Secret に
+# 書き戻すだけの namespace（#983）。
+#
+# **llm-gateway に置けない理由**: Envoy Gateway のコントローラは watch.namespaces に
+# 従って llm-gateway に Role を持ち、その Role は `secrets: [get, list, watch]` を
+# namespace 全体に与える（helm-values/envoy-gateway/values.yaml の watch 設定の帰結）。
+# App の秘密鍵をあそこに置くと、コントローラ —— と、そこに入れる者 —— が寿命無制限に
+# トークンを発行できる。1 時間のトークンに絞った意味が消える。
+#
+# argo に置いても隔離にはならない —— pluto-checker の ClusterRole は
+# ClusterRoleBinding で束ねているため cluster-wide で、github-auth に置いても
+# argo に置いても同じく読める（manifests/argo/pluto-check.yaml）。ただし
+# pluto-checker は固定バイナリ pluto の実行にしか使われず、claude を走らせる
+# ai-fix ステップは無権限の pluto-fixer に切り替えてある。
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: github-auth
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/warn-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/audit-version: latest

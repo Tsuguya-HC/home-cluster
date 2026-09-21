@@ -390,3 +390,9 @@ All policies are CiliumNetworkPolicy (CNP) and CiliumClusterwideNetworkPolicy (C
 | Component | Ingress | Egress |
 |---|---|---|
 | **agent-router-controller** | kube-apiserver/host/remote-node → 9443 (Pod mutator webhook); envoy-gateway (envoy-gateway-system) → 1063 (extension server gRPC); prometheus (monitoring) → 8080 (metrics, plain HTTP) | kube-apiserver |
+
+## github-auth (1 policy)
+
+| Component | Ingress | Egress |
+|---|---|---|
+| **github-token-rotator** | (none) | kube-apiserver:6443, api.github.com:443 |

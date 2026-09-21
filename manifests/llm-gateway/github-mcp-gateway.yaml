@@ -1,0 +1,131 @@
+# GitHub MCP 専用のデータプレーン（#983）。**llm-gateway とは別の Gateway / 別の Envoy。**
+#
+# 相乗りさせない理由は 2 つある。
+#
+# 1. **資格情報と egress が 1 つの Pod に集まるのを避ける。** この Envoy に LLM
+#    プロバイダへの egress を持たせない（#942）。GitHub ルートを相乗りさせると
+#    同じ Pod が LLM と GitHub の資格情報を両方持ち、両方へ出られることになり、
+#    CNP では区別できなくなる。分ければ **GitHub の資格情報を持つ Envoy は LLM
+#    プロバイダへ出られず、その逆も出られない**ことを Cilium identity で言い切れる。
+# 2. **SecurityPolicy の既定値が安全側を向く。** 分けると Gateway 単位のポリシーを
+#    backstop として置けるので、ロール別のポリシーが付き損ねても 401 で止まる。
+#    相乗りだと同じ失敗が llm-gateway-client-keys の継承になり、**どの LLM
+#    クライアント鍵でも GitHub が開く**（しかも落ちないので気づけない）。
+#
+# 代償は Envoy Deployment 1 本（requests 100m / 256Mi）。
+#
+# namespace を分けていないのは、分けると envoy-gateway の watch.namespaces に
+# 足す必要があり、足し忘れが「作ったのに何も起きない」になるため。CNP は
+# Pod ラベルで選ぶので、namespace を分けなくても egress は分離できる。
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: github-mcp
+  namespace: llm-gateway
+spec:
+  # GatewayClass は llm-gateway と共用（cluster-scoped、controllerName が同じ）。
+  gatewayClassName: llm-gateway
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+  infrastructure:
+    parametersRef:
+      group: gateway.envoyproxy.io
+      kind: EnvoyProxy
+      name: github-mcp
+---
+# **EnvoyProxy を llm-gateway と共用してはいけない。** envoyService.name を
+# ピンしてあるので、同じ EnvoyProxy を 2 本の Gateway が参照すると両方が同じ
+# Service 名を取りに行く（upstream に検出も validation も無い）。
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyProxy
+metadata:
+  name: github-mcp
+  namespace: llm-gateway
+spec:
+  provider:
+    type: Kubernetes
+    kubernetes:
+      envoyService:
+        type: ClusterIP
+        name: github-mcp
+      envoyDeployment:
+        replicas: 1
+        pod:
+          affinity:
+            podAntiAffinity:
+              # 避けるのは他のデータプレーン Envoy（llm-gateway-envoy）との同居だけ。
+              # 同じノードに乗ると、ノード再起動 1 回で LLM と GitHub の両方が
+              # 同時に止まる。required にはしない——ワーカー 3 台の構成でノード
+              # 保守中に Pending になる方が損なので、preferred で買っているのは
+              # 分散の保証ではなく確率。
+              preferredDuringSchedulingIgnoredDuringExecution:
+                - weight: 100
+                  podAffinityTerm:
+                    labelSelector:
+                      matchLabels:
+                        app.kubernetes.io/managed-by: envoy-gateway
+                    topologyKey: kubernetes.io/hostname
+        container:
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+  # llm-gateway 側と同じ理由で 1 本にまとめ、matches を書かない。分けると
+  # 「ルートにマッチしなかった 404」——どのクライアントが壊れたリクエストを
+  # 送ったかを最も知りたい場面——でだけ匿名の 1 行になる。
+  # gen_ai.* は LLM 専用なのでここには無く、代わりに GitHub 側で意味のある欄を置く。
+  telemetry:
+    accessLog:
+      settings:
+        - sinks:
+            - type: File
+              file:
+                path: /dev/stdout
+          format:
+            type: JSON
+            json:
+              # SecurityPolicy の apiKeyAuth が鍵を照合して付けたクライアント ID。
+              # **本物なのは 2xx の行だけ。** Envoy は拒否時にこのヘッダへ触らずに
+              # 返すので、401 の行には呼ぶ側が書いた値がそのまま出る
+              # （api_key_auth.cc:154 で return、:176 の setReferenceKey に到達しない）。
+              # 失敗の帰属をこの欄で読まないこと。
+              github.client: "%REQ(X-GITHUB-CLIENT-ID)%"
+              start_time: "%START_TIME%"
+              method: "%REQ(:METHOD)%"
+              # 書き換え前のパス。どのロールのルートに入ったかがこれで分かる。
+              x-envoy-origin-path: "%REQ(X-ENVOY-ORIGINAL-PATH?:PATH)%"
+              path: "%REQ(:PATH)%"
+              response_code: "%RESPONSE_CODE%"
+              response_flags: "%RESPONSE_FLAGS%"
+              response_code_details: "%RESPONSE_CODE_DETAILS%"
+              duration: "%DURATION%"
+              user-agent: "%REQ(USER-AGENT)%"
+              x-request-id: "%REQ(X-REQUEST-ID)%"
+              upstream_host: "%UPSTREAM_HOST%"
+              upstream_cluster: "%UPSTREAM_CLUSTER%"
+              downstream_remote_address: "%DOWNSTREAM_REMOTE_ADDRESS%"
+              route_name: "%ROUTE_NAME%"
+---
+# Envoy の既定バッファは 32KiB では足りない。ここを流れるのは MCP の JSON-RPC で、
+# 最大の要因は /rw の create_or_update_file がファイル内容を base64 で運ぶこと
+# （base64 は元サイズの約 1.33 倍に膨らむ）。ソースファイル 1 本分を想定して 10Mi
+# にする。
+#
+# **バッファ超過時に 413 になるか接続がリセットされるかは未検証。** このリポに
+# 記録が無い。
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: ClientTrafficPolicy
+metadata:
+  name: github-mcp-buffer
+  namespace: llm-gateway
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: github-mcp
+  connection:
+    bufferLimit: 10Mi

@@ -1,0 +1,239 @@
+# GitHub のリモート MCP への経路（#983）。**handler はトークンを持たず、gateway が持つ。**
+#
+# 実測の前提（2026-09-21、クラスタ内から api.githubcopilot.com へ直接）:
+#   - installation token を Bearer で受ける（200。偽トークンは 401）
+#   - installation スコープはそのまま効く（App の installation 外のリポは 404）
+#   - セッション ID 不要。素の POST で通る
+#
+# **ツール単位の制限は GitHub 側のパスが担う**ので toolSelector は使わない:
+#   /mcp/                      42 ツール
+#   /mcp/readonly              24
+#   /mcp/x/issues/readonly      6（get_label / issue_read / list_issue_fields /
+#                                  list_issue_types / list_issues / search_issues）
+# read-only パスに書き込みツールを投げるとサーバーが `unknown tool`（-32602）を返す。
+# **ただしこれが強制力を持つのは gateway がトークンを持つときだけ** —— handler に
+# トークンがあれば MCP のパスを無視して api.github.com を直接叩けるので、
+# credentialInjection とセットで初めて意味がある。
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: Backend
+metadata:
+  name: github-mcp
+  namespace: llm-gateway
+spec:
+  endpoints:
+    - fqdn:
+        hostname: api.githubcopilot.com
+        port: 443
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: BackendTLSPolicy
+metadata:
+  name: github-mcp
+  namespace: llm-gateway
+spec:
+  targetRefs:
+    - group: gateway.envoyproxy.io
+      kind: Backend
+      name: github-mcp
+  validation:
+    wellKnownCACertificates: System
+    hostname: api.githubcopilot.com
+---
+# 読み取り専用ロールのトークン注入。Secret は github-auth namespace の CronJob が
+# 30 分ごとに上書きする。
+# **キー名は `credential` 固定**で、値は `Bearer ghs_...`（スキームを含む）。
+#
+# overwrite: true なのは、呼ぶ側が送った Authorization を必ず捨てるため。
+# クライアントの認証は別ヘッダ（x-github-client）で行い、そちらは SecurityPolicy の
+# sanitize が落とす。
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: HTTPRouteFilter
+metadata:
+  name: github-mcp-credential-ro
+  namespace: llm-gateway
+spec:
+  credentialInjection:
+    header: Authorization
+    overwrite: true
+    credential:
+      valueRef:
+        group: ""
+        kind: Secret
+        name: github-mcp-credential-ro
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: HTTPRouteFilter
+metadata:
+  name: github-mcp-credential-rw
+  namespace: llm-gateway
+spec:
+  credentialInjection:
+    header: Authorization
+    overwrite: true
+    credential:
+      valueRef:
+        group: ""
+        kind: Secret
+        name: github-mcp-credential-rw
+---
+# 読み取り専用ロール。App は tgy-hc-tf-reviewer（contents:read + issues:read）。
+#
+# **パスの書き換えで GitHub 側のツールセットを固定する。** 呼ぶ側は /ro しか知らず、
+# 実際に届くのは /mcp/readonly。呼ぶ側が /mcp/ を指定してもここで潰れる。
+#
+# hostname の書き換えを忘れないこと —— 忘れると :authority が /ro を送ってきた
+# ときの値のまま上流へ行き、GitHub 側で弾かれる（git over Envoy で実際に踏んだ）。
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: github-mcp-ro
+  namespace: llm-gateway
+spec:
+  parentRefs:
+    - name: github-mcp
+      kind: Gateway
+      group: gateway.networking.k8s.io
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /ro
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            hostname: api.githubcopilot.com
+            path:
+              type: ReplaceFullPath
+              replaceFullPath: /mcp/readonly
+        - type: ExtensionRef
+          extensionRef:
+            group: gateway.envoyproxy.io
+            kind: HTTPRouteFilter
+            name: github-mcp-credential-ro
+      backendRefs:
+        - name: github-mcp
+          kind: Backend
+          group: gateway.envoyproxy.io
+          port: 443
+---
+# 書き込みロール。App は tgy-hc-tf-coder（contents:write + PR:write + checks:read +
+# issues:read）。ツールセットは絞らない（42 ツール）。
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: github-mcp-rw
+  namespace: llm-gateway
+spec:
+  parentRefs:
+    - name: github-mcp
+      kind: Gateway
+      group: gateway.networking.k8s.io
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /rw
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            hostname: api.githubcopilot.com
+            path:
+              type: ReplaceFullPath
+              replaceFullPath: /mcp/
+        - type: ExtensionRef
+          extensionRef:
+            group: gateway.envoyproxy.io
+            kind: HTTPRouteFilter
+            name: github-mcp-credential-rw
+      backendRefs:
+        - name: github-mcp
+          kind: Backend
+          group: gateway.envoyproxy.io
+          port: 443
+---
+# **ロールの分離はここ。** ルート単位に別の鍵集合を持たせることで、ro の鍵で rw の
+# ルートは叩けない（2026-09-20 に実測。他ルートの鍵は 401）。
+#
+# ルートに付けて成立するのは、**このルートがパスで決まる**から。llm-gateway 側で
+# 同じことが成立しなかった（#971 → #978）のは AIGatewayRoute がモデル名ヘッダで
+# マッチし、そのヘッダを埋める extproc が認証（order 7）より後に走るため、認証の
+# 時点ではまだ catch-all ルートにいたからで、パスマッチにはその問題が無い。
+#
+# sanitize: true で x-github-client は上流へ行かない。認証後に
+# forwardClientIDHeader が x-github-client-id を付け直す。
+#
+# **credentialRefs は Secret 単位。** apiKeyAuth は参照した Secret の全キーを
+# 有効な資格情報として扱い、キーを個別に選ぶフィールドは無い。ro/rw で
+# 同じ Secret を指すと、ro に配った鍵で rw のルートも通ってしまいロール分離が
+# 消える。
+# **ro と rw は別の Secret を参照すること。**
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: github-mcp-ro
+  namespace: llm-gateway
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: github-mcp-ro
+  apiKeyAuth:
+    credentialRefs:
+      - group: ""
+        kind: Secret
+        name: github-mcp-ro-client-keys
+    extractFrom:
+      - headers: [x-github-client]
+    sanitize: true
+    forwardClientIDHeader: x-github-client-id
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: github-mcp-rw
+  namespace: llm-gateway
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: github-mcp-rw
+  apiKeyAuth:
+    credentialRefs:
+      - group: ""
+        kind: Secret
+        name: github-mcp-rw-client-keys
+    extractFrom:
+      - headers: [x-github-client]
+    sanitize: true
+    forwardClientIDHeader: x-github-client-id
+---
+# **backstop。** Gateway 単位のポリシーは「ルート側に既にあればそちら優先」
+# （securitypolicy.go の `if r.Security != nil { continue }`）で配られるので、
+# 上の 2 本が正しく付いている限りこれは一度も評価されない。
+#
+# 効くのは**ルート側が付き損ねたとき**だけ —— 名前の取り違え、targetRef のミス、
+# 2 本目が Conflicted で黙って無視された、等。そのとき配下のルートは
+# 「誰も持っていない鍵」を要求することになり、**全部 401 になって気づける**。
+# これが無いと同じ失敗が「無認証で通る」になる。
+#
+# 鍵を誰にも配らないことがこの仕掛けの全てなので、**ここに本物のクライアントを
+# 足さないこと**。
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: github-mcp-backstop
+  namespace: llm-gateway
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: github-mcp
+  apiKeyAuth:
+    credentialRefs:
+      - group: ""
+        kind: Secret
+        name: github-mcp-backstop-key
+    extractFrom:
+      - headers: [x-github-client]
+    sanitize: true
+    forwardClientIDHeader: x-github-client-id

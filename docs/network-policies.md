@@ -372,11 +372,12 @@ All policies are CiliumNetworkPolicy (CNP) and CiliumClusterwideNetworkPolicy (C
 |---|---|---|
 | **taskflow-controller** | host/remote-node → 8081 (probes); kube-apiserver/host/remote-node → 9443 (TaskFlow admission webhook); prometheus (monitoring) → 8443 (metrics, TLS + authn/authz) | kube-apiserver |
 
-## llm-gateway (1 policy)
+## llm-gateway (2 policies)
 
 | Component | Ingress | Egress |
 |---|---|---|
 | **llm-gateway-envoy** | claude-code-build / claude-code → 10080; argo (SA `pluto-fixer` only) → 10080; host/remote-node → 19003 (probes) | envoy-gateway (envoy-gateway-system):18000, openrouter.ai + api.anthropic.com:443 |
+| **github-mcp-envoy** | claude-code / claude-code-build → 10080; host/remote-node → 19003 (probes) | envoy-gateway (envoy-gateway-system):18000, api.githubcopilot.com:443 |
 
 ## envoy-gateway-system (2 policies)
 

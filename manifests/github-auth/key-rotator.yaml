@@ -50,6 +50,7 @@ data:
   clients: |
     pr-review ro -
     implement rw -
+    task-executor-write rw claude-code/github-gateway-client-keys/task-executor-write
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -146,9 +147,18 @@ data:
         rotated=$old
       fi
 
+      # **2 つのエンコードを置く。** Envoy の apiKeyAuth が明示的に剥がすのは
+      # `Bearer ` だけなので、`gh` が送る `Authorization: token <値>` は文字列
+      # そのものが照合対象になり、curl が送る `Bearer <値>` は剥がされた生の値が
+      # 照合対象になる。同じ呼び出し元が両方の作法で来るので両方を有効にする。
+      # apiKeyAuth は Secret の全キーを有効な資格情報として扱うので、これで足りる。
       mkdir -p "$WORK/gw/$name"
       printf 'token %s' "$raw" > "$WORK/gw/$name/$client"
-      [ -z "$prev" ] || printf '%s' "$prev" > "$WORK/gw/$name/$client-prev"
+      printf '%s' "$raw" > "$WORK/gw/$name/$client-bearer"
+      if [ -n "$prev" ]; then
+        printf '%s' "$prev" > "$WORK/gw/$name/$client-prev"
+        printf '%s' "${prev#token }" > "$WORK/gw/$name/$client-prev-bearer"
+      fi
 
       if [ "$consumer" != "-" ]; then
         c_ns=${consumer%%/*}

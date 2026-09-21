@@ -1,0 +1,75 @@
+# 署名コミットを gateway 経由で行う（#1038）。
+#
+# **イメージの github-signed-commit.sh は使えない。** あちらは
+# `API="https://api.github.com"` をハードコードしていて、handler が持たなくなった
+# installation token を `Authorization: Bearer` で送る。ここを直すには images リポの
+# 変更とビルド・digest bump が要るので、home-cluster 側で完結する形に置き換える。
+#
+# REST の 5 段（blob → tree → commit → ref）を GraphQL の createCommitOnBranch 1 回に
+# 畳んである。署名はどちらも GitHub 側が付けるので、得られるものは変わらない。
+# `gh api graphql` は GH_HOST を見るので、handler が gateway を向いていればそのまま通る。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: signed-commit
+  namespace: claude-code
+data:
+  signed-commit.sh: |
+    #!/bin/sh
+    # usage: signed-commit.sh -r OWNER/REPO -m MESSAGE [-b BRANCH]
+    #
+    # cwd の git 作業ツリーで**既にコミット済み**の変更を、GitHub 側に署名付きの
+    # コミットとして載せ直す。ローカルの HEAD は push しない（push には資格情報が
+    # 要り、この Pod は持っていない）。
+    set -eu
+
+    REPO=""
+    MESSAGE=""
+    BRANCH=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        -r) REPO=$2; shift 2 ;;
+        -m) MESSAGE=$2; shift 2 ;;
+        -b) BRANCH=$2; shift 2 ;;
+        *) echo "unknown option: $1" >&2; exit 1 ;;
+      esac
+    done
+    if [ -z "$REPO" ] || [ -z "$MESSAGE" ]; then
+      echo "usage: signed-commit.sh -r OWNER/REPO -m MESSAGE [-b BRANCH]" >&2
+      exit 1
+    fi
+    [ -n "$BRANCH" ] || BRANCH=$(git rev-parse --abbrev-ref HEAD)
+
+    # **expectedHeadOid は GitHub 側の ref から取る。** ローカルの HEAD ではない ——
+    # 両者がずれていると GitHub は 422 で拒否し、それが正しい（他の誰かが同じ
+    # ブランチを進めていたときに黙って上書きしないため）。
+    BASE=$(gh api "repos/${REPO}/git/ref/heads/${BRANCH}" -q '.object.sha')
+
+    # 直前のコミットで変わったファイルだけを載せる。
+    ADDS=$(git diff-tree --no-commit-id --name-only -r --diff-filter=d HEAD |
+      while IFS= read -r f; do
+        [ -f "$f" ] || continue
+        jq -n --arg p "$f" --arg c "$(base64 -w0 < "$f")" '{path:$p, contents:$c}'
+      done | jq -sc '.')
+    DELS=$(git diff-tree --no-commit-id --name-only -r --diff-filter=D HEAD |
+      jq -R -s -c 'split("\n") | map(select(length > 0)) | map({path: .})')
+
+    HEADLINE=$(printf '%s' "$MESSAGE" | head -1)
+    BODY=$(printf '%s' "$MESSAGE" | tail -n +2)
+
+    OID=$(jq -n \
+      --arg repo "$REPO" --arg branch "$BRANCH" --arg oid "$BASE" \
+      --arg headline "$HEADLINE" --arg body "$BODY" \
+      --argjson additions "$ADDS" --argjson deletions "$DELS" \
+      '{
+        query: "mutation($input:CreateCommitOnBranchInput!){createCommitOnBranch(input:$input){commit{oid}}}",
+        variables: {input: {
+          branch: {repositoryNameWithOwner: $repo, branchName: $branch},
+          message: {headline: $headline, body: $body},
+          fileChanges: {additions: $additions, deletions: $deletions},
+          expectedHeadOid: $oid
+        }}
+      }' | gh api graphql --input - --jq '.data.createCommitOnBranch.commit.oid')
+
+    [ -n "$OID" ] || { echo "createCommitOnBranch returned no oid" >&2; exit 1; }
+    echo "$OID"

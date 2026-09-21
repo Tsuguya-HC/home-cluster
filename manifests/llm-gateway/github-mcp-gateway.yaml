@@ -29,6 +29,12 @@ spec:
     - name: http
       protocol: HTTP
       port: 80
+      # CRD の default。書かないと apiserver が埋めた値とマニフェストが食い違い、
+      # Application が永久に OutOfSync になる（listener が 1 本だけの間は表面化
+      # していなかった）。
+      allowedRoutes:
+        namespaces:
+          from: Same
     # REST / GraphQL / git 用（#1038）。**TLS なのは `gh` が平文を拒むから** ——
     # GH_HOST を渡すと https 固定になり、http:// では呼べない。証明書は
     # Certificate `github-gateway-tls`。
@@ -40,18 +46,29 @@ spec:
       protocol: HTTPS
       port: 443
       hostname: gh-ro.infra.tgy.io
+      allowedRoutes:
+        namespaces:
+          from: Same
       tls:
         mode: Terminate
         certificateRefs:
-          - name: github-gateway-tls
+          # group / kind も CRD の default。同じ理由で明記する。
+          - group: ""
+            kind: Secret
+            name: github-gateway-tls
     - name: https-rw
       protocol: HTTPS
       port: 443
       hostname: gh-rw.infra.tgy.io
+      allowedRoutes:
+        namespaces:
+          from: Same
       tls:
         mode: Terminate
         certificateRefs:
-          - name: github-gateway-tls
+          - group: ""
+            kind: Secret
+            name: github-gateway-tls
   infrastructure:
     parametersRef:
       group: gateway.envoyproxy.io

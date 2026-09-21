@@ -183,7 +183,6 @@ spec:
           limits:
             memory: 1Gi
         command: [sh]
-        volumeMounts:
         env:
           # GitHub も gateway 経由（#1038）。**この Pod は GitHub の資格情報を持たない** ——
           # 以前はここで App の秘密鍵から自分でトークンを作っていた。installation token は

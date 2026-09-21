@@ -125,7 +125,7 @@ All policies are CiliumNetworkPolicy (CNP) and CiliumClusterwideNetworkPolicy (C
 | **redis-secret-init** (Job) | (deny world) | kube-apiserver |
 | **cloudflared** | (deny world) | *.v2.argotunnel.com + cftunnel.com + h2.cftunnel.com + quic.cftunnel.com:443/7844 (7844 TCP+UDP), server:8080, eventsource (argo):12000, kanidm (kanidm):8443, nextcloud (nextcloud):80, harbor-nginx (harbor):8443, oauth2-proxy-rss (oauth2-proxy):4180 |
 
-## argo (24 policies)
+## argo (25 policies)
 
 | Component | Ingress | Egress |
 |---|---|---|
@@ -150,6 +150,7 @@ All policies are CiliumNetworkPolicy (CNP) and CiliumClusterwideNetworkPolicy (C
 | **kanidm-backup** (kanidm-backup=true) | (deny world) | kube-apiserver, *.r2.cloudflarestorage.com:443, seaweedfs-filer (seaweedfs):8333 |
 | **kanidm-repl-exchange** (kanidm-repl-exchange=true) | (deny world) | kube-apiserver, seaweedfs-filer (seaweedfs):8333 |
 | **image-digest-audit** (image-digest-audit=true) | (none) | harbor-nginx (harbor):8443 |
+| **github-mcp-smoke** (github-mcp-smoke=true) | (none) | kube-apiserver, github-mcp (llm-gateway):10080, discord.com:443, seaweedfs-filer (seaweedfs):8333 |
 | **aqua-checksum** (aqua-checksum=true) | (none) | kube-apiserver, github.com + api.github.com + *.githubusercontent.com + discord.com + tuf-repo-cdn.sigstore.dev + get.helm.sh :443, seaweedfs-filer (seaweedfs):8333 |
 | **renovate** (renovate=true) | (none) | harbor-nginx (harbor):8443 |
 | **tofu-harbor** (tofu-harbor=true) | (none) | harbor-nginx (harbor):8443 |
@@ -377,7 +378,7 @@ All policies are CiliumNetworkPolicy (CNP) and CiliumClusterwideNetworkPolicy (C
 | Component | Ingress | Egress |
 |---|---|---|
 | **llm-gateway-envoy** | claude-code-build / claude-code → 10080; argo (SA `pluto-fixer` only) → 10080; host/remote-node → 19003 (probes) | envoy-gateway (envoy-gateway-system):18000, openrouter.ai + api.anthropic.com:443 |
-| **github-mcp-envoy** | claude-code / claude-code-build → 10080; host/remote-node → 19003 (probes) | envoy-gateway (envoy-gateway-system):18000, api.githubcopilot.com:443 |
+| **github-mcp-envoy** | claude-code / claude-code-build → 10080; argo (SA `github-mcp-smoke` only) → 10080; host/remote-node → 19003 (probes) | envoy-gateway (envoy-gateway-system):18000, api.githubcopilot.com:443 |
 
 ## envoy-gateway-system (2 policies)
 

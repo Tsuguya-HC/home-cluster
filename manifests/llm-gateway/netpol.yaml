@@ -94,6 +94,11 @@ spec:
             io.kubernetes.pod.namespace: claude-code
         - matchLabels:
             io.kubernetes.pod.namespace: claude-code-build
+        # argo は gateway を呼ばないワークロードが常駐しているので namespace 単位では
+        # 開けない。境界を毎日確かめる smoke の SA だけに絞る。
+        - matchLabels:
+            io.kubernetes.pod.namespace: argo
+            io.cilium.k8s.policy.serviceaccount: github-mcp-smoke
       toPorts:
         - ports:
             - port: "10080"

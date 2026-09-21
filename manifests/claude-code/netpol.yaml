@@ -40,7 +40,13 @@ spec:
             io.kubernetes.pod.namespace: llm-gateway
       toPorts:
         - ports:
+            # 10080 は LLM（#942）、10443 は GitHub（#1038）。**どちらも同じ
+            # namespace の Envoy だが Pod は別**で、matchLabels に gateway 名を
+            # 書いていないのでこの 1 本が両方に当たる。片方だけ許したければ
+            # gateway.networking.k8s.io/gateway-name で絞ること。
             - port: "10080"
+              protocol: TCP
+            - port: "10443"
               protocol: TCP
     - toEndpoints:
         - matchLabels:

@@ -53,6 +53,7 @@ data:
     task-executor-write rw claude-code/github-gateway-client-keys/task-executor-write
     wf-creator rw claude-code/github-gateway-client-keys/wf-creator
     wf-improver rw claude-code/github-gateway-client-keys/wf-improver
+    claude-code-generic rw claude-code/github-gateway-client-keys/claude-code-generic
 ---
 apiVersion: v1
 kind: ConfigMap

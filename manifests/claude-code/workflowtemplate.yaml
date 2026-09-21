@@ -83,16 +83,15 @@ spec:
   volumes:
     - name: workspace
       emptyDir: {}
+    - name: signed-commit
+      configMap:
+        name: signed-commit
+        defaultMode: 0555
     - name: claude-home
       emptyDir: {}
     - name: mcp-config
       configMap:
         name: claude-code-mcp
-    - name: github-token
-      emptyDir: {}
-    - name: github-app-secret
-      secret:
-        secretName: tf-coder-github-app-private-key
   affinity:
     nodeAffinity:
       preferredDuringSchedulingIgnoredDuringExecution:
@@ -115,49 +114,39 @@ spec:
         runAsGroup: 65532
         fsGroup: 65532
       initContainers:
-        - name: github-auth
-          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:0b658d03cee98b3118622d47d07950b5dc5dd8ef73689bab68ff28c00299f296
-          command: [github-auth.sh]
-          env:
-            - name: GITHUB_APP_ID
-              value: "5009499"
-            - name: GITHUB_REPO
-              value: "Tsuguya-HC/home-rss"
-          securityContext:
-            runAsUser: 65532
-            runAsNonRoot: true
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop: [ALL]
-          volumeMounts:
-            - name: github-app-secret
-              mountPath: /github-app
-              readOnly: true
-            - name: github-token
-              mountPath: /github-token
-          resources:
-            requests:
-              cpu: 10m
-              memory: 32Mi
-            limits:
-              memory: 64Mi
         - name: setup
           image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:0b658d03cee98b3118622d47d07950b5dc5dd8ef73689bab68ff28c00299f296
           command: [sh, -c]
           args:
             - |
-              export GITHUB_TOKEN=$(cat /github-token/token)
               git config --global --add safe.directory /workspace
-              git clone "https://x-access-token:${GITHUB_TOKEN}@github.com/Tsuguya-HC/home-rss.git" /workspace
+              # **ここに入るのは呼び出し元鍵**で、GitHub の資格情報ではない ——
+              # gateway が Authorization を実 installation token に付け替える。
+              # `token ` の形にするのは、Envoy の apiKeyAuth が明示的に剥がすのが
+              # `Bearer ` だけで、こちらは文字列そのものが照合対象になるため。
+              git config --global "http.https://${GH_HOST}/.extraHeader" \
+                "Authorization: token ${GH_ENTERPRISE_TOKEN}"
+              git clone "https://${GH_HOST}/Tsuguya-HC/home-rss.git" /workspace
               cd /workspace
               git checkout -b "issue-${ISSUE_NUMBER}"
               git config user.name "tgy-cluster-bot[bot]"
               git config user.email "tgy-cluster-bot[bot]@users.noreply.github.com"
               mkdir -p /workspace/.bin
-              cp /usr/local/bin/github-signed-commit.sh /workspace/.bin/
               curl -sf -H "Authorization: token ${GITHUB_TOKEN}" "https://api.github.com/repos/Tsuguya-HC/home-rss/issues/${ISSUE_NUMBER}" | jq -r '"# Issue #\(.number): \(.title)\n\n\(.body)"' > /workspace/ISSUE.md
               cp -R /workspace/k8s/.claude /claude-home/
           env:
+            # GitHub は gateway 経由（#1038）。**この Pod は GitHub の資格情報を持たない**
+            # —— installation token は gateway 側にしかなく、gateway が Authorization を
+            # 付け直す。GH_HOST を渡すと `gh` は GHES 扱いになり、REST を /api/v3、
+            # GraphQL を /api/graphql に送る。ロールはホスト名で決まる。
+            - name: GH_HOST
+              value: gh-rw.infra.tgy.io
+            # gateway のクライアントキー。**GitHub の資格情報ではない。**
+            - name: GH_ENTERPRISE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: github-gateway-client-keys
+                  key: claude-code-generic
             - name: HOME
               value: /tmp
             - name: ISSUE_NUMBER
@@ -173,9 +162,6 @@ spec:
               mountPath: /workspace
             - name: claude-home
               mountPath: /claude-home
-            - name: github-token
-              mountPath: /github-token
-              readOnly: true
           resources:
             requests:
               cpu: 10m
@@ -187,22 +173,33 @@ spec:
         command: [sh, -c]
         args:
           - |
-            export GITHUB_TOKEN=$(cat /github-token/token)
             if [ "$CUSTOM_PROMPT" != "none" ] && [ -n "$CUSTOM_PROMPT" ]; then
               PROMPT="$CUSTOM_PROMPT"
             else
               PROMPT="/workspace/ISSUE.md に対象 Issue の内容があります。これを読んで要件を理解し、実装してください。完了したらコミット・プッシュして PR を作成してください。Closes は ISSUE.md 冒頭の Issue 番号を使うこと。
 
             ## Git コミット（署名付き）
-            git commit + git push の代わりに、github-signed-commit.sh を使うこと。
+            git commit + git push の代わりに、signed-commit.sh を使うこと。
             1. git add でファイルをステージ
-            2. /workspace/.bin/github-signed-commit.sh -r Tsuguya-HC/home-rss -m 'コミットメッセージ' を実行
+            2. /scripts/signed-commit.sh -r Tsuguya-HC/home-rss -m 'コミットメッセージ' を実行
             これにより GitHub API 経由で署名付きコミットが作成され、ローカルも同期される。
             PR 作成は署名コミット後に gh pr create で行う。"
             fi
             cd /workspace
             claude -p "$PROMPT" --model review --verbose --allowedTools "Bash,Read,Write,Edit,Glob,Grep,Agent" --mcp-config /mcp-config/mcp.json
         env:
+          # GitHub は gateway 経由（#1038）。**この Pod は GitHub の資格情報を持たない**
+          # —— installation token は gateway 側にしかなく、gateway が Authorization を
+          # 付け直す。GH_HOST を渡すと `gh` は GHES 扱いになり、REST を /api/v3、
+          # GraphQL を /api/graphql に送る。ロールはホスト名で決まる。
+          - name: GH_HOST
+            value: gh-rw.infra.tgy.io
+          # gateway のクライアントキー。**GitHub の資格情報ではない。**
+          - name: GH_ENTERPRISE_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: github-gateway-client-keys
+                key: claude-code-generic
           - name: HOME
             value: /claude-home
           - name: ISSUE_NUMBER
@@ -243,13 +240,13 @@ spec:
         volumeMounts:
           - name: workspace
             mountPath: /workspace
+          - name: signed-commit
+            mountPath: /scripts
+            readOnly: true
           - name: claude-home
             mountPath: /claude-home
           - name: mcp-config
             mountPath: /mcp-config
-            readOnly: true
-          - name: github-token
-            mountPath: /github-token
             readOnly: true
         resources:
           requests:

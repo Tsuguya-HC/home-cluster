@@ -26,10 +26,6 @@ spec:
       emptyDir: {}
     - name: claude-home
       emptyDir: {}
-    - name: signed-commit
-      configMap:
-        name: signed-commit
-        defaultMode: 0555
     - name: argocd-token
       secret:
         secretName: argocd-cluster-bot-token
@@ -79,7 +75,7 @@ spec:
             limits:
               memory: 64Mi
       container:
-        image: registry.infra.tgy.io/tools/claude-code:latest@sha256:a1a12fe81f5ab7ad1335bbd10d2faa2e152332d0185a93d348552e616760fc5f
+        image: registry.infra.tgy.io/tools/claude-code:latest@sha256:039c07017273b014bed37709888c3e22d74532894d02c9758377d2a0d702eede
         command: [sh, -c]
         args:
           - |
@@ -144,9 +140,9 @@ spec:
             3. /tmp/result.txt に「不足している権限」「必要な修正」を明記して早期終了する
 
             ## Git コミット（署名付き）
-            git commit + git push の代わりに、signed-commit.sh を使うこと。
+            git commit + git push の代わりに、github-signed-commit.sh を使うこと。
             1. git add でファイルをステージ
-            2. /scripts/signed-commit.sh -r OWNER/REPO -m 'コミットメッセージ' を実行（リポジトリ名はタスク説明から判断）
+            2. /usr/local/bin/github-signed-commit.sh -r OWNER/REPO -m 'コミットメッセージ' を実行（リポジトリ名はタスク説明から判断）
             これにより GitHub API 経由で署名付きコミットが作成される。
             **git push は使えない**（この Pod は GitHub の資格情報を持たない）。"
 
@@ -228,9 +224,6 @@ spec:
             mountPath: /workspace
           - name: claude-home
             mountPath: /claude-home
-          - name: signed-commit
-            mountPath: /scripts
-            readOnly: true
           - name: argocd-token
             mountPath: /argocd-token
             readOnly: true

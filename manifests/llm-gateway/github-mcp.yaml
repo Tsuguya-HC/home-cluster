@@ -111,10 +111,14 @@ spec:
             kind: HTTPRouteFilter
             name: github-mcp-credential-ro
       backendRefs:
+        # weight は CRD の既定値。書かないと apiserver が埋めた値とマニフェストが
+        # 食い違い、Application が永久に OutOfSync になる。ignoreDifferences で
+        # 隠さず明示するのは、upstream が既定値を変えたときに差分として見えるため。
         - name: github-mcp
           kind: Backend
           group: gateway.envoyproxy.io
           port: 443
+          weight: 1
 ---
 # 書き込みロール。App は tgy-hc-tf-coder（contents:write + PR:write + checks:read +
 # issues:read）。ツールセットは絞らない（42 ツール）。
@@ -146,10 +150,14 @@ spec:
             kind: HTTPRouteFilter
             name: github-mcp-credential-rw
       backendRefs:
+        # weight は CRD の既定値。書かないと apiserver が埋めた値とマニフェストが
+        # 食い違い、Application が永久に OutOfSync になる。ignoreDifferences で
+        # 隠さず明示するのは、upstream が既定値を変えたときに差分として見えるため。
         - name: github-mcp
           kind: Backend
           group: gateway.envoyproxy.io
           port: 443
+          weight: 1
 ---
 # **ロールの分離はここ。** ルート単位に別の鍵集合を持たせることで、ro の鍵で rw の
 # ルートは叩けない（2026-09-20 に実測。他ルートの鍵は 401）。

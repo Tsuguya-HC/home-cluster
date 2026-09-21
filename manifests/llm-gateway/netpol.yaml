@@ -95,10 +95,15 @@ spec:
         - matchLabels:
             io.kubernetes.pod.namespace: claude-code-build
         # argo は gateway を呼ばないワークロードが常駐しているので namespace 単位では
-        # 開けない。境界を毎日確かめる smoke の SA だけに絞る。
+        # 開けない。呼ぶステップの SA だけに絞る。
         - matchLabels:
             io.kubernetes.pod.namespace: argo
             io.cilium.k8s.policy.serviceaccount: github-mcp-smoke
+        # **pluto-checker ではなく pluto-fixer**（#1038）。前者は全 Secret を読めるので
+        # claude を走らせる ai-fix には与えていない。
+        - matchLabels:
+            io.kubernetes.pod.namespace: argo
+            io.cilium.k8s.policy.serviceaccount: pluto-fixer
       toPorts:
         - ports:
             # listener 80 と 443 に対して Envoy が実際に listen する port。

@@ -166,7 +166,7 @@ spec:
           # private な parts リポを引くための installation token を作る。App の鍵は
           # この init と下の github-auth だけが見る（agent には渡さない）。
           - name: parts
-            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:039c07017273b014bed37709888c3e22d74532894d02c9758377d2a0d702eede
+            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:0ceee9710c8107be0200d63c676514c8aaa2a0e9d453a5fd3f4e07a055e8dc43
             command: [parts]
             args: [-s, implement-tests, -s, implement, -c, verdict-protocol, -c, untrusted-input, -c, build-sandbox]
             env:
@@ -265,7 +265,7 @@ spec:
         # agent が知っているのは gateway の URL と alias だけ。
         containers:
           - name: agent
-            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:039c07017273b014bed37709888c3e22d74532894d02c9758377d2a0d702eede
+            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:0ceee9710c8107be0200d63c676514c8aaa2a0e9d453a5fd3f4e07a055e8dc43
             workingDir: /workspace
             securityContext:
               # VM の中の特権。ホストには及ばない（containerd が

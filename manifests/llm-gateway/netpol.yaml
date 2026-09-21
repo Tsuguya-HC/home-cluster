@@ -101,7 +101,12 @@ spec:
             io.cilium.k8s.policy.serviceaccount: github-mcp-smoke
       toPorts:
         - ports:
+            # listener 80 と 443 に対して Envoy が実際に listen する port。
+            # 443 側は #1038 の REST / GraphQL / git 用で、`gh` が平文を拒むので
+            # 平文のまま済ませることはできない。
             - port: "10080"
+              protocol: TCP
+            - port: "10443"
               protocol: TCP
     # kubelet の probe。readiness は :19003/ready（:19001 は stats）。
     # 混同すると Pod が永久に Ready にならない。
@@ -122,10 +127,14 @@ spec:
         - ports:
             - port: "18000"
               protocol: TCP
-    # 上流。**api.github.com も github.com も要らない** —— このルートが通すのは
-    # MCP だけで、clone も push もしない。ここに足すと分離の意味が薄れる。
+    # 上流。MCP に加えて REST / GraphQL / git smart HTTP（#1038）。
+    # **3 つとも GitHub なので、この Envoy が持つ資格情報の境界は動かない** ——
+    # 分けているのは「GitHub の資格情報を持つ Envoy」と「LLM の資格情報を持つ
+    # Envoy」であって、GitHub の中のプロトコルではない。
     - toFQDNs:
         - matchName: "api.githubcopilot.com"
+        - matchName: "api.github.com"
+        - matchName: "github.com"
       toPorts:
         - ports:
             - port: "443"

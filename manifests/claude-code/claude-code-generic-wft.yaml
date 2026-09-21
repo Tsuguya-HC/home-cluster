@@ -99,7 +99,6 @@ spec:
           allowPrivilegeEscalation: false
           capabilities:
             drop: [ALL]
-        volumeMounts:
         resources:
           requests:
             cpu: 10m
@@ -334,7 +333,6 @@ spec:
           allowPrivilegeEscalation: false
           capabilities:
             drop: [ALL]
-        volumeMounts:
         resources:
           requests:
             cpu: 10m

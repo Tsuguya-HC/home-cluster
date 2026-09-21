@@ -24,6 +24,11 @@ spec:
       namespace: envoy-gateway-system
     - server: https://kubernetes.default.svc
       namespace: envoy-ai-gateway-system
+    # GitHub App の秘密鍵と installation token の rotator（#983）。llm-gateway とは
+    # 別 namespace なのは、あちらの Secret が Envoy Gateway コントローラから
+    # 全部読めるため（manifests/infra/github-auth-namespace.yaml）。
+    - server: https://kubernetes.default.svc
+      namespace: github-auth
   clusterResourceWhitelist:
     - group: '*'
       kind: CustomResourceDefinition

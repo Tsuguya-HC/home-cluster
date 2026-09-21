@@ -1,0 +1,41 @@
+# github-auth namespace の rotator が、この namespace の資格情報 Secret だけを
+# 書けるようにする（#983）。Role はこちら側に、SA はあちら側にある。
+#
+# **read を与えていない。** rotator は毎回 mint して上書きするだけで、現在値を
+# 読む必要が無い。get を外すと llm-gateway の他の Secret（上流 LLM の API キー、
+# クライアントキー一覧）へ手が届かないことが RBAC で言い切れる。
+#
+# create に resourceNames が効かないのは K8s の仕様（作る前の名前は照合できない）。
+# 残余: この namespace 内なら任意の名前で新規 Secret を作れる。ただし get が無いので
+# 既存 Secret は読めず、patch は上の 2 名に限定されているので他の Secret は
+# 改変できない。create だけ落とす案は、この Secret を GitOps 側にプレースホルダで
+# 置いた場合に ArgoCD の selfHeal が rotator の書き込みを毎回巻き戻すため採らなかった。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: github-token-rotator
+  namespace: llm-gateway
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [create]
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames:
+      - github-mcp-credential-ro
+      - github-mcp-credential-rw
+    verbs: [patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: github-token-rotator
+  namespace: llm-gateway
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: github-token-rotator
+subjects:
+  - kind: ServiceAccount
+    name: github-token-rotator
+    namespace: github-auth

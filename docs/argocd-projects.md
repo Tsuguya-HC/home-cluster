@@ -13,7 +13,7 @@ ArgoCD AppProject でアプリケーションをドメインごとに分離し�
 | security | Secret 管理・セキュリティ (ESO, OAuth2 Proxy, Kanidm, Trivy, Kyverno) | `*` | 10 |
 | apps | ユーザー向けアプリケーション (Nextcloud, Harbor) | nextcloud, harbor | 2 |
 | storage | ストレージ (SeaweedFS, CNPG, QNAP CSI, NFS) | cnpg-system, database, nfs-provisioner, seaweedfs, trident | 6 |
-| ai | AI/ML インフラ (Qdrant, Ollama, TaskFlow, LLM gateway) | qdrant, ollama, taskflow-system, llm-gateway, envoy-gateway-system, envoy-ai-gateway-system | 6 |
+| ai | AI/ML インフラ (Qdrant, Ollama, TaskFlow, LLM gateway) | qdrant, ollama, taskflow-system, llm-gateway, envoy-gateway-system, envoy-ai-gateway-system, github-auth | 7 |
 
 ## sourceRepos が及ばない範囲（重要）
 

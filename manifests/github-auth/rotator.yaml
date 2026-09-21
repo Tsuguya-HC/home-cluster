@@ -1,0 +1,189 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: github-token-rotator
+  namespace: github-auth
+---
+# GitHub App の秘密鍵から installation token を発行し、gateway が
+# credentialInjection で注入する Secret に書き戻す（#983）。
+#
+# **なぜ Argo ではなく CronJob か**: この Secret が切れると handler の GitHub
+# アクセスが全部 401 になる。Argo Workflows 製にすると「Argo だけ止まった状態で
+# handler は動き続け、1 時間後に全部落ちる」という、片方の障害がもう片方へ遅れて
+# 伝わる形になる。単一コンテナ・アーティファクト無し・分岐無しなので、そもそも
+# Workflow にする理由が無い。
+#
+# **状態を持たない**。毎回 mint して上書きするだけで、前回の値も前回の実行結果も
+# 見ない。#973 のクライアントキーが二重鍵と更新順序を要るのは Envoy 側が鍵の一覧を
+# 持つからで、こちらは **GitHub が古いトークンを自分の期限まで有効に保つ**ので
+# 窓も順序も要らない。
+#
+# 30 分間隔なのはトークンの寿命 1 時間の半分。どの瞬間に発行された Secret を
+# 掴んでも、残り 30 分以上は必ずある。
+#
+# **`github-mcp-credential-*`（llm-gateway ns）は GitOps 管理外。** この CronJob が
+# `kubectl apply --server-side` で実行時に直接書くだけで、この機能を revert しても
+# 消えない（llm-gateway namespace ごと消える revert ではないため）。手動で消すなら
+# `kubectl delete secret -n llm-gateway github-mcp-credential-ro github-mcp-credential-rw`。
+# github-auth namespace 側（この CronJob 自身や SA）は namespace ごと prune されるので
+# 手当て不要。
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: github-token-rotator
+  namespace: github-auth
+spec:
+  schedule: "*/30 * * * *"
+  # 既定（未設定）だと、コントローラが 100 回連続で開始を取りこぼした時点で
+  # **スケジューリング自体を諦める**。ノード障害で数時間落ちた後に二度と走らない、が
+  # 起こりうる。期限を書くと取りこぼしはその期限内だけ拾われ、カウンタは溜まらない。
+  startingDeadlineSeconds: 300
+  # 前回が走っている間に次を始めない。mint は速いので並走する理由が無く、
+  # 並走すると 2 つのトークンが順不同で同じ Secret を上書きする。
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      # 30 分後には次が走るので、それより短く切る。ぶら下がったまま
+      # concurrencyPolicy: Forbid で次を止め続ける状態を作らない。
+      activeDeadlineSeconds: 300
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: github-token-rotator
+        spec:
+          serviceAccountName: github-token-rotator
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            fsGroup: 65532
+            seccompProfile:
+              type: RuntimeDefault
+          volumes:
+            # App の秘密鍵は読み取り専用で 2 本マウントする。github-auth.sh が読む
+            # パスは固定（/github-app/private-key）なので、ロールごとにここから
+            # コピーして使う。
+            # 0400 は owner(root) しか読めず、Pod は runAsUser: 65532 で動くので
+            # 読めない。fsGroup: 65532 がファイルの group を書き換えるので、
+            # group にも read を与える 0440 にする。
+            - name: key-ro
+              secret:
+                secretName: tf-reviewer-github-app-private-key
+                defaultMode: 0440
+            - name: key-rw
+              secret:
+                secretName: tf-coder-github-app-private-key
+                defaultMode: 0440
+            - name: github-app
+              emptyDir: {}
+            - name: github-token
+              emptyDir: {}
+            - name: tmp
+              emptyDir: {}
+          containers:
+            - name: rotate
+              image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:0b658d03cee98b3118622d47d07950b5dc5dd8ef73689bab68ff28c00299f296
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: [ALL]
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 64Mi
+                limits:
+                  memory: 256Mi
+              env:
+                # installation は id ではなくリポジトリから引く（github-auth.sh の作り）。
+                # tf-reviewer / tf-coder はどちらも全リポに入っているので、どのリポを
+                # 指しても同じ installation に解決される。
+                - name: GITHUB_REPO
+                  value: "Tsuguya-HC/home-cluster"
+              volumeMounts:
+                - name: key-ro
+                  mountPath: /keys/ro
+                  readOnly: true
+                - name: key-rw
+                  mountPath: /keys/rw
+                  readOnly: true
+                - name: github-app
+                  mountPath: /github-app
+                - name: github-token
+                  mountPath: /github-token
+                - name: tmp
+                  mountPath: /tmp
+              command: [sh, -c]
+              args:
+                - |
+                  set -eu
+                  for role in ro rw; do
+                    cp "/keys/${role}/private-key" /github-app/private-key
+                    GITHUB_APP_ID=$(cat "/keys/${role}/app-id")
+                    export GITHUB_APP_ID
+                    github-auth.sh
+                    TOKEN=$(cat /github-token/token)
+                    # 形を見る。空や null を Secret に書くと、症状は「発行に失敗した」では
+                    # なく「gateway が Bearer を付けて 401 が返る」に化ける。
+                    # 文字クラスは実物に合わせること —— installation token は ghs_ の後ろに
+                    # `.` `-` `_` を含む（2026-09-18 実測）。
+                    case "$TOKEN" in
+                      ghs_*) ;;
+                      *) echo "unexpected token shape for role ${role}" >&2; exit 1 ;;
+                    esac
+                    # --from-literal ではなく --from-file を使うのは、installation token を
+                    # execve の argv に載せないため。Tetragon が process_exec を
+                    # process.arguments 込みで Loki へ export しており、この namespace も
+                    # kubectl/sh も exportDenyList から外れていないので、argv に載せると
+                    # Grafana 読者全員に生トークンが見える。
+                    # umask 077 は同じ理由で、/tmp に置く平文ファイルを他ユーザーから
+                    # 読めなくする。
+                    # printf '%s' で末尾改行を入れないのは、--from-file がファイル内容を
+                    # そのまま値にするため —— \n が混じると Envoy が
+                    # `Bearer ghs_...\n` を送って全リクエストが 401 になる。
+                    # 「鍵が違う」場合と区別が付かない（2026-09-20 に実測で踏んだ）。
+                    #
+                    # apply が --server-side なのは、client-side apply が
+                    # last-applied-configuration アノテーションに**同じトークンをもう 1 部**
+                    # 書き込むため。同じ Secret の中とはいえ、写しを増やす理由が無い。
+                    ( umask 077; printf '%s' "Bearer ${TOKEN}" > /tmp/credential )
+                    kubectl create secret generic "github-mcp-credential-${role}" \
+                      --namespace llm-gateway \
+                      --from-file=credential=/tmp/credential \
+                      --dry-run=client -o yaml \
+                      | kubectl apply --server-side --force-conflicts -f -
+                    rm -f /github-app/private-key /github-token/token /tmp/credential
+                    echo "rotated: ${role}"
+                  done
+---
+# rotator が出られる先。DNS はクラスタ全体の allow-dns が持っている。
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: github-token-rotator
+  namespace: github-auth
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: github-token-rotator
+  egress:
+    # Secret の書き戻し。kube-proxy replacement なので 10.96.0.1:443 ではなく
+    # CP の実 IP に出る。
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "6443"
+              protocol: TCP
+    # JWT → installation token。**github.com は要らない** —— このジョブは clone も
+    # push もしない。
+    - toFQDNs:
+        - matchName: "api.github.com"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP

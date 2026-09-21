@@ -1,0 +1,27 @@
+# GitHub App の秘密鍵を持つ唯一の namespace にする予定の置き場（#983）。いまは
+# installation token の rotator だけ。namespace 自体は
+# manifests/infra/github-auth-namespace.yaml（infra app が作る）。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: github-auth
+  namespace: argocd
+spec:
+  project: ai
+  source:
+    repoURL: https://github.com/Tsuguya-HC/home-cluster.git
+    targetRevision: main
+    path: manifests/github-auth
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: github-auth
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      # namespace の実体は manifests/infra/github-auth-namespace.yaml（infra app）。
+      # 既存 namespace への CreateNamespace は冪等なので、infra app より先に
+      # このアプリが sync されるレースの保険として残す。
+      - CreateNamespace=true
+      - ServerSideApply=true

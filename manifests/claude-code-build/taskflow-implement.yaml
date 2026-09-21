@@ -201,7 +201,7 @@ spec:
               limits: {cpu: 500m, memory: 256Mi}
           # 対象リポ用の installation token。ファイルで渡し、agent 側の入口で消す。
           - name: github-auth
-            image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:0b658d03cee98b3118622d47d07950b5dc5dd8ef73689bab68ff28c00299f296
+            image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:022e23ed50d5db9b1710df78b36d5137cb318ce06cb32a1a0cd87907e99515b8
             command: [sh, -c]
             args:
               - |
@@ -241,7 +241,7 @@ spec:
               limits: {cpu: 100m, memory: 64Mi}
           # github-signed-commit.sh を argo-tools から借りる。claude-code イメージには無い。
           - name: helpers
-            image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:0b658d03cee98b3118622d47d07950b5dc5dd8ef73689bab68ff28c00299f296
+            image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:022e23ed50d5db9b1710df78b36d5137cb318ce06cb32a1a0cd87907e99515b8
             command: [sh, -c]
             args: ["cp /usr/local/bin/github-signed-commit.sh /helpers/"]
             securityContext:

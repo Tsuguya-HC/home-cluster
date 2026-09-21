@@ -67,3 +67,61 @@ spec:
         - ports:
             - port: "443"
               protocol: TCP
+---
+# GitHub MCP 専用のデータプレーン（#983）。**llm-gateway-envoy とは別の Pod** で、
+# endpointSelector の gateway-name がそれを分けている。
+#
+# **この分離が資格情報の境界そのもの。** こちらの Envoy は GitHub の installation
+# token を持つが外部 LLM へは出られず、llm-gateway 側は LLM の API キーを持つが
+# GitHub へは出られない。相乗りさせると 1 つの Pod が両方を持つことになり、
+# CNP では区別できなくなる（同じ Pod なので）。
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: github-mcp-envoy
+  namespace: llm-gateway
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/managed-by: envoy-gateway
+      gateway.networking.k8s.io/gateway-name: github-mcp
+  ingress:
+    # 呼ぶ側。**新しい namespace から呼ぶときはここにも足すこと** —— 片側だけだと
+    # エラーは出ず、接続がただ失敗する。現時点では消費者がまだ無く、
+    # claude-code / claude-code-build の handler が MCP に切り替わった時点で使われる。
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: claude-code
+        - matchLabels:
+            io.kubernetes.pod.namespace: claude-code-build
+      toPorts:
+        - ports:
+            - port: "10080"
+              protocol: TCP
+    # kubelet の probe。readiness は :19003/ready（:19001 は stats）。
+    # 混同すると Pod が永久に Ready にならない。
+    - fromEntities:
+        - host
+        - remote-node
+      toPorts:
+        - ports:
+            - port: "19003"
+              protocol: TCP
+  egress:
+    # xDS。
+    - toEndpoints:
+        - matchLabels:
+            control-plane: envoy-gateway
+            io.kubernetes.pod.namespace: envoy-gateway-system
+      toPorts:
+        - ports:
+            - port: "18000"
+              protocol: TCP
+    # 上流。**api.github.com も github.com も要らない** —— このルートが通すのは
+    # MCP だけで、clone も push もしない。ここに足すと分離の意味が薄れる。
+    - toFQDNs:
+        - matchName: "api.githubcopilot.com"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP

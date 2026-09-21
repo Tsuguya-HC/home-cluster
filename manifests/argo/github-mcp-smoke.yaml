@@ -1,0 +1,195 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: github-mcp-smoke
+  namespace: argo
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: github-mcp-smoke
+  namespace: argo
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: argo-workflows-edit
+subjects:
+  - kind: ServiceAccount
+    name: github-mcp-smoke
+    namespace: argo
+---
+# GitHub MCP gateway の境界が生きているかを毎日確かめる（#983）。
+#
+# **確かめているのは疎通ではなく分離。** ルート単位の SecurityPolicy が
+# ロールごとに別の鍵集合を見ていること —— 読み取り専用の鍵で書き込みルートへ
+# 入れないこと —— は、YAML を突き合わせても「両方に付いている」としか分からず、
+# 参照先の中身が入れ替わっても静かに通る。実際この層は、ro と rw が同じ Secret を
+# 指したまま一度実装された（レビューで発見）。
+#
+# 往復は 3 つで、**肯定側を 1 つ必ず含める**。否定側だけだと「認証が壊れて
+# 何もかも 401」という状態が全部緑に見える。
+#
+#   1. ro の鍵 → /rw  : 401。ロール分離そのもの
+#   2. 無効な鍵 → /ro : 401。認証が生きている
+#   3. ro の鍵 → /ro  : 200。1 と 2 が「全部 401」で成立していないこと
+#
+# **CNP に api.githubcopilot.com を書かない。** 書かなければ、この Pod が
+# gateway を迂回して直接 GitHub へ出ようとした時点で drop されて落ちる。
+# 「gateway 経由であること」を設定ではなくネットワークで担保する。
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: github-mcp-smoke
+  namespace: argo
+spec:
+  endpointSelector:
+    matchLabels:
+      github-mcp-smoke: "true"
+  egress:
+    # 検査対象。10080 は listener 80 に対して Envoy が実際に listen する port
+    # （Service の port は 80 だが、CNP は変換後の backend port で当たる）。
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/managed-by: envoy-gateway
+            gateway.networking.k8s.io/gateway-name: github-mcp
+            io.kubernetes.pod.namespace: llm-gateway
+      toPorts:
+        - ports:
+            - port: "10080"
+              protocol: TCP
+    # 下の 3 つは、この workflow が何を喋るかとは無関係に argo の workflow Pod なら
+    # 必ず要る。塞ぐと失敗ではなくハングや i/o timeout になる。
+    #   - kube-apiserver: wait サイドカーが結果を workflowtaskresults へ POST する
+    #   - seaweedfs filer: wait がログを上げる
+    #   - discord.com: コントローラが全 workflow に注入する exit hook の通知
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "6443"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: seaweedfs
+            app.kubernetes.io/component: filer
+            io.kubernetes.pod.namespace: seaweedfs
+      toPorts:
+        - ports:
+            - port: "8333"
+              protocol: TCP
+    - toFQDNs:
+        - matchName: "discord.com"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+---
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: github-mcp-smoke
+  namespace: argo
+spec:
+  activeDeadlineSeconds: 300
+  serviceAccountName: github-mcp-smoke
+  entrypoint: main
+  templates:
+    - name: main
+      metadata:
+        labels:
+          github-mcp-smoke: "true"
+      container:
+        image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:0b658d03cee98b3118622d47d07950b5dc5dd8ef73689bab68ff28c00299f296
+        resources:
+          requests:
+            cpu: 10m
+            memory: 64Mi
+          limits:
+            memory: 128Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        env:
+          - name: HOME
+            value: /tmp
+          # 読み取り専用ロールの鍵。**この workflow に rw の鍵は渡さない** ——
+          # 渡せば「rw の鍵で rw に入れる」ことしか確かめられず、分離の検査に
+          # ならない。ここで要るのは「ro の鍵が rw に届かない」の側。
+          #
+          # smoke 専用の client ID（1Password の property `github-mcp-smoke`）を使う。
+          # pr-review handler 用の ID を借りると、gateway のアクセスログで
+          # smoke と本物の handler が区別できなくなり、smoke 側から鍵が漏れれば
+          # それは本番鍵の漏洩になる。片方だけ revoke することもできない。
+          - name: SMOKE_KEY
+            valueFrom:
+              secretKeyRef:
+                name: github-mcp-ro-client-keys
+                key: github-mcp-smoke
+        volumeMounts:
+          - name: tmp
+            mountPath: /tmp
+        command: [sh, -c]
+        args:
+          - |
+            set -eu
+            BASE=http://github-mcp.llm-gateway.svc.cluster.local
+            BODY='{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
+            FAILED=0
+
+            # $1=ラベル $2=パス $3=鍵 $4=期待するコード
+            probe() {
+              # 鍵をヘッダファイル経由で渡す。argv に直接展開すると Tetragon が
+              # process_exec を argv 込みで export しており、この namespace は
+              # exportDenyList に入っていないため curl の argv がそのまま Loki に
+              # 出て鍵が漏れる。umask 077 は /tmp に置く平文ファイルを他ユーザー
+              # から読めなくする。
+              # curl の -H @file は「Header: value」を 1 行書いたファイルを読む。
+              # LF 区切りで動作し CRLF は不要（curl 8.22.0 でローカル検証済み）。
+              ( umask 077; printf 'x-github-client: %s\n' "$3" > /tmp/hdr.txt )
+              code=$(curl -s -o /tmp/body.txt -w '%{http_code}' --max-time 30 -X POST \
+                -H @/tmp/hdr.txt \
+                -H 'Content-Type: application/json' \
+                -H 'Accept: application/json, text/event-stream' \
+                -d "$BODY" "${BASE}$2" || echo 000)
+              rm -f /tmp/hdr.txt
+              if [ "$code" = "$4" ]; then
+                echo "ok   $1: $2 -> $code"
+              else
+                echo "FAIL $1: $2 -> $code (expected $4)"
+                # 本文は握りつぶさない。401 と 404 の取り違え、gateway に
+                # 届いていない（000）の区別がここでしか付かない。
+                head -c 300 /tmp/body.txt
+                echo
+                FAILED=1
+              fi
+            }
+
+            # ロール分離。ro の鍵は rw のルートに届かない。
+            probe "ro-key-on-rw-route" /rw "$SMOKE_KEY" 401
+            # 認証が生きている。どのロールにも属さない値は通らない。
+            probe "invalid-key-on-ro-route" /ro "not-a-real-key" 401
+            # 肯定側。上の 2 つが「全部 401」で成立していないことを示す。
+            probe "ro-key-on-ro-route" /ro "$SMOKE_KEY" 200
+
+            [ "$FAILED" -eq 0 ] || exit 1
+            echo "github-mcp boundary intact"
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: CronWorkflow
+metadata:
+  name: github-mcp-smoke
+  namespace: argo
+spec:
+  schedules:
+    - "0 9 * * *"
+  timezone: Asia/Tokyo
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 600
+  workflowSpec:
+    workflowTemplateRef:
+      name: github-mcp-smoke

@@ -43,7 +43,17 @@ data:
     # **expectedHeadOid は GitHub 側の ref から取る。** ローカルの HEAD ではない ——
     # 両者がずれていると GitHub は 422 で拒否し、それが正しい（他の誰かが同じ
     # ブランチを進めていたときに黙って上書きしないため）。
-    BASE=$(gh api "repos/${REPO}/git/ref/heads/${BRANCH}" -q '.object.sha')
+    #
+    # **GitHub 側にまだ無いブランチはここで作る。** 手元で切ったばかりのブランチは
+    # ref が無く、読みに行くと 404 になる（2026-09-21、タスク #787 で実際に踏んだ）。
+    # push できない Pod からブランチを生やす手段は ref の作成しかないので、無ければ
+    # 手元の親コミットの位置に作る。既にあれば触らない。
+    BASE=$(gh api "repos/${REPO}/git/ref/heads/${BRANCH}" -q '.object.sha' 2>/dev/null || true)
+    if [ -z "$BASE" ]; then
+      BASE=$(git rev-parse HEAD^)
+      gh api "repos/${REPO}/git/refs" \
+        -f "ref=refs/heads/${BRANCH}" -f "sha=${BASE}" >/dev/null
+    fi
 
     # 直前のコミットで変わったファイルだけを載せる。
     ADDS=$(git diff-tree --no-commit-id --name-only -r --diff-filter=d HEAD |

@@ -34,10 +34,10 @@ data:
         *) echo "unknown option: $1" >&2; exit 1 ;;
       esac
     done
-    [ -n "$REPO" ] && [ -n "$MESSAGE" ] || {
+    if [ -z "$REPO" ] || [ -z "$MESSAGE" ]; then
       echo "usage: signed-commit.sh -r OWNER/REPO -m MESSAGE [-b BRANCH]" >&2
       exit 1
-    }
+    fi
     [ -n "$BRANCH" ] || BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
     # **expectedHeadOid は GitHub 側の ref から取る。** ローカルの HEAD ではない ——

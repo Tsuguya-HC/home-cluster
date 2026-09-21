@@ -40,16 +40,13 @@ spec:
   volumes:
     - name: workspace
       emptyDir: {}
+    - name: signed-commit
+      configMap:
+        name: signed-commit
+        defaultMode: 0555
     - name: claude-home
       emptyDir: {}
-    - name: github-token
-      emptyDir: {}
-    - name: github-app-secret
-      secret:
-        secretName: tf-coder-github-app-private-key
     - name: verdict
-      emptyDir: {}
-    - name: helpers
       emptyDir: {}
     - name: diagnose
       configMap:
@@ -152,36 +149,16 @@ spec:
         runAsGroup: 65532
         fsGroup: 65532
       initContainers:
-        - name: github-auth
-          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:0b658d03cee98b3118622d47d07950b5dc5dd8ef73689bab68ff28c00299f296
-          command: [github-auth.sh]
-          env:
-            - name: GITHUB_APP_ID
-              value: "5009499"
-            - name: GITHUB_REPO
-              value: "{{workflow.parameters.repo}}"
-          securityContext:
-            runAsUser: 65532
-            runAsNonRoot: true
-            allowPrivilegeEscalation: false
-            capabilities: {drop: [ALL]}
-          volumeMounts:
-            - {name: github-app-secret, mountPath: /github-app, readOnly: true}
-            - {name: github-token, mountPath: /github-token}
-          resources:
-            requests: {cpu: 10m, memory: 32Mi}
-            limits: {memory: 64Mi}
         - name: setup
           image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:0b658d03cee98b3118622d47d07950b5dc5dd8ef73689bab68ff28c00299f296
           command: [sh, -c]
           args:
             - |
               set -eu
-              GITHUB_TOKEN=$(cat /github-token/token)
               REPO="{{workflow.parameters.repo}}"
               BRANCH="{{workflow.parameters.branch}}"
               git config --global --add safe.directory /workspace
-              git clone "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git" /workspace
+              git clone "https://${GH_HOST}/${REPO}.git" /workspace
               cd /workspace
               # 差し戻しで 2 周目以降はブランチが既にある
               git checkout "${BRANCH}" 2>/dev/null || git checkout -b "${BRANCH}"
@@ -190,8 +167,15 @@ spec:
               # 署名コミットのスクリプトは argo-tools イメージにあり、main の
               # claude-code イメージには無い。専用ボリューム経由で渡す。
               # 作業ツリーの中に置くと git add -A が拾って PR に混入する
-              cp /usr/local/bin/github-signed-commit.sh /helpers/
           env:
+            # GitHub は gateway 経由（#1038）。**この Pod は GitHub の資格情報を持たない** ——
+            # installation token は gateway 側にしかない。`gh` は GH_HOST を見て REST を
+            # /api/v3、GraphQL を /api/graphql に送る。
+            - {name: GH_HOST, value: gh-rw.infra.tgy.io}
+            # gateway のクライアントキー。**GitHub の資格情報ではない。**
+            - name: GH_ENTERPRISE_TOKEN
+              valueFrom:
+                secretKeyRef: {name: github-gateway-client-keys, key: implement}
             - {name: HOME, value: /tmp}
           securityContext:
             runAsUser: 65532
@@ -200,8 +184,6 @@ spec:
             capabilities: {drop: [ALL]}
           volumeMounts:
             - {name: workspace, mountPath: /workspace}
-            - {name: github-token, mountPath: /github-token, readOnly: true}
-            - {name: helpers, mountPath: /helpers}
           resources:
             requests: {cpu: 10m, memory: 64Mi}
             limits: {memory: 256Mi}
@@ -211,7 +193,6 @@ spec:
         workingDir: /workspace
         args:
           - |
-            export GITHUB_TOKEN=$(cat /github-token/token)
             # init が書いた ~/.gitconfig は別コンテナなので届かない。ここで設定し直す
             git config --global --add safe.directory /workspace
             PROMPT="$(cat /prompt/implement.md)
@@ -265,20 +246,19 @@ spec:
             # 署名コミットは staged changes から GitHub API 経由で作る。
             # ローカルの git commit + push では署名が付かず ruleset に弾かれる
             git add -A
-            export GH_TOKEN="$GITHUB_TOKEN"
             REPO="{{workflow.parameters.repo}}"
             BRANCH="{{workflow.parameters.branch}}"
 
-            # github-signed-commit.sh は **既存 ref を PATCH するだけ**で ref を作らない。
-            # ローカルの checkout -b はリモートに存在しないので、先に main から生やす。
-            # 差し戻しの 2 周目以降は既にあるので 422 になるが、それでよい。
+            # ブランチは main から明示的に生やす。signed-commit.sh も ref が無ければ作るが、
+            # そちらは手元の親コミットを起点にするので、ここで main を起点に固定しておく。
+            # 差し戻しの 2 周目以降は既にあるので飛ばす。
             if ! gh api "repos/${REPO}/git/ref/heads/${BRANCH}" >/dev/null 2>&1; then
               BASE_SHA=$(gh api "repos/${REPO}/git/ref/heads/main" -q '.object.sha')
               gh api "repos/${REPO}/git/refs" -f ref="refs/heads/${BRANCH}" -f sha="$BASE_SHA" >/dev/null
               echo "ブランチ ${BRANCH} を作成しました"
             fi
 
-            /helpers/github-signed-commit.sh \
+            /scripts/signed-commit.sh \
               -r "$REPO" \
               -b "$BRANCH" \
               -m "{{workflow.parameters.pr-title}}"
@@ -299,6 +279,14 @@ spec:
                 | gh pr comment "$PR" --repo "$REPO" --body-file - || true
             fi
         env:
+          # GitHub は gateway 経由（#1038）。**この Pod は GitHub の資格情報を持たない** ——
+          # installation token は gateway 側にしかない。`gh` は GH_HOST を見て REST を
+          # /api/v3、GraphQL を /api/graphql に送る。
+          - {name: GH_HOST, value: gh-rw.infra.tgy.io}
+          # gateway のクライアントキー。**GitHub の資格情報ではない。**
+          - name: GH_ENTERPRISE_TOKEN
+            valueFrom:
+              secretKeyRef: {name: github-gateway-client-keys, key: implement}
           - {name: HOME, value: /tmp}
           # 推論は llm-gateway 経由（#942）。**この Pod は LLM の資格情報を持たない** —
           # 実キーは gateway の BackendSecurityPolicy 側にしかなく、gateway が付け直す。
@@ -332,8 +320,7 @@ spec:
         volumeMounts:
           - {name: workspace, mountPath: /workspace}
           - {name: claude-home, mountPath: /claude-home}
-          - {name: github-token, mountPath: /github-token, readOnly: true}
-          - {name: helpers, mountPath: /helpers, readOnly: true}
+          - {name: signed-commit, mountPath: /scripts, readOnly: true}
           - {name: prompt, mountPath: /prompt, readOnly: true}
           - {name: diagnose, mountPath: /diagnose, readOnly: true}
         resources:
@@ -348,30 +335,20 @@ spec:
       metadata:
         labels:
           agent.tgy.io/phase: checks
-      initContainers:
-        - name: github-auth
-          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:0b658d03cee98b3118622d47d07950b5dc5dd8ef73689bab68ff28c00299f296
-          command: [github-auth.sh]
-          env:
-            - {name: GITHUB_APP_ID, value: "5009499"}
-            - {name: GITHUB_REPO, value: "{{workflow.parameters.repo}}"}
-          securityContext:
-            runAsUser: 65532
-            runAsNonRoot: true
-            allowPrivilegeEscalation: false
-            capabilities: {drop: [ALL]}
-          volumeMounts:
-            - {name: github-app-secret, mountPath: /github-app, readOnly: true}
-            - {name: github-token, mountPath: /github-token}
-          resources:
-            requests: {cpu: 10m, memory: 32Mi}
-            limits: {memory: 64Mi}
       script:
         image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:0b658d03cee98b3118622d47d07950b5dc5dd8ef73689bab68ff28c00299f296
+        env:
+          # GitHub は gateway 経由（#1038）。**この Pod は GitHub の資格情報を持たない** ——
+          # installation token は gateway 側にしかない。`gh` は GH_HOST を見て REST を
+          # /api/v3、GraphQL を /api/graphql に送る。
+          - {name: GH_HOST, value: gh-rw.infra.tgy.io}
+          # gateway のクライアントキー。**GitHub の資格情報ではない。**
+          - name: GH_ENTERPRISE_TOKEN
+            valueFrom:
+              secretKeyRef: {name: github-gateway-client-keys, key: implement}
         command: [sh]
         source: |
           set -u
-          export GH_TOKEN=$(cat /github-token/token)
           export HOME=/tmp
           REPO="{{workflow.parameters.repo}}"
           BRANCH="{{workflow.parameters.branch}}"
@@ -467,7 +444,6 @@ spec:
           allowPrivilegeEscalation: false
           capabilities: {drop: [ALL]}
         volumeMounts:
-          - {name: github-token, mountPath: /github-token, readOnly: true}
           - {name: verdict, mountPath: /work}
         resources:
           requests: {cpu: 10m, memory: 64Mi}
@@ -495,24 +471,6 @@ spec:
         runAsGroup: 65532
         fsGroup: 65532
       initContainers:
-        - name: github-auth
-          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:0b658d03cee98b3118622d47d07950b5dc5dd8ef73689bab68ff28c00299f296
-          command: [github-auth.sh]
-          env:
-            - {name: GITHUB_APP_ID, value: "5009499"}
-            - {name: GITHUB_REPO, value: "{{workflow.parameters.repo}}"}
-          securityContext:
-            runAsUser: 65532
-            runAsGroup: 65532
-            runAsNonRoot: true
-            allowPrivilegeEscalation: false
-            capabilities: {drop: [ALL]}
-          volumeMounts:
-            - {name: github-app-secret, mountPath: /github-app, readOnly: true}
-            - {name: github-token, mountPath: /github-token}
-          resources:
-            requests: {cpu: 10m, memory: 32Mi}
-            limits: {memory: 64Mi}
         - name: prepare
           image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:0b658d03cee98b3118622d47d07950b5dc5dd8ef73689bab68ff28c00299f296
           command: [sh, -c]
@@ -539,7 +497,6 @@ spec:
         command: [sh, -c]
         args:
           - |
-            export GITHUB_TOKEN=$(cat /github-token/token)
             PROMPT="$(cat /prompt/review.md; echo; cat /prompt/verdict-protocol.md)
 
             ## 対象
@@ -591,6 +548,14 @@ spec:
             printf '%s' "$VERDICT" > /work/verdict.txt
             echo "verdict: $VERDICT"
         env:
+          # GitHub は gateway 経由（#1038）。**この Pod は GitHub の資格情報を持たない** ——
+          # installation token は gateway 側にしかない。`gh` は GH_HOST を見て REST を
+          # /api/v3、GraphQL を /api/graphql に送る。
+          - {name: GH_HOST, value: gh-rw.infra.tgy.io}
+          # gateway のクライアントキー。**GitHub の資格情報ではない。**
+          - name: GH_ENTERPRISE_TOKEN
+            valueFrom:
+              secretKeyRef: {name: github-gateway-client-keys, key: implement}
           - {name: HOME, value: /tmp}
           # 推論は llm-gateway 経由（#942）。**この Pod は LLM の資格情報を持たない** —
           # 実キーは gateway の BackendSecurityPolicy 側にしかなく、gateway が付け直す。
@@ -622,7 +587,6 @@ spec:
           allowPrivilegeEscalation: false
           capabilities: {drop: [ALL]}
         volumeMounts:
-          - {name: github-token, mountPath: /github-token, readOnly: true}
           - {name: verdict, mountPath: /work}
           - {name: prompt, mountPath: /prompt, readOnly: true}
           - {name: diagnose, mountPath: /diagnose, readOnly: true}
@@ -684,30 +648,20 @@ spec:
     # PR は implement がドラフトで作成済み。ここでやるのは状態の遷移だけで、
     # PR の状態は判定の「結果」であって判定そのものではない。
     - name: ready-for-review
-      initContainers:
-        - name: github-auth
-          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:0b658d03cee98b3118622d47d07950b5dc5dd8ef73689bab68ff28c00299f296
-          command: [github-auth.sh]
-          env:
-            - {name: GITHUB_APP_ID, value: "5009499"}
-            - {name: GITHUB_REPO, value: "{{workflow.parameters.repo}}"}
-          securityContext:
-            runAsUser: 65532
-            runAsNonRoot: true
-            allowPrivilegeEscalation: false
-            capabilities: {drop: [ALL]}
-          volumeMounts:
-            - {name: github-app-secret, mountPath: /github-app, readOnly: true}
-            - {name: github-token, mountPath: /github-token}
-          resources:
-            requests: {cpu: 10m, memory: 32Mi}
-            limits: {memory: 64Mi}
       script:
         image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:0b658d03cee98b3118622d47d07950b5dc5dd8ef73689bab68ff28c00299f296
+        env:
+          # GitHub は gateway 経由（#1038）。**この Pod は GitHub の資格情報を持たない** ——
+          # installation token は gateway 側にしかない。`gh` は GH_HOST を見て REST を
+          # /api/v3、GraphQL を /api/graphql に送る。
+          - {name: GH_HOST, value: gh-rw.infra.tgy.io}
+          # gateway のクライアントキー。**GitHub の資格情報ではない。**
+          - name: GH_ENTERPRISE_TOKEN
+            valueFrom:
+              secretKeyRef: {name: github-gateway-client-keys, key: implement}
         command: [sh]
         source: |
           set -eu
-          export GH_TOKEN=$(cat /github-token/token)
           export HOME=/tmp
           REPO="{{workflow.parameters.repo}}"
           PR=$(gh pr list --repo "$REPO" --head "{{workflow.parameters.branch}}" --json number -q '.[0].number')
@@ -721,8 +675,6 @@ spec:
           runAsNonRoot: true
           allowPrivilegeEscalation: false
           capabilities: {drop: [ALL]}
-        volumeMounts:
-          - {name: github-token, mountPath: /github-token, readOnly: true}
         resources:
           requests: {cpu: 10m, memory: 64Mi}
           limits: {memory: 256Mi}
@@ -731,30 +683,20 @@ spec:
     - name: escalate
       inputs:
         parameters: [{name: verdict}]
-      initContainers:
-        - name: github-auth
-          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:0b658d03cee98b3118622d47d07950b5dc5dd8ef73689bab68ff28c00299f296
-          command: [github-auth.sh]
-          env:
-            - {name: GITHUB_APP_ID, value: "5009499"}
-            - {name: GITHUB_REPO, value: "{{workflow.parameters.repo}}"}
-          securityContext:
-            runAsUser: 65532
-            runAsNonRoot: true
-            allowPrivilegeEscalation: false
-            capabilities: {drop: [ALL]}
-          volumeMounts:
-            - {name: github-app-secret, mountPath: /github-app, readOnly: true}
-            - {name: github-token, mountPath: /github-token}
-          resources:
-            requests: {cpu: 10m, memory: 32Mi}
-            limits: {memory: 64Mi}
       script:
         image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:0b658d03cee98b3118622d47d07950b5dc5dd8ef73689bab68ff28c00299f296
+        env:
+          # GitHub は gateway 経由（#1038）。**この Pod は GitHub の資格情報を持たない** ——
+          # installation token は gateway 側にしかない。`gh` は GH_HOST を見て REST を
+          # /api/v3、GraphQL を /api/graphql に送る。
+          - {name: GH_HOST, value: gh-rw.infra.tgy.io}
+          # gateway のクライアントキー。**GitHub の資格情報ではない。**
+          - name: GH_ENTERPRISE_TOKEN
+            valueFrom:
+              secretKeyRef: {name: github-gateway-client-keys, key: implement}
         command: [sh]
         source: |
           set -u
-          export GH_TOKEN=$(cat /github-token/token)
           export HOME=/tmp
           REPO="{{workflow.parameters.repo}}"
           PR=$(gh pr list --repo "$REPO" --head "{{workflow.parameters.branch}}" --json number -q '.[0].number' 2>/dev/null || true)
@@ -772,8 +714,6 @@ spec:
           runAsNonRoot: true
           allowPrivilegeEscalation: false
           capabilities: {drop: [ALL]}
-        volumeMounts:
-          - {name: github-token, mountPath: /github-token, readOnly: true}
         resources:
           requests: {cpu: 10m, memory: 32Mi}
           limits: {memory: 64Mi}

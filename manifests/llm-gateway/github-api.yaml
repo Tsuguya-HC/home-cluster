@@ -1,0 +1,382 @@
+# GitHub の REST / GraphQL / git smart HTTP を gateway 経由にする経路（#1038）。
+# **handler はトークンを持たず、gateway が持つ。**
+#
+# MCP（github-mcp.yaml）と同じ Gateway・同じ Envoy に相乗りさせている。あちらが
+# llm-gateway と Envoy を分けた理由は「GitHub の資格情報を持つ Envoy と LLM の
+# 資格情報を持つ Envoy を分ける」ことなので、GitHub 向けの経路を同じ Envoy に
+# 足してもその境界は動かない。Envoy Deployment は増えない。
+#
+# **ロールの分離はホスト名でやる。** MCP は `/ro` `/rw` のパスで分けたが、こちらは
+# 使えない —— `gh` は GH_HOST を渡すと GHES 扱いになり、REST を `/api/v3/<path>`、
+# GraphQL を `/api/graphql` に固定する（2026-09-21 実測）。呼ぶ側がパスを選べないので、
+# ルートを選ばせる自由度はホスト名にしか無い。
+#
+# **呼ぶ側の認証と実トークンの注入は Authorization 1 本で両立する**（2026-09-21 実測）。
+# apiKeyAuth が呼び出し元鍵を照合し、同じルートの credentialInjection が overwrite で
+# 実 installation token に差し替える。カスタムヘッダは要らない。
+#
+# **鍵は `token ` を前置した形で持つ。** `gh` は `Authorization: token <値>` を送り、
+# Envoy の apiKeyAuth が明示的に剥がすのは `Bearer ` だけなので、照合対象は
+# `token <値>` の文字列そのものになる。この Secret を書くのは github-auth namespace の
+# 鍵生成器で、1Password は経由しない（#973）。呼ぶ側に配るのは前置していない生の値で、
+# 前置は `gh` が自分でやる。
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: Backend
+metadata:
+  name: github-api
+  namespace: llm-gateway
+spec:
+  endpoints:
+    - fqdn:
+        hostname: api.github.com
+        port: 443
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: BackendTLSPolicy
+metadata:
+  name: github-api
+  namespace: llm-gateway
+spec:
+  targetRefs:
+    - group: gateway.envoyproxy.io
+      kind: Backend
+      name: github-api
+  validation:
+    wellKnownCACertificates: System
+    hostname: api.github.com
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: Backend
+metadata:
+  name: github-git
+  namespace: llm-gateway
+spec:
+  endpoints:
+    - fqdn:
+        hostname: github.com
+        port: 443
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: BackendTLSPolicy
+metadata:
+  name: github-git
+  namespace: llm-gateway
+spec:
+  targetRefs:
+    - group: gateway.envoyproxy.io
+      kind: Backend
+      name: github-git
+  validation:
+    wellKnownCACertificates: System
+    hostname: github.com
+---
+# git smart HTTP のトークン注入。**REST / GraphQL とは形式が違う。**
+# GitHub の git エンドポイントは `Bearer` を受けず、`Basic base64(x-access-token:TOKEN)`
+# を要求する。値は github-auth namespace の CronJob が 30 分ごとに上書きする。
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: HTTPRouteFilter
+metadata:
+  name: github-git-credential-ro
+  namespace: llm-gateway
+spec:
+  credentialInjection:
+    header: Authorization
+    overwrite: true
+    credential:
+      valueRef:
+        group: ""
+        kind: Secret
+        name: github-git-credential-ro
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: HTTPRouteFilter
+metadata:
+  name: github-git-credential-rw
+  namespace: llm-gateway
+spec:
+  credentialInjection:
+    header: Authorization
+    overwrite: true
+    credential:
+      valueRef:
+        group: ""
+        kind: Secret
+        name: github-git-credential-rw
+---
+# 読み取り専用ロール。App は tgy-hc-tf-reviewer（contents:read + issues:read）。
+#
+# ルールの順序ではなく**マッチの具体性**で選ばれる（Gateway API はパスの長い方が勝つ）
+# ので、`/api/...` が git の catch-all に吸われることはない。
+#
+# **URLRewrite の hostname を必ず書くこと。** 忘れると :authority が gh-ro の
+# ホスト名のまま上流へ行き、GitHub 側で弾かれる。git では症状がさらに悪く、
+# 301 が返って git がリダイレクトを追い github.com へ直行するため、public リポだと
+# 匿名で clone が成功して**偽陽性になる**（#983 で実際に踏んだ）。
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: github-ro
+  namespace: llm-gateway
+spec:
+  parentRefs:
+    - name: github-mcp
+      kind: Gateway
+      group: gateway.networking.k8s.io
+      sectionName: https-ro
+  hostnames:
+    - gh-ro.infra.tgy.io
+  rules:
+    - matches:
+        - path:
+            type: Exact
+            value: /api/graphql
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            hostname: api.github.com
+            path:
+              type: ReplaceFullPath
+              replaceFullPath: /graphql
+        - type: ExtensionRef
+          extensionRef:
+            group: gateway.envoyproxy.io
+            kind: HTTPRouteFilter
+            name: github-mcp-credential-ro
+      backendRefs:
+        # weight は CRD の既定値。書かないと apiserver が埋めた値とマニフェストが
+        # 食い違い、Application が永久に OutOfSync になる。
+        - name: github-api
+          kind: Backend
+          group: gateway.envoyproxy.io
+          port: 443
+          weight: 1
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/v3
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            hostname: api.github.com
+            path:
+              type: ReplacePrefixMatch
+              replacePrefixMatch: /
+        - type: ExtensionRef
+          extensionRef:
+            group: gateway.envoyproxy.io
+            kind: HTTPRouteFilter
+            name: github-mcp-credential-ro
+      backendRefs:
+        - name: github-api
+          kind: Backend
+          group: gateway.envoyproxy.io
+          port: 443
+          weight: 1
+    # git smart HTTP。パスは `<owner>/<repo>.git/...` なので書き換えず、
+    # ホスト名だけ github.com にする。
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            hostname: github.com
+        - type: ExtensionRef
+          extensionRef:
+            group: gateway.envoyproxy.io
+            kind: HTTPRouteFilter
+            name: github-git-credential-ro
+      backendRefs:
+        - name: github-git
+          kind: Backend
+          group: gateway.envoyproxy.io
+          port: 443
+          weight: 1
+---
+# 書き込みロール。App は tgy-hc-tf-coder（contents:write + PR:write + checks:read +
+# issues:read）。clone だけでなく push もここを通る。
+#
+# ルールの順序ではなく**マッチの具体性**で選ばれる（Gateway API はパスの長い方が勝つ）
+# ので、`/api/...` が git の catch-all に吸われることはない。
+#
+# **URLRewrite の hostname を必ず書くこと。** 忘れると :authority が gh-ro の
+# ホスト名のまま上流へ行き、GitHub 側で弾かれる。git では症状がさらに悪く、
+# 301 が返って git がリダイレクトを追い github.com へ直行するため、public リポだと
+# 匿名で clone が成功して**偽陽性になる**（#983 で実際に踏んだ）。
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: github-rw
+  namespace: llm-gateway
+spec:
+  parentRefs:
+    - name: github-mcp
+      kind: Gateway
+      group: gateway.networking.k8s.io
+      sectionName: https-rw
+  hostnames:
+    - gh-rw.infra.tgy.io
+  rules:
+    - matches:
+        - path:
+            type: Exact
+            value: /api/graphql
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            hostname: api.github.com
+            path:
+              type: ReplaceFullPath
+              replaceFullPath: /graphql
+        - type: ExtensionRef
+          extensionRef:
+            group: gateway.envoyproxy.io
+            kind: HTTPRouteFilter
+            name: github-mcp-credential-rw
+      backendRefs:
+        # weight は CRD の既定値。書かないと apiserver が埋めた値とマニフェストが
+        # 食い違い、Application が永久に OutOfSync になる。
+        - name: github-api
+          kind: Backend
+          group: gateway.envoyproxy.io
+          port: 443
+          weight: 1
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/v3
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            hostname: api.github.com
+            path:
+              type: ReplacePrefixMatch
+              replacePrefixMatch: /
+        - type: ExtensionRef
+          extensionRef:
+            group: gateway.envoyproxy.io
+            kind: HTTPRouteFilter
+            name: github-mcp-credential-rw
+      backendRefs:
+        - name: github-api
+          kind: Backend
+          group: gateway.envoyproxy.io
+          port: 443
+          weight: 1
+    # git smart HTTP。パスは `<owner>/<repo>.git/...` なので書き換えず、
+    # ホスト名だけ github.com にする。
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            hostname: github.com
+        - type: ExtensionRef
+          extensionRef:
+            group: gateway.envoyproxy.io
+            kind: HTTPRouteFilter
+            name: github-git-credential-rw
+      backendRefs:
+        - name: github-git
+          kind: Backend
+          group: gateway.envoyproxy.io
+          port: 443
+          weight: 1
+---
+# **ro と rw は別の Secret を参照すること。** apiKeyAuth は参照した Secret の全キーを
+# 有効な資格情報として扱い、キーを個別に選ぶフィールドは無い。同じ Secret を指すと
+# ro に配った鍵で rw のルートも通り、ロール分離が消える。
+#
+# `extractFrom` が Authorization なのは `gh` がそこにしか鍵を置けないため。git 側は
+# http.extraHeader で同じヘッダに同じ鍵を載せるので、API と git で呼ぶ側の作法が揃う。
+# sanitize: true で呼び出し元鍵は上流へ行かず、同じルートの credentialInjection が
+# 実 installation token を入れ直す（2026-09-21 実測で両立を確認）。
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: github-ro
+  namespace: llm-gateway
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: github-ro
+  apiKeyAuth:
+    credentialRefs:
+      - group: ""
+        kind: Secret
+        name: github-api-ro-client-keys
+    extractFrom:
+      - headers: [Authorization]
+    sanitize: true
+    forwardClientIDHeader: x-github-client-id
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: github-rw
+  namespace: llm-gateway
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: github-rw
+  apiKeyAuth:
+    credentialRefs:
+      - group: ""
+        kind: Secret
+        name: github-api-rw-client-keys
+    extractFrom:
+      - headers: [Authorization]
+    sanitize: true
+    forwardClientIDHeader: x-github-client-id
+---
+# handler が TLS で来るためのサーバー証明書。DNS-01 なので、このホスト名を外から
+# 到達可能にする必要は無い（registry.infra.tgy.io と同じ）。
+#
+# **名前は外からも引ける。** `*.infra.tgy.io` は CoreDNS の template が
+# Gateway の LB IP に answer するので、クラスタの外からは公開 Gateway に着いて
+# 404 になる。そちらに HTTPRoute を作らないこと —— 作ると資格情報を注入する
+# 経路が外から叩けるようになる。
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: github-gateway-tls
+  namespace: llm-gateway
+spec:
+  secretName: github-gateway-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+    - gh-ro.infra.tgy.io
+    - gh-rw.infra.tgy.io
+---
+# **route timeout を明示する。** Envoy の RouteAction.timeout は未設定だと既定 15 秒で、
+# Envoy Gateway はこれを上書きしない（2026-09-21 に github-mcp の Envoy の
+# config_dump を実測: 既存ルートの timeout は unset）。MCP の JSON-RPC は往復が速いので
+# 表面化しないが、**git の clone / push はリポジトリ全体を運ぶので 15 秒を超える。**
+#
+# ここが効くのは「レスポンス全体を受け切るまで」で、接続の idle ではない。
+#
+# MCP のルート（github-mcp-ro / -rw）には付けない。あちらは既定のまま動いており、
+# 触ると今回の変更の影響範囲が広がる。
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: github-timeout
+  namespace: llm-gateway
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: github-ro
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: github-rw
+  timeout:
+    http:
+      requestTimeout: 300s

@@ -29,6 +29,29 @@ spec:
     - name: http
       protocol: HTTP
       port: 80
+    # REST / GraphQL / git 用（#1038）。**TLS なのは `gh` が平文を拒むから** ——
+    # GH_HOST を渡すと https 固定になり、http:// では呼べない。証明書は
+    # Certificate `github-gateway-tls`。
+    #
+    # **listener をロールごとに分けているのは、`gh` がパスを選べないから。** MCP は
+    # `/ro` `/rw` のパスでロールを分けたが、`gh` は REST を `/api/v3/<path>`、GraphQL を
+    # `/api/graphql` に固定するので、ルートを選ばせる自由度がホスト名にしか無い。
+    - name: https-ro
+      protocol: HTTPS
+      port: 443
+      hostname: gh-ro.infra.tgy.io
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: github-gateway-tls
+    - name: https-rw
+      protocol: HTTPS
+      port: 443
+      hostname: gh-rw.infra.tgy.io
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: github-gateway-tls
   infrastructure:
     parametersRef:
       group: gateway.envoyproxy.io
@@ -115,8 +138,19 @@ spec:
 # （base64 は元サイズの約 1.33 倍に膨らむ）。ソースファイル 1 本分を想定して 10Mi
 # にする。
 #
-# **バッファ超過時に 413 になるか接続がリセットされるかは未検証。** このリポに
-# 記録が無い。
+# **このポリシーは Gateway 全体に効く**（targetRefs に sectionName が無い）ので、
+# #1038 で足した git smart HTTP もここを通る。packfile はリポジトリ全体を運ぶので
+# 10Mi を超えるが、**これは高水位であって上限ではない** —— body を要求するフィルタが
+# 1 つも掛かっていない（apiKeyAuth / credentialInjection / URLRewrite はヘッダと
+# パスしか見ない）ので、超過しても背圧がかかるだけで body はストリームされる。
+# **そのため値を上げていない。** 上げると、この Envoy（replicas 1、memory limit あり）
+# が同時接続ぶんの高水位を抱えうる最悪値だけが増える。
+#
+# **超過時の実挙動はまだ測っていない。** 実トラフィックが乗るのは handler を
+# 切り替えてからなので、そこで測る。
+#
+# listener 別に 2 本目のポリシーを足さないこと。同じ対象に 2 本掛けると片方が
+# Conflicted で黙って無視される種類の失敗になり、どちらが効いているか分からなくなる。
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: ClientTrafficPolicy
 metadata:

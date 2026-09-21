@@ -378,7 +378,7 @@ All policies are CiliumNetworkPolicy (CNP) and CiliumClusterwideNetworkPolicy (C
 | Component | Ingress | Egress |
 |---|---|---|
 | **llm-gateway-envoy** | claude-code-build / claude-code → 10080; argo (SA `pluto-fixer` only) → 10080; host/remote-node → 19003 (probes) | envoy-gateway (envoy-gateway-system):18000, openrouter.ai + api.anthropic.com:443 |
-| **github-mcp-envoy** | claude-code / claude-code-build → 10080; argo (SA `github-mcp-smoke` only) → 10080; host/remote-node → 19003 (probes) | envoy-gateway (envoy-gateway-system):18000, api.githubcopilot.com:443 |
+| **github-mcp-envoy** | claude-code / claude-code-build → 10080, 10443; argo (SA `github-mcp-smoke` only) → 10080, 10443; host/remote-node → 19003 (probes) | envoy-gateway (envoy-gateway-system):18000, api.githubcopilot.com + api.github.com + github.com:443 |
 
 ## envoy-gateway-system (2 policies)
 
@@ -393,8 +393,9 @@ All policies are CiliumNetworkPolicy (CNP) and CiliumClusterwideNetworkPolicy (C
 |---|---|---|
 | **agent-router-controller** | kube-apiserver/host/remote-node → 9443 (Pod mutator webhook); envoy-gateway (envoy-gateway-system) → 1063 (extension server gRPC); prometheus (monitoring) → 8080 (metrics, plain HTTP) | kube-apiserver |
 
-## github-auth (1 policy)
+## github-auth (2 policies)
 
 | Component | Ingress | Egress |
 |---|---|---|
 | **github-token-rotator** | (none) | kube-apiserver:6443, api.github.com:443 |
+| **github-gateway-key-rotator** | (none) | kube-apiserver:6443 |

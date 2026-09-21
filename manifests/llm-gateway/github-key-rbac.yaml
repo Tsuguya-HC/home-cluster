@@ -1,0 +1,40 @@
+# github-auth namespace の鍵生成器が、この namespace のクライアントキー Secret だけを
+# 書けるようにする（#973）。Role はこちら側に、SA はあちら側にある。
+#
+# **get を与えている。** installation token の rotator は毎回上書きするだけなので
+# read を外せたが、こちらは前回値を一世代残すために現在値を読む必要がある。
+# 下の resourceNames に限定してあるので、上流 LLM の API キーにも MCP の
+# クライアントキーにも手が届かない。
+#
+# create に resourceNames が効かないのは K8s の仕様（作る前の名前は照合できない）。
+# 残余はこの namespace 内で任意の名前の Secret を新規作成できること。既存 Secret の
+# 読み書きは下に限定されているので、他の Secret は読めも変えもできない。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: github-gateway-key-rotator
+  namespace: llm-gateway
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [create]
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames:
+      - github-api-ro-client-keys
+      - github-api-rw-client-keys
+    verbs: [get, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: github-gateway-key-rotator
+  namespace: llm-gateway
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: github-gateway-key-rotator
+subjects:
+  - kind: ServiceAccount
+    name: github-gateway-key-rotator
+    namespace: github-auth

@@ -17,6 +17,12 @@ data:
         prometheus :9153
 
         rewrite name registry.infra.tgy.io harbor.harbor.svc.cluster.local
+        # GitHub を gateway 経由にする経路（#1038）。下の template が
+        # *.infra.tgy.io を Gateway の LB IP に answer してしまうので、その前に
+        # 名前を Service へ向ける。この行が無いと handler は公開 Gateway へ行き、
+        # そこにはルートが無いので 404 になる。
+        rewrite name gh-ro.infra.tgy.io github-mcp.llm-gateway.svc.cluster.local
+        rewrite name gh-rw.infra.tgy.io github-mcp.llm-gateway.svc.cluster.local
 
         hosts {
             192.168.10.192  idm.tgy.io

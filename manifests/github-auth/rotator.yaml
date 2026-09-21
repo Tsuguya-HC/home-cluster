@@ -24,7 +24,8 @@ metadata:
 # **`github-mcp-credential-*`（llm-gateway ns）は GitOps 管理外。** この CronJob が
 # `kubectl apply --server-side` で実行時に直接書くだけで、この機能を revert しても
 # 消えない（llm-gateway namespace ごと消える revert ではないため）。手動で消すなら
-# `kubectl delete secret -n llm-gateway github-mcp-credential-ro github-mcp-credential-rw`。
+# `kubectl delete secret -n llm-gateway github-mcp-credential-ro github-mcp-credential-rw \
+#   github-git-credential-ro github-git-credential-rw`。
 # github-auth namespace 側（この CronJob 自身や SA）は namespace ごと prune されるので
 # 手当て不要。
 apiVersion: batch/v1
@@ -156,7 +157,21 @@ spec:
                       --from-file=credential=/tmp/credential \
                       --dry-run=client -o yaml \
                       | kubectl apply --server-side --force-conflicts -f -
-                    rm -f /github-app/private-key /github-token/token /tmp/credential
+                    # git smart HTTP 用（#1038）。**同じトークンでも形式が違う** ——
+                    # GitHub の git エンドポイントは Bearer を受けず、
+                    # Basic base64(x-access-token:TOKEN) を要求する。上の Bearer は
+                    # MCP と REST / GraphQL が使う。
+                    # base64 は -w0 で折り返しを止める。折り返しの \n が値に入ると、
+                    # 上の改行と同じく「鍵が違う」と区別の付かない 401 になる。
+                    ( umask 077; printf 'Basic %s' \
+                        "$(printf 'x-access-token:%s' "${TOKEN}" | base64 -w0)" \
+                        > /tmp/credential-git )
+                    kubectl create secret generic "github-git-credential-${role}" \
+                      --namespace llm-gateway \
+                      --from-file=credential=/tmp/credential-git \
+                      --dry-run=client -o yaml \
+                      | kubectl apply --server-side --force-conflicts -f -
+                    rm -f /github-app/private-key /github-token/token /tmp/credential /tmp/credential-git
                     echo "rotated: ${role}"
                   done
 ---

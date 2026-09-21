@@ -93,6 +93,10 @@ spec:
     - name: github-mcp
       kind: Gateway
       group: gateway.networking.k8s.io
+      # listener を明示する。書かないと hostnames を持たないこのルートが
+      # HTTPS listener（#1038 の REST / GraphQL / git 用）にも張り付き、
+      # gh-ro / gh-rw のホスト名でも MCP が開く。
+      sectionName: http
   rules:
     - matches:
         - path:
@@ -132,6 +136,10 @@ spec:
     - name: github-mcp
       kind: Gateway
       group: gateway.networking.k8s.io
+      # listener を明示する。書かないと hostnames を持たないこのルートが
+      # HTTPS listener（#1038 の REST / GraphQL / git 用）にも張り付き、
+      # gh-ro / gh-rw のホスト名でも MCP が開く。
+      sectionName: http
   rules:
     - matches:
         - path:

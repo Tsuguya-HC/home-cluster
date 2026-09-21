@@ -144,7 +144,7 @@ All policies are CiliumNetworkPolicy (CNP) and CiliumClusterwideNetworkPolicy (C
 | **events-controller** | host → 8081 | kube-apiserver, eventbus:8222 |
 | **eventbus** | eventsource (github-webhook), alertmanager-eventsource (alertmanager-webhook), task-dispatch-eventsource (task-dispatch), task-status-sync-eventsource (task-status-sync), argocd-deployed-eventsource (argocd-deployed), sensors (tofu-cloudflare, tofu-unifi, tofu-harbor, upgrade-k8s, pxe-sync, talos-build, images-build, single-repo-build, alert-investigate, task-dispatch, task-status-sync, talos-extension-bump, renovate-webhook, aqua-checksum, pr-review-dispatch) → 4222; self → 6222/7777; events-controller → 8222 | self:6222/7777 |
 | **workflow-pods** (backup-workflow, pxe-sync, talos-build, kanidm-repl-exchange, kanidm-backup, aqua-checksum, pluto-check excluded) | (deny world) | kube-apiserver, HTTPS 443, kube-apiserver/remote-node/host:50000 (Talos apid — node IPs carry node identity, so toCIDR does not match), seaweedfs-filer (seaweedfs):8333 |
-| **pluto-check** (pluto-check=true) | (none) | kube-apiserver:6443, seaweedfs-filer (seaweedfs):8333, llm-gateway-envoy (llm-gateway):10080, github.com + api.github.com + discord.com :443 |
+| **pluto-check** (pluto-check=true) | (none) | kube-apiserver:6443, seaweedfs-filer (seaweedfs):8333, envoy-gateway (llm-gateway):10080, 10443, discord.com:443 |
 | **etcd-backup** (backup-workflow=true) | (deny world) | kube-apiserver:6443/50000 (Talos apid), *.r2.cloudflarestorage.com:443, seaweedfs-filer (seaweedfs):8333 |
 | **pxe-sync** (pxe-sync=true) | (deny world) | kube-apiserver, github.com + api.github.com + *.githubusercontent.com + dl-cdn.alpinelinux.org :443, seaweedfs-filer (seaweedfs):8333, QNAP NAS (192.168.5.240):2049 (NFS) |
 | **kanidm-backup** (kanidm-backup=true) | (deny world) | kube-apiserver, *.r2.cloudflarestorage.com:443, seaweedfs-filer (seaweedfs):8333 |
@@ -378,7 +378,7 @@ All policies are CiliumNetworkPolicy (CNP) and CiliumClusterwideNetworkPolicy (C
 | Component | Ingress | Egress |
 |---|---|---|
 | **llm-gateway-envoy** | claude-code-build / claude-code → 10080; argo (SA `pluto-fixer` only) → 10080; host/remote-node → 19003 (probes) | envoy-gateway (envoy-gateway-system):18000, openrouter.ai + api.anthropic.com:443 |
-| **github-mcp-envoy** | claude-code / claude-code-build → 10080, 10443; argo (SA `github-mcp-smoke` only) → 10080, 10443; host/remote-node → 19003 (probes) | envoy-gateway (envoy-gateway-system):18000, api.githubcopilot.com + api.github.com + github.com:443 |
+| **github-mcp-envoy** | claude-code / claude-code-build → 10080, 10443; argo (SA `github-mcp-smoke`, `pluto-fixer` only) → 10080, 10443; host/remote-node → 19003 (probes) | envoy-gateway (envoy-gateway-system):18000, api.githubcopilot.com + api.github.com + github.com:443 |
 
 ## envoy-gateway-system (2 policies)
 

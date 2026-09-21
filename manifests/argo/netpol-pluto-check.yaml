@@ -59,11 +59,16 @@ spec:
             io.kubernetes.pod.namespace: llm-gateway
       toPorts:
         - ports:
+            # 10080 は LLM（#942）、10443 は GitHub（#1038）。同じ namespace の
+            # 別 Envoy で、matchLabels に gateway 名を書いていないのでこの 1 本が
+            # 両方に当たる。
             - port: "10080"
               protocol: TCP
+            - port: "10443"
+              protocol: TCP
+    # **github.com / api.github.com はもう要らない**（#1038）。clone も gh も gateway を
+    # 通るようになったので、この Pod が GitHub へ直接出られないことを CNP で言い切れる。
     - toFQDNs:
-        - matchName: "github.com"
-        - matchName: "api.github.com"
         - matchName: "discord.com"
       toPorts:
         - ports:

@@ -168,77 +168,6 @@ spec:
       # claude を走らせるこのステップだけ権限の無い SA に落とす（上の定義を参照）。
       # pluto 本体（detect-*）は固定のバイナリなので pluto-checker のままでよい。
       serviceAccountName: pluto-fixer
-      # App の秘密鍵は **init だけ** が持つ。JWT に署名して installation token を
-      # ファイルに落とし、main はそれを読む。env から unset するだけでは足りない —
-      # `unset` はシェルの環境配列しか消さず、exec 時のスタックは書き換わらないので、
-      # 同じ UID の子プロセスが `/proc/<ppid>/environ` から元の値を読める（実測）。
-      # init のプロセスは agent 起動時にはもう存在しないので、その経路ごと消える。
-      # Pod に残るのは 1 時間・1 installation スコープの token だけ。
-      # taskflow-pr-review.yaml が parts の clone 用に同じ形を使っている。
-      initContainers:
-        - name: github-auth
-          image: registry.infra.tgy.io/tools/claude-code:latest@sha256:a1a12fe81f5ab7ad1335bbd10d2faa2e152332d0185a93d348552e616760fc5f
-          command: [sh, -c]
-          env:
-            - name: GITHUB_APP_PRIVATE_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: pluto-check-github-app-private-key
-                  key: private-key
-            - name: GITHUB_APP_ID
-              value: "5008662"
-            - name: GITHUB_REPO
-              value: "Tsuguya-HC/home-cluster"
-          args:
-            - |
-              set -euo pipefail
-              echo "=== Generating GitHub App installation token ==="
-              echo "$GITHUB_APP_PRIVATE_KEY" > /tmp/app-key.pem
-              NOW=$(date +%s)
-              HEADER=$(printf '{"alg":"RS256","typ":"JWT"}' | base64 -w 0 | tr '+/' '-_' | tr -d '=')
-              PAYLOAD=$(printf '{"iat":%d,"exp":%d,"iss":"%s"}' "$((NOW - 60))" "$((NOW + 600))" "$GITHUB_APP_ID" | base64 -w 0 | tr '+/' '-_' | tr -d '=')
-              SIGNATURE=$(printf '%s.%s' "$HEADER" "$PAYLOAD" | openssl dgst -sha256 -sign /tmp/app-key.pem -binary | base64 -w 0 | tr '+/' '-_' | tr -d '=')
-              JWT="${HEADER}.${PAYLOAD}.${SIGNATURE}"
-              rm -f /tmp/app-key.pem
-              INSTALLATION_ID=$(curl -sf \
-                -H "Authorization: Bearer ${JWT}" \
-                -H "Accept: application/vnd.github+json" \
-                "https://api.github.com/repos/${GITHUB_REPO}/installation" \
-                | jq -r '.id')
-              curl -sf -X POST \
-                -H "Authorization: Bearer ${JWT}" \
-                -H "Accept: application/vnd.github+json" \
-                "https://api.github.com/app/installations/${INSTALLATION_ID}/access_tokens" \
-                | jq -r '.token' > /github-token/token
-              # 形を見る。`test -s` は改行 1 バイトでも真、`grep -qv '^null$'` は
-              # 空行を「null でない行」として通すので、どちらも空トークンを素通しする
-              # （実測）。main へ持ち越すと 2 ステップ先の「clone できない」に化ける。
-              #
-              # **文字クラスは実物で確かめること。** installation token は `ghs_` の後ろが
-              # 英数だけではなく、`.` `-` `_` を含む 383 文字（2026-09-18 に実測）。
-              # `[A-Za-z0-9]` だけにすると本物が必ず落ちる。
-              grep -qE '^ghs_[A-Za-z0-9._-]{20,}$' /github-token/token
-              # 0400 だと init と main の UID が一致し続けることに依存する。
-              # workflowDefaults の fsGroup: 65532 で emptyDir が setgid になり、
-              # 中のファイルはグループを継ぐので、0440 なら UID がずれても読める。
-              chmod 0440 /github-token/token
-          securityContext:
-            runAsNonRoot: true
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            capabilities: {drop: [ALL]}
-          volumeMounts:
-            - {name: github-token, mountPath: /github-token}
-            - {name: auth-tmp, mountPath: /tmp}
-          resources:
-            requests: {cpu: 50m, memory: 64Mi}
-            limits: {memory: 128Mi}
-      volumes:
-        - name: github-token
-          emptyDir: {}
-        # 秘密鍵を書く先を main の /tmp と分ける。main からは見えない。
-        - name: auth-tmp
-          emptyDir: {}
       inputs:
         artifacts:
           - name: pluto-cluster
@@ -254,9 +183,16 @@ spec:
           limits:
             memory: 1Gi
         command: [sh]
-        volumeMounts:
-          - {name: github-token, mountPath: /github-token, readOnly: true}
         env:
+          # GitHub も gateway 経由（#1038）。**この Pod は GitHub の資格情報を持たない** ——
+          # 以前はここで App の秘密鍵から自分でトークンを作っていた。installation token は
+          # gateway 側にしかなく、gateway が Authorization を付け直す。`gh` は GH_HOST を
+          # 見て REST を /api/v3、GraphQL を /api/graphql に送る。
+          - {name: GH_HOST, value: gh-rw.infra.tgy.io}
+          # gateway のクライアントキー。**GitHub の資格情報ではない。**
+          - name: GH_ENTERPRISE_TOKEN
+            valueFrom:
+              secretKeyRef: {name: github-gateway-client-keys, key: pluto-check}
           # 推論は llm-gateway 経由（#942）。**この Pod は LLM の資格情報を持たない** —
           # 実キーは gateway の BackendSecurityPolicy 側にしかなく、gateway が
           # Authorization を付け直す。
@@ -302,11 +238,15 @@ spec:
 
           # init が作った installation token を読む。**App の秘密鍵はこのコンテナに
           # 無い** — env にも /proc にも無いので、この先で起動する claude からも辿れない。
-          GITHUB_TOKEN=$(cat /github-token/token)
-          export GITHUB_TOKEN
 
           echo "=== Cloning home-cluster ==="
-          git clone "https://x-access-token:${GITHUB_TOKEN}@github.com/Tsuguya-HC/home-cluster.git" /tmp/workspace
+          # clone も gateway 経由（#1038）。**ここに入るのは呼び出し元鍵**で、GitHub の
+          # 資格情報ではない —— gateway が Authorization を実 installation token に
+          # 付け替える。`token ` の形にするのは、Envoy の apiKeyAuth が明示的に剥がすのが
+          # `Bearer ` だけで、こちらは文字列そのものが照合対象になるため。
+          git config --global "http.https://${GH_HOST}/.extraHeader" \
+            "Authorization: token ${GH_ENTERPRISE_TOKEN}"
+          git clone "https://${GH_HOST}/Tsuguya-HC/home-cluster.git" /tmp/workspace
           cd /tmp/workspace
 
           echo "[detect-all-in-cluster]"

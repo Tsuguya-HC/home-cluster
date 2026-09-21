@@ -51,6 +51,7 @@ data:
     pr-review ro -
     implement rw -
     task-executor-write rw claude-code/github-gateway-client-keys/task-executor-write
+    pluto-check rw argo/github-gateway-client-keys/pluto-check
     wf-creator rw claude-code/github-gateway-client-keys/wf-creator
     wf-improver rw claude-code/github-gateway-client-keys/wf-improver
     claude-code-generic rw claude-code/github-gateway-client-keys/claude-code-generic

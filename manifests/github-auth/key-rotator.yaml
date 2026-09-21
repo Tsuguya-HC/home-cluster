@@ -49,7 +49,7 @@ metadata:
 data:
   clients: |
     pr-review ro -
-    implement rw -
+    implement rw claude-code/github-gateway-client-keys/implement
     task-executor-write rw claude-code/github-gateway-client-keys/task-executor-write
     pluto-check rw argo/github-gateway-client-keys/pluto-check
     wf-creator rw claude-code/github-gateway-client-keys/wf-creator

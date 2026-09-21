@@ -31,8 +31,9 @@ All policies are CiliumNetworkPolicy (CNP) and CiliumClusterwideNetworkPolicy (C
 | Workflow pods (claude-code) | SeaweedFS filer (seaweedfs) | 8333 | Artifact/log storage |
 | Workflow pods (rss) | SeaweedFS filer (seaweedfs) | 8333 | Artifact/log storage |
 | Workflow pods (claude-code) | Loki gateway (monitoring) | 8080 | Log query (logcli) |
-| Workflow pods (claude-code-build) | Envoy data plane (llm-gateway) | 10080 | LLM API (via alias). **Next stage; handler-side egress not implemented** |
+| Workflow pods (claude-code-build) | Envoy data plane (llm-gateway) | 10080 | LLM API (via alias) |
 | Workflow pods (claude-code) | Envoy data plane (llm-gateway) | 10080 | LLM API (via alias); all claude-code handlers |
+| pluto-check (argo, SA pluto-fixer) | Envoy data plane (llm-gateway) | 10080 | LLM API (via alias) |
 | Envoy data plane (llm-gateway) | Envoy Gateway (envoy-gateway-system) | 18000 | xDS |
 | Envoy Gateway (envoy-gateway-system) | Agent Router (envoy-ai-gateway-system) | 1063 | extension server gRPC (xDS translation) |
 | Prometheus (monitoring) | Agent Router (envoy-ai-gateway-system) | 8080 | Metrics scrape |
@@ -91,7 +92,6 @@ All policies are CiliumNetworkPolicy (CNP) and CiliumClusterwideNetworkPolicy (C
 | Workflow pods (claude-code) | ArgoCD server (argocd) | 8080 | ArgoCD API access |
 | memory (memory) | qdrant (qdrant) | 6333 | Vector database |
 | memory (memory) | ollama (ollama) | 11434 | LLM inference |
-| Workflow pods (claude-code) | memory (memory) | 3000 | Memory API access |
 | Collector pods (trading) | SeaweedFS filer (seaweedfs) | 8333 | Market data ingestion |
 | aqua-checksum (argo) | SeaweedFS filer (seaweedfs) | 8333 | Workflow step log/artifact upload |
 | Collector pods (trading) | shared-pg (database) | 5432 | Market data ingestion |
@@ -226,7 +226,7 @@ All policies are CiliumNetworkPolicy (CNP) and CiliumClusterwideNetworkPolicy (C
 
 | Component | Ingress | Egress |
 |---|---|---|
-| **shared-pg** | grafana (monitoring), argo-workflows-controller (argo), argo-workflows-server (argo), nextcloud (nextcloud), harbor-core (harbor), harbor-exporter (harbor), harbor-jobservice (harbor), seaweedfs-filer (seaweedfs), horenso (horenso), trading (collector), trading (reporter) → 5432; ingress (pg-gateway: pg.infra.tgy.io TLS passthrough, 192.168.10.193:443 → shared-pg-rw:5432, direct-TLS clients only; reaches every shared-pg role) → 5432; self → 5432/8000 (replication); cloudnative-pg (cnpg-system), host → 8000 (probes) | kube-apiserver, self:5432/8000, *.r2.cloudflarestorage.com:443 (backup) |
+| **shared-pg** | grafana (monitoring), argo-workflows-controller (argo), argo-workflows-server (argo), nextcloud (nextcloud), harbor-core (harbor), harbor-exporter (harbor), harbor-jobservice (harbor), seaweedfs-filer (seaweedfs), horenso (horenso), collector (trading), reporter (trading) → 5432; ingress (pg-gateway: pg.infra.tgy.io TLS passthrough, 192.168.10.193:443 → shared-pg-rw:5432, direct-TLS clients only; reaches every shared-pg role) → 5432; self → 5432/8000 (replication); cloudnative-pg (cnpg-system), host → 8000 (probes) | kube-apiserver, self:5432/8000, *.r2.cloudflarestorage.com:443 (backup) |
 
 ## cert-manager (4 policies)
 

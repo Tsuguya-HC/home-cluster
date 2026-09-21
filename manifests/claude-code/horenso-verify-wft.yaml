@@ -75,11 +75,6 @@ spec:
           emptyDir: {}
         - name: pgdata
           emptyDir: {}
-        - name: github-token
-          emptyDir: {}
-        - name: github-app-secret
-          secret:
-            secretName: tf-coder-github-app-private-key
         - name: scripts
           configMap:
             name: horenso-verify-scripts
@@ -113,29 +108,15 @@ spec:
           resources:
             requests: {cpu: 50m, memory: 128Mi}
             limits: {memory: 512Mi}
-      initContainers:
-        - name: github-auth
-          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:0b658d03cee98b3118622d47d07950b5dc5dd8ef73689bab68ff28c00299f296
-          command: [github-auth.sh]
-          env:
-            - {name: GITHUB_APP_ID, value: "5009499"}
-            - {name: GITHUB_REPO, value: "{{inputs.parameters.repo}}"}
-          securityContext:
-            runAsUser: 65532
-            runAsGroup: 65532
-            runAsNonRoot: true
-            allowPrivilegeEscalation: false
-            capabilities: {drop: [ALL]}
-          volumeMounts:
-            - {name: github-app-secret, mountPath: /github-app, readOnly: true}
-            - {name: github-token, mountPath: /github-token}
-          resources:
-            requests: {cpu: 10m, memory: 32Mi}
-            limits: {memory: 64Mi}
       container:
         image: registry.infra.tgy.io/tools/claude-code:latest@sha256:a1a12fe81f5ab7ad1335bbd10d2faa2e152332d0185a93d348552e616760fc5f
         command: [sh, /scripts/verify.sh]
         env:
+          # GitHub は gateway 経由（#1038）。**この Pod は GitHub の資格情報を持たない。**
+          - {name: GH_HOST, value: gh-ro.infra.tgy.io}
+          - name: GH_ENTERPRISE_TOKEN
+            valueFrom:
+              secretKeyRef: {name: github-gateway-client-keys, key: horenso-verify}
           - {name: HOME, value: /tmp}
           - {name: REPO, value: "{{inputs.parameters.repo}}"}
           - {name: BRANCH, value: "{{inputs.parameters.branch}}"}
@@ -144,7 +125,6 @@ spec:
           capabilities: {drop: [ALL]}
         volumeMounts:
           - {name: work, mountPath: /work}
-          - {name: github-token, mountPath: /github-token, readOnly: true}
           - {name: scripts, mountPath: /scripts, readOnly: true}
         resources:
           requests: {cpu: 200m, memory: 512Mi}

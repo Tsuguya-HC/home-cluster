@@ -30,13 +30,12 @@ spec:
   volumes:
     - name: workspace
       emptyDir: {}
+    - name: signed-commit
+      configMap:
+        name: signed-commit
+        defaultMode: 0555
     - name: claude-home
       emptyDir: {}
-    - name: github-token
-      emptyDir: {}
-    - name: github-app-secret
-      secret:
-        secretName: tf-coder-github-app-private-key
   affinity:
     nodeAffinity:
       preferredDuringSchedulingIgnoredDuringExecution:
@@ -64,45 +63,31 @@ spec:
       securityContext:
         runAsUser: 65532
         runAsNonRoot: true
-      initContainers:
-        - name: github-auth
-          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:0b658d03cee98b3118622d47d07950b5dc5dd8ef73689bab68ff28c00299f296
-          command: [github-auth.sh]
-          env:
-            - name: GITHUB_APP_ID
-              value: "5009499"
-            - name: GITHUB_REPO
-              value: "{{workflow.parameters.repo}}"
-          securityContext:
-            runAsUser: 65532
-            runAsNonRoot: true
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop: [ALL]
-          volumeMounts:
-            - name: github-app-secret
-              mountPath: /github-app
-              readOnly: true
-            - name: github-token
-              mountPath: /github-token
-          resources:
-            requests:
-              cpu: 10m
-              memory: 32Mi
-            limits:
-              memory: 64Mi
       script:
         image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:0b658d03cee98b3118622d47d07950b5dc5dd8ef73689bab68ff28c00299f296
+        env:
+          # GitHub は gateway 経由（#1038）。**この Pod は GitHub の資格情報を持たない**
+          # —— installation token は gateway 側にしかなく、gateway が Authorization を
+          # 付け直す。`gh` は GH_HOST を見て REST を /api/v3、GraphQL を /api/graphql に送る。
+          - name: GH_HOST
+            value: gh-rw.infra.tgy.io
+          # gateway のクライアントキー。**GitHub の資格情報ではない。**
+          - name: GH_ENTERPRISE_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: github-gateway-client-keys
+                key: claude-code-generic
+          - name: HOME
+            value: /tmp
         command: [sh]
         source: |
-          export GITHUB_TOKEN=$(cat /github-token/token)
           REPO="{{workflow.parameters.repo}}"
           BRANCH="{{workflow.parameters.branch}}"
           OWNER=$(echo "$REPO" | cut -d'/' -f1)
-          OPEN_PRS=$(wget -qO- --header="Authorization: token ${GITHUB_TOKEN}" \
-            --header="Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${REPO}/pulls?state=open&head=${OWNER}:${BRANCH}" \
-            | jq 'length')
+          # wget で api.github.com を直接叩いていたのをやめる（#1038）。gh は GH_HOST を
+          # 見るので、同じ問い合わせが gateway 経由になる。
+          OPEN_PRS=$(gh api "repos/${REPO}/pulls?state=open&head=${OWNER}:${BRANCH}" \
+            --jq 'length')
           if [ "$OPEN_PRS" -gt 0 ]; then
             echo "has-pr"
           else
@@ -115,9 +100,6 @@ spec:
           capabilities:
             drop: [ALL]
         volumeMounts:
-          - name: github-token
-            mountPath: /github-token
-            readOnly: true
         resources:
           requests:
             cpu: 10m
@@ -132,49 +114,39 @@ spec:
         runAsGroup: 65532
         fsGroup: 65532
       initContainers:
-        - name: github-auth
-          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:0b658d03cee98b3118622d47d07950b5dc5dd8ef73689bab68ff28c00299f296
-          command: [github-auth.sh]
-          env:
-            - name: GITHUB_APP_ID
-              value: "5009499"
-            - name: GITHUB_REPO
-              value: "{{workflow.parameters.repo}}"
-          securityContext:
-            runAsUser: 65532
-            runAsNonRoot: true
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop: [ALL]
-          volumeMounts:
-            - name: github-app-secret
-              mountPath: /github-app
-              readOnly: true
-            - name: github-token
-              mountPath: /github-token
-          resources:
-            requests:
-              cpu: 10m
-              memory: 32Mi
-            limits:
-              memory: 64Mi
         - name: setup
           image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:0b658d03cee98b3118622d47d07950b5dc5dd8ef73689bab68ff28c00299f296
           command: [sh, -c]
           args:
             - |
-              export GITHUB_TOKEN=$(cat /github-token/token)
               REPO="{{workflow.parameters.repo}}"
               BRANCH="{{workflow.parameters.branch}}"
               git config --global --add safe.directory /workspace
-              git clone "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git" /workspace
+              # **ここに入るのは呼び出し元鍵**で、GitHub の資格情報ではない ——
+              # gateway が Authorization を実 installation token に付け替える。
+              # `token ` の形にするのは、Envoy の apiKeyAuth が明示的に剥がすのが
+              # `Bearer ` だけで、こちらは文字列そのものが照合対象になるため。
+              git config --global "http.https://${GH_HOST}/.extraHeader" \
+                "Authorization: token ${GH_ENTERPRISE_TOKEN}"
+              git clone "https://${GH_HOST}/${REPO}.git" /workspace
               cd /workspace
               git checkout -b "${BRANCH}"
               git config user.name "tgy-cluster-bot[bot]"
               git config user.email "tgy-cluster-bot[bot]@users.noreply.github.com"
               mkdir -p /workspace/.bin
-              cp /usr/local/bin/github-signed-commit.sh /workspace/.bin/
           env:
+            # GitHub は gateway 経由（#1038）。**この Pod は GitHub の資格情報を持たない**
+            # —— installation token は gateway 側にしかなく、gateway が Authorization を
+            # 付け直す。GH_HOST を渡すと `gh` は GHES 扱いになり、REST を /api/v3、
+            # GraphQL を /api/graphql に送る。ロールはホスト名で決まる。
+            - name: GH_HOST
+              value: gh-rw.infra.tgy.io
+            # gateway のクライアントキー。**GitHub の資格情報ではない。**
+            - name: GH_ENTERPRISE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: github-gateway-client-keys
+                  key: claude-code-generic
             - name: HOME
               value: /tmp
           securityContext:
@@ -188,9 +160,6 @@ spec:
               mountPath: /workspace
             - name: claude-home
               mountPath: /claude-home
-            - name: github-token
-              mountPath: /github-token
-              readOnly: true
           resources:
             requests:
               cpu: 10m
@@ -202,17 +171,28 @@ spec:
         command: [sh, -c]
         args:
           - |
-            export GITHUB_TOKEN=$(cat /github-token/token)
             cd /workspace
             SIGNING_INSTRUCTION="
 
             ## Git コミット（署名付き）
-            git commit + git push の代わりに、github-signed-commit.sh を使うこと。
+            git commit + git push の代わりに、signed-commit.sh を使うこと。
             1. git add でファイルをステージ
-            2. /workspace/.bin/github-signed-commit.sh -r {{workflow.parameters.repo}} -m 'コミットメッセージ' を実行
+            2. /scripts/signed-commit.sh -r {{workflow.parameters.repo}} -m 'コミットメッセージ' を実行
             これにより GitHub API 経由で署名付きコミットが作成され、ローカルも同期される。"
             claude --model review -p "${PROMPT}${SIGNING_INSTRUCTION}" --verbose --allowedTools "Bash,Read,Write,Edit,Glob,Grep,Agent"
         env:
+          # GitHub は gateway 経由（#1038）。**この Pod は GitHub の資格情報を持たない**
+          # —— installation token は gateway 側にしかなく、gateway が Authorization を
+          # 付け直す。GH_HOST を渡すと `gh` は GHES 扱いになり、REST を /api/v3、
+          # GraphQL を /api/graphql に送る。ロールはホスト名で決まる。
+          - name: GH_HOST
+            value: gh-rw.infra.tgy.io
+          # gateway のクライアントキー。**GitHub の資格情報ではない。**
+          - name: GH_ENTERPRISE_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: github-gateway-client-keys
+                key: claude-code-generic
           - name: HOME
             value: /claude-home
           - name: PROMPT
@@ -251,11 +231,11 @@ spec:
         volumeMounts:
           - name: workspace
             mountPath: /workspace
+          - name: signed-commit
+            mountPath: /scripts
+            readOnly: true
           - name: claude-home
             mountPath: /claude-home
-          - name: github-token
-            mountPath: /github-token
-            readOnly: true
         resources:
           requests:
             cpu: 100m
@@ -267,41 +247,25 @@ spec:
       securityContext:
         runAsUser: 65532
         runAsNonRoot: true
-      initContainers:
-        - name: github-auth
-          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:0b658d03cee98b3118622d47d07950b5dc5dd8ef73689bab68ff28c00299f296
-          command: [github-auth.sh]
-          env:
-            - name: GITHUB_APP_ID
-              value: "5009499"
-            - name: GITHUB_REPO
-              value: "{{workflow.parameters.repo}}"
-          securityContext:
-            runAsUser: 65532
-            runAsNonRoot: true
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop: [ALL]
-          volumeMounts:
-            - name: github-app-secret
-              mountPath: /github-app
-              readOnly: true
-            - name: github-token
-              mountPath: /github-token
-          resources:
-            requests:
-              cpu: 10m
-              memory: 32Mi
-            limits:
-              memory: 64Mi
       script:
         image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:0b658d03cee98b3118622d47d07950b5dc5dd8ef73689bab68ff28c00299f296
+        env:
+          # GitHub は gateway 経由（#1038）。**この Pod は GitHub の資格情報を持たない**
+          # —— installation token は gateway 側にしかなく、gateway が Authorization を
+          # 付け直す。`gh` は GH_HOST を見て REST を /api/v3、GraphQL を /api/graphql に送る。
+          - name: GH_HOST
+            value: gh-rw.infra.tgy.io
+          # gateway のクライアントキー。**GitHub の資格情報ではない。**
+          - name: GH_ENTERPRISE_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: github-gateway-client-keys
+                key: claude-code-generic
+          - name: HOME
+            value: /tmp
         command: [sh]
         source: |
           set -eu
-          GITHUB_TOKEN=$(cat /github-token/token)
-          export GH_TOKEN=$GITHUB_TOKEN
-          export HOME=/tmp
 
           REPO="{{workflow.parameters.repo}}"
           BRANCH="{{workflow.parameters.branch}}"
@@ -371,9 +335,6 @@ spec:
           capabilities:
             drop: [ALL]
         volumeMounts:
-          - name: github-token
-            mountPath: /github-token
-            readOnly: true
         resources:
           requests:
             cpu: 10m

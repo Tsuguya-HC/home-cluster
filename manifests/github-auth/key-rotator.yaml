@@ -54,6 +54,7 @@ data:
     wf-creator rw claude-code/github-gateway-client-keys/wf-creator
     wf-improver rw claude-code/github-gateway-client-keys/wf-improver
     claude-code-generic rw claude-code/github-gateway-client-keys/claude-code-generic
+    horenso-verify ro claude-code/github-gateway-client-keys/horenso-verify
 ---
 apiVersion: v1
 kind: ConfigMap

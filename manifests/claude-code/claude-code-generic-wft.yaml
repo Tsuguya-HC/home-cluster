@@ -30,10 +30,6 @@ spec:
   volumes:
     - name: workspace
       emptyDir: {}
-    - name: signed-commit
-      configMap:
-        name: signed-commit
-        defaultMode: 0555
     - name: claude-home
       emptyDir: {}
   affinity:
@@ -166,7 +162,7 @@ spec:
             limits:
               memory: 256Mi
       container:
-        image: registry.infra.tgy.io/tools/claude-code:latest@sha256:a1a12fe81f5ab7ad1335bbd10d2faa2e152332d0185a93d348552e616760fc5f
+        image: registry.infra.tgy.io/tools/claude-code:latest@sha256:039c07017273b014bed37709888c3e22d74532894d02c9758377d2a0d702eede
         command: [sh, -c]
         args:
           - |
@@ -174,9 +170,9 @@ spec:
             SIGNING_INSTRUCTION="
 
             ## Git コミット（署名付き）
-            git commit + git push の代わりに、signed-commit.sh を使うこと。
+            git commit + git push の代わりに、github-signed-commit.sh を使うこと。
             1. git add でファイルをステージ
-            2. /scripts/signed-commit.sh -r {{workflow.parameters.repo}} -m 'コミットメッセージ' を実行
+            2. /usr/local/bin/github-signed-commit.sh -r {{workflow.parameters.repo}} -m 'コミットメッセージ' を実行
             これにより GitHub API 経由で署名付きコミットが作成され、ローカルも同期される。"
             claude --model review -p "${PROMPT}${SIGNING_INSTRUCTION}" --verbose --allowedTools "Bash,Read,Write,Edit,Glob,Grep,Agent"
         env:
@@ -230,9 +226,6 @@ spec:
         volumeMounts:
           - name: workspace
             mountPath: /workspace
-          - name: signed-commit
-            mountPath: /scripts
-            readOnly: true
           - name: claude-home
             mountPath: /claude-home
         resources:

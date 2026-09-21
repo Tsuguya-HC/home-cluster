@@ -68,7 +68,7 @@ spec:
             secretName: aqua-checksum-github-app-private-key
       initContainers:
         - name: github-auth
-          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:0b658d03cee98b3118622d47d07950b5dc5dd8ef73689bab68ff28c00299f296
+          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:022e23ed50d5db9b1710df78b36d5137cb318ce06cb32a1a0cd87907e99515b8
           command: [github-auth.sh]
           env:
             - name: GITHUB_APP_ID
@@ -94,7 +94,7 @@ spec:
             limits:
               memory: 64Mi
       container:
-        image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:0b658d03cee98b3118622d47d07950b5dc5dd8ef73689bab68ff28c00299f296
+        image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:022e23ed50d5db9b1710df78b36d5137cb318ce06cb32a1a0cd87907e99515b8
         command: [sh, -c]
         args:
           - |

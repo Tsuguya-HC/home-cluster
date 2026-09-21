@@ -40,15 +40,34 @@ spec:
             summary: "収集が 80 時間成功していない ({{ $labels.cronjob }})"
             description: "trading/{{ $labels.cronjob }} の最後の成功から {{ $value | humanizeDuration }} 経過。平日のみの実行で週末は 72 時間空くため、これを超えるのは異常。"
 
+        # **`== 0` では一度も発火しない。** kube-state-metrics は
+        # `.status.lastSuccessfulTime` が未設定の間このメトリクスを値 0 としてではなく
+        # シリーズごと出さないので、比較する相手が存在しない。左辺から成功記録のある
+        # ものを引くと、スケジュールはされたが成功が無いものだけが残る。
+        #
+        # `absent()` もここでは使えない。あれはセレクタ全体が空かどうかしか見ないので、
+        # 複数ある CronJob の 1 本だけ成功記録が無い状態を拾えない
+        # （2026-09-21、陽性対照を作って実測）。
+        #
+        # 左辺に `kube_cronjob_info` は使わない。CronJob オブジェクトが作られた瞬間
+        # から該当してしまい、`for: 2h` が日次・週次・月次いずれの実行間隔より短いため、
+        # 新規追加した CronJob が初回実行のチャンスを迎える前に必ず発火する。
+        # `kube_cronjob_status_last_schedule_time` は CronJob controller が最初の
+        # Job を実際に作った時点で初めて出るので、「まだ一度もスケジュールされていない」
+        # ものは自然に外れる（「スケジュール済みだが last_schedule_time が無い」状態は、
+        # 現時点のクラスタにはその状態の CronJob が無く実測できていない。上記の
+        # 「値0ではなくシリーズごと出さない」という、同じ kube-state-metrics で
+        # 既に実測済みの挙動からの推論）。
         - alert: TradingCollectionNeverSucceeded
           expr: |
-            max by (cronjob) (kube_cronjob_status_last_successful_time{namespace="trading"}) == 0
+            kube_cronjob_status_last_schedule_time{namespace="trading"}
+              unless on(cronjob) kube_cronjob_status_last_successful_time{namespace="trading"}
           for: 2h
           labels:
             severity: warning
           annotations:
             summary: "収集が一度も成功していない ({{ $labels.cronjob }})"
-            description: "trading/{{ $labels.cronjob }} に成功実行の記録が無い。追加直後か、初回から失敗し続けている。"
+            description: "trading/{{ $labels.cronjob }} はスケジュールされたが成功実行の記録が無い。初回から失敗し続けている。"
 
         - alert: TradingCollectionJobFailing
           expr: |

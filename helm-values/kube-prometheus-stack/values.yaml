@@ -119,9 +119,7 @@ kube-state-metrics:
   # **parent ごとのラベルに gateway と section を必ず含めること。** controller だけ
   # だと、同じコントローラが持つ parent が 2 つある HTTPRoute（同じ Gateway の別
   # listener に付く、別の Gateway に付く）で系列が同一になり、Prometheus が重複
-  # タイムスタンプとして毎回捨てる（PrometheusDuplicateTimestamps が鳴る）。
-  # 2026-09-21、parentRef に sectionName を足した HTTPRoute で Envoy Gateway が古い
-  # status を消さずに残し、これで 4 系列が重複した（#1042）。
+  # タイムスタンプとして毎回捨てる（#1057）。
   customResourceState:
     enabled: true
     config:

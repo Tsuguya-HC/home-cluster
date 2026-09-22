@@ -173,10 +173,7 @@ spec:
               -d "$PAYLOAD" \
               "$HORENSO/tasks/$TASK_ID" || true
         env:
-          # GitHub は gateway 経由（#1038）。**この Pod は GitHub の資格情報を持たない** ——
-          # installation token は gateway 側にしかなく、gateway が Authorization を
-          # 付け直す。GH_HOST を渡すと `gh` は GHES 扱いになり、REST を /api/v3、
-          # GraphQL を /api/graphql に送る。ロールはホスト名で決まる。
+          # GitHub は gateway 経由（#1038）。この Pod は GitHub の資格情報を持たない。
           - name: GH_HOST
             value: gh-rw.infra.tgy.io
           # gateway のクライアントキー。**GitHub の資格情報ではない。** この鍵が示すのは

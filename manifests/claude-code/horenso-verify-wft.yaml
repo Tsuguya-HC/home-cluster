@@ -7,6 +7,20 @@
 # 検証内容は #76（result が 3800 バイトで切り詰められ UTF-8 が壊れる）の型に合わせてある。
 # 読み取り系が 200 を返すこと、workflow が Succeeded になることは、
 # あのバグを 7 週間見逃した理由そのものだった。
+#
+# Argo の executor は自分の結果を workflowtaskresults に書く。これが無いと
+# コンテナが何をしたかに関わらず exit 64 で落ちる。ClusterRole argo-workflows-edit は
+# workflow の create/delete まで含んで過大なので、executor が要る最小だけを与える。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: agent-executor
+  namespace: claude-code
+rules:
+  - apiGroups: [argoproj.io]
+    resources: [workflowtaskresults]
+    verbs: [create, patch]
+---
 # 検証実行専用の ServiceAccount。クラスタ上の何も読まない。
 # 必要なのは argoexec が自分の結果を報告する権限だけで、GitHub の資格情報は
 # volume 経由で渡るので RBAC は要らない。

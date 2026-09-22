@@ -15,9 +15,7 @@
 #
 # **判定を読み直して人間に通知する部品はここに置かない。** 通知は Pod の中の仕事ではなく、
 # framework が終端で出すもの（Warning Event / Ready=False / metric、design.md §5 / §9）から
-# 引くのが正。Step 0 の cnp-check は通知サイドカーが判定を自前でやり直しており、
-# taskflow-cnp-check.yaml には今もそれが残っている — terminals を宣言して Event / 条件 /
-# metric に寄せれば落とせる（taskflow #64 のフォロー）。pr-review はサイドカーを持たない。
+# 引くのが正。pr-review はサイドカーを持たない。
 # parts リポの版。全 handler が同じ SHA を読む（役割ごとに版を割らない）。branch は Renovate が
 # 追う先、sha が handler に渡る値（`parts` はブランチ名を受け付けない）。bump は Renovate の
 # customManager（renovate.jsonc の git-refs）。
@@ -43,7 +41,7 @@ data:
 # （「根拠は taskflow-common.yaml 参照」）だけにして、コピーを増やさないこと。
 #
 # **ここに無関係なキーを足さない。** envFrom は ConfigMap の全キーを無差別に注入するので、
-# 追加したキーは確認なしに 15 handler 全部へ伝播する。別の共通 env が要るときは目的別に
+# 追加したキーは確認なしに全 handler へ伝播する。別の共通 env が要るときは目的別に
 # 別 ConfigMap を切ること。
 apiVersion: v1
 kind: ConfigMap

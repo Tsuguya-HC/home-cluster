@@ -115,6 +115,13 @@ kube-state-metrics:
   #
   # conditions は配列なので 1 メトリクスで type ラベルを回すことはできない。
   # 見たい条件ごとにメトリクスを分ける。
+  #
+  # **parent ごとのラベルに gateway と section を必ず含めること。** controller だけ
+  # だと、同じコントローラが持つ parent が 2 つある HTTPRoute（同じ Gateway の別
+  # listener に付く、別の Gateway に付く）で系列が同一になり、Prometheus が重複
+  # タイムスタンプとして毎回捨てる（PrometheusDuplicateTimestamps が鳴る）。
+  # 2026-09-21、parentRef に sectionName を足した HTTPRoute で Envoy Gateway が古い
+  # status を消さずに残し、これで 4 系列が重複した（#1042）。
   customResourceState:
     enabled: true
     config:
@@ -154,6 +161,8 @@ kube-state-metrics:
                     path: [status, parents]
                     labelsFromPath:
                       controller: [controllerName]
+                      gateway: [parentRef, name]
+                      section: [parentRef, sectionName]
                     valueFrom: [conditions, "[type=Accepted]", status]
               - name: resolvedrefs
                 help: "HTTPRoute ResolvedRefs condition, per gateway controller"
@@ -163,6 +172,8 @@ kube-state-metrics:
                     path: [status, parents]
                     labelsFromPath:
                       controller: [controllerName]
+                      gateway: [parentRef, name]
+                      section: [parentRef, sectionName]
                     valueFrom: [conditions, "[type=ResolvedRefs]", status]
 
 prometheus-node-exporter:

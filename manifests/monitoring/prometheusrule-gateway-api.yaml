@@ -30,8 +30,7 @@ spec:
         # accepted は parents ごと（= Gateway コントローラごと）に出るので、
         # Cilium 以外のコントローラが付けた status もこの式で見える
         # （経緯は docs/known-issues.md の #952）。parent が複数あって
-        # 一方だけ Accepted のケースは、引き算の性質上ここでは鳴らない
-        # （現状そのような HTTPRoute は無い）。
+        # 一方だけ Accepted のケースは、引き算の性質上ここでは鳴らない。
         - alert: HTTPRouteNotAccepted
           expr: |
             count by (namespace, httproute) (

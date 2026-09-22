@@ -30,6 +30,8 @@ data:
     wf-improver rw claude-code/github-gateway-client-keys/wf-improver
     claude-code-generic rw claude-code/github-gateway-client-keys/claude-code-generic
     horenso-verify ro claude-code/github-gateway-client-keys/horenso-verify
+    taskflow-implement rw claude-code-build/github-gateway-client-keys/taskflow-implement
+    taskflow-implement-parts ro claude-code-build/github-gateway-client-keys/taskflow-implement-parts
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -153,14 +155,24 @@ data:
       echo "wrote gateway secret: $(basename "$d")"
     done
 
+    # gw ループと違い、ここは 1 namespace の失敗で他を止めない。グロブ順は
+    # ソートされる（`-` < `.`）ので、新しい namespace の書き込み Role がまだ
+    # 効いていない間に走ると、それより後ろの移行済み consumer まで巻き込んで
+    # 鍵更新が止まってしまう。
+    fail=0
     for d in "$WORK"/consumer/*; do
       [ -d "$d" ] || continue
       b=$(basename "$d")
-      apply_dir "${b%%.*}" "${b#*.}" "$d"
-      echo "wrote consumer secret: ${b%%.*}/${b#*.}"
+      if apply_dir "${b%%.*}" "${b#*.}" "$d"; then
+        echo "wrote consumer secret: ${b%%.*}/${b#*.}"
+      else
+        echo "failed to write consumer secret: ${b%%.*}/${b#*.}" >&2
+        fail=1
+      fi
     done
 
     rm -rf "$WORK"
+    [ "$fail" -eq 0 ] || exit 1
 ---
 apiVersion: batch/v1
 kind: CronJob
@@ -180,7 +192,11 @@ spec:
   failedJobsHistoryLimit: 3
   jobTemplate:
     spec:
-      backoffLimit: 2
+      # rotate.sh は毎回全 client の鍵を新規生成する。リトライすると 1 consumer の
+      # 失敗のたびに全員分が再ローテーションされ、「2 周期有効」の猶予が数分に縮む
+      # （in-flight の handler が握る鍵が gateway から消えて 401）。リトライせず
+      # 翌日の実行に委ねる。消費側に届かなかった鍵も gateway の前回値として 1 周期は有効。
+      backoffLimit: 0
       activeDeadlineSeconds: 300
       template:
         metadata:

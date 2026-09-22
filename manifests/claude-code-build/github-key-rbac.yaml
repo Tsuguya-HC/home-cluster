@@ -1,0 +1,33 @@
+# 鍵生成器が、この namespace へ配る分だけを書けるようにする（#973）。
+# Role はこちら側に、SA はあちら側にある。
+#
+# **clients 表に consumer 行を足したら、ここの resourceNames にも足すこと。**
+# 足し忘れると生成器が 403 で落ちる（黙って配られないのではなく落ちるので気づける）。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: github-gateway-key-rotator
+  namespace: claude-code-build
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [create]
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames:
+      - github-gateway-client-keys
+    verbs: [get, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: github-gateway-key-rotator
+  namespace: claude-code-build
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: github-gateway-key-rotator
+subjects:
+  - kind: ServiceAccount
+    name: github-gateway-key-rotator
+    namespace: github-auth

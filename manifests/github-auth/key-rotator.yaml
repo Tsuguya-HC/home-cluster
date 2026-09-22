@@ -1,46 +1,20 @@
 # GitHub の REST / GraphQL / git を gateway 経由で呼ぶ側のクライアントキーを、
 # クラスタ内で生成・ローテーションする（#973）。
 #
-# **なぜ 1Password を出るか**: この鍵はクラスタの外で使えない —— gateway に届く Pod
-# からしか通らないので、外部資格情報のように保管庫へ置く必然性が無い。置いたままだと
-# handler を 1 本足すたびに人手で 1Password のフィールドを作ることになる。
-#
-# **対象は #1038 で新しく生える鍵だけ。** MCP のクライアントキー
-# （github-mcp-*-client-keys）と LLM 階層の鍵は 1Password のまま動かさない ——
-# あちらの Secret は ExternalSecret が `creationPolicy: Owner` で所有しており
-# （`blockOwnerDeletion: true` の ownerReference を張っていることを実測）、
-# ExternalSecret を消すと Secret ごと GC される。**その削除を持つ Application
-# （secrets）と、作り直す hook を持つ Application（github-auth）は別で、
-# ArgoCD に両者を跨ぐ順序保証は無い。** 参照先を失った SecurityPolicy は 500 直返しに
-# なるので、所有権の移管は #973 で別途やる。それまでこの Gateway の SecurityPolicy は
-# 1Password 由来の Secret と生成器由来の Secret を両方参照する。
-#
-# **github-token-rotator とは別の CronJob。** あちらは installation token（寿命 1 時間）
-# を 30 分ごとに上書きするだけで状態を持たない。こちらは日次で、前回値を一世代だけ
-# 残す。周期も関心も違うので混ぜない。
+# **MCP のクライアントキーをここへ移さないこと**（移管は #973）。あちらの Secret は
+# ExternalSecret が所有しており、ExternalSecret を消すと Secret ごと消える。
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: github-gateway-key-rotator
   namespace: github-auth
 ---
-# **鍵の一覧はここが正。** handler を足すときに触るのはこのファイルだけで、
-# 1Password も gateway のマニフェストも触らない。
-#
 # 書式: `<client> <role> <consumer>`
-#   client   … そのまま Secret のキー名になり、gateway のアクセスログに
-#              `github.client` として出る。**値が重複すると SecurityPolicy 全体が
-#              翻訳エラーで 500 直返し**になるが、値は毎回乱数なので衝突しない。
-#              ID の重複は先勝ちで黙って無視されるので、名前は重複させないこと
-#   role     … ro / rw。gateway 側のどちらの Secret に入るかを決める
+#   client   … Secret のキー名になる。**重複させないこと**（片方が黙って無視される）
+#   role     … ro / rw
 #   consumer … `<ns>/<secret>/<key>`、まだ配らないなら `-`
 #
 # **consumer を書く行を足したら、その namespace への書き込み Role も足すこと。**
-# 足し忘れると生成器が 403 で落ちる（黙って配られないのではなく落ちるので気づける）。
-#
-# gateway 側の Secret には前回値が `<client>-prev` として同居する。これも有効な
-# 資格情報なので、アクセスログの `github.client` に `-prev` が出ている間は、
-# まだ旧鍵で来ている呼び出し元が残っているということ。
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -65,24 +39,15 @@ metadata:
 data:
   rotate.sh: |
     #!/bin/sh
-    # 二重鍵の重なりは「gateway 側が今回値と前回値を同時に持つ」ことで作る。
-    # 1 回の run で 新値生成 → gateway 側に新旧 → 消費側に新値 の順に書く。
-    # 前回値は次の run で自然に落ちる（毎回 {新, 前} だけを書くため）。
+    # gateway 側は今回値と前回値を同時に持つ。前回値は次の run で落ちる。
     #
-    # **順序が要件。** 消費側を先に書くと、その瞬間に gateway がまだ知らない鍵を
-    # 持つ Pod が生まれて 401 になる。gateway を先に書けば、その間に起動した Pod が
-    # 持つ旧鍵は前回値として有効なままなので窓が無い。
-    #
-    # **gateway 側と消費側で値の形が違う。** gateway は `gh` が送る
-    # `Authorization: token <値>` と照合するので前置込みで持ち、消費側は `gh` が
-    # 自分で前置するので生の値を持つ。
+    # **gateway を先、消費側を後に書くこと。** 逆だと gateway がまだ知らない鍵を
+    # 持つ Pod が生まれて 401 になる。
     set -eu
 
     WORK=/tmp/keys
 
-    # 値を argv に載せない。Tetragon が process_exec を process.arguments 込みで
-    # Loki へ export しており、この namespace も exportDenyList から外れていないので、
-    # argv に載せると Grafana 読者全員に見える。ファイル経由で渡す。
+    # **値を argv に載せないこと。** argv はプロセス監視のログに残る。ファイル経由で渡す。
     gen() {
       head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n'
     }
@@ -135,13 +100,9 @@ data:
       name=$(secret_for "$role")
       old=$(cur "$name" "$client")
 
-      # bootstrap は「鍵が無ければ作る」だけ。既にあるものは値を据え置く。
-      # ここで回してしまうと、sync が頻繁な日に in-flight の handler が持つ鍵が
-      # 1 回の run を待たずに前回値へ落ち、さらに次で消えて 401 になる。
-      #
-      # **据え置くのは今回値だけでは足りない。** apply_dir はステージしたファイルから
-      # Secret 全体を組み直すので、前回値をステージし直さないと `<client>-prev` が
-      # 消える —— 直前に回したばかりの重なりを、sync 1 回で潰すことになる。
+      # bootstrap は鍵が無いときだけ作り、既にあるものは今回値も前回値も据え置く。
+      # **前回値も必ずステージし直すこと** —— apply_dir は Secret 全体を組み直すので、
+      # 落とすと重なりが消えて in-flight の handler が 401 になる。
       if [ "${MODE:-rotate}" = bootstrap ] && [ -n "$old" ]; then
         raw=${old#token }
         prev=$(cur "$name" "$client-prev")
@@ -152,11 +113,8 @@ data:
         rotated=$old
       fi
 
-      # **2 つのエンコードを置く。** Envoy の apiKeyAuth が明示的に剥がすのは
-      # `Bearer ` だけなので、`gh` が送る `Authorization: token <値>` は文字列
-      # そのものが照合対象になり、curl が送る `Bearer <値>` は剥がされた生の値が
-      # 照合対象になる。同じ呼び出し元が両方の作法で来るので両方を有効にする。
-      # apiKeyAuth は Secret の全キーを有効な資格情報として扱うので、これで足りる。
+      # **gateway 側には 2 つの形を置くこと**（`token <値>` と生の値）。呼ぶ側は
+      # `Authorization: token <値>` と `Authorization: Bearer <値>` の両方で来る。
       mkdir -p "$WORK/gw/$name"
       printf 'token %s' "$raw" > "$WORK/gw/$name/$client"
       printf '%s' "$raw" > "$WORK/gw/$name/$client-bearer"
@@ -170,11 +128,8 @@ data:
         c_rest=${consumer#*/}
         c_secret=${c_rest%%/*}
         c_key=${c_rest#*/}
-        # 3 つとも空でないことを見る。**空の名前空間を見逃さないこと** ——
-        # 先頭が `/` の consumer は $c_ns が空になり、ステージ先が先頭 `.` の
-        # ディレクトリになる。下の apply ループのグロブは先頭 `.` に一致しないので、
-        # ファイルは書かれるのに apply されず、ログにも出ない。この表の
-        # 書き違えは落ちて気づけることが前提なので、ここだけ黙って通してはいけない。
+        # **3 つとも空でないことを見ること。** 名前空間が空だとステージ先が先頭 `.` の
+        # ディレクトリになり、下のグロブが拾わず黙って配られない。
         if [ -z "$c_ns" ] || [ -z "$c_secret" ] || [ -z "$c_key" ] ||
            [ "$c_ns" = "$consumer" ] || [ "$c_secret" = "$c_rest" ]; then
           echo "malformed consumer for ${client}: ${consumer}" >&2
@@ -213,8 +168,7 @@ metadata:
   name: github-gateway-key-rotator
   namespace: github-auth
 spec:
-  # 日次。前回値を一世代だけ残すので、鍵 1 本の有効期間は約 48 時間になる。
-  # handler は短命な Job なので、この重なり幅で in-flight を取りこぼさない。
+  # 鍵 1 本は 2 周期有効（前回値を一世代残すため）。**handler の実行時間より長く保つこと。**
   schedule: "0 17 * * *"
   # 既定（未設定）だと、コントローラが 100 回連続で開始を取りこぼした時点で
   # スケジューリング自体を諦める。期限を書くと取りこぼしはその期限内だけ拾われる。
@@ -289,9 +243,7 @@ spec:
     matchLabels:
       app.kubernetes.io/name: github-gateway-key-rotator
   egress:
-    # 鍵の生成は /dev/urandom で完結する。**外部へは一切出ない** ——
-    # installation token を取りに行く github-token-rotator と違い、
-    # この Pod は apiserver 以外に用が無い。
+    # 鍵の生成は /dev/urandom で完結する。apiserver 以外に用が無い。
     - toEntities:
         - kube-apiserver
       toPorts:
@@ -299,17 +251,13 @@ spec:
             - port: "6443"
               protocol: TCP
 ---
-# **ブートストラップ。** この生成器が持つ Secret はまだ存在しないので、CronJob の
-# 初回実行を待つと、それまで参照先の無い SecurityPolicy が翻訳エラーで
-# **500 直返し**になる。sync の直後に発行して、その窓を閉じる。
+# ブートストラップ。CronJob の初回を待たずに鍵を発行する（無いと SecurityPolicy が
+# 参照先を失って 500 になる）。
 #
-# **MODE=bootstrap は回さない。** 既にある鍵は値を据え置き、無いものだけ発行する。
-# hook は sync のたびに走るので、ここで回すと sync が続いた日に in-flight の
-# handler が持つ鍵が寿命を待たずに消える。回すのは CronJob の仕事。
+# **MODE=bootstrap のまま使うこと。** hook は sync のたびに走るので、ここで回すと
+# in-flight の handler が持つ鍵が寿命を待たずに消える。
 #
-# Pod spec が CronJob と重複しているのは、「CronJob を今すぐ 1 回走らせる」プリミティブが
-# ArgoCD にも K8s にも無いため。スクリプトと clients 表は ConfigMap で共有しているので、
-# 二重管理になるのは実行の殻だけ。
+# Pod spec が CronJob と重複しているのは、CronJob を今すぐ 1 回走らせる手段が無いため。
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -317,9 +265,7 @@ metadata:
   namespace: github-auth
   annotations:
     argocd.argoproj.io/hook: PostSync
-    # 成功時だけ消すと、失敗した Job が同名で残って次の sync の作成を塞ぐ
-    # （Job の spec は immutable なので上書きもできない）。失敗側も消して、
-    # 次の sync でやり直せるようにする。
+    # 失敗時も消すこと。残ると同名の Job を作れず、次の sync が塞がる。
     argocd.argoproj.io/hook-delete-policy: HookSucceeded,HookFailed
 spec:
   backoffLimit: 2

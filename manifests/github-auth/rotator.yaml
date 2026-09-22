@@ -157,10 +157,8 @@ spec:
                       --from-file=credential=/tmp/credential \
                       --dry-run=client -o yaml \
                       | kubectl apply --server-side --force-conflicts -f -
-                    # git smart HTTP 用（#1038）。**同じトークンでも形式が違う** ——
-                    # GitHub の git エンドポイントは Bearer を受けず、
-                    # Basic base64(x-access-token:TOKEN) を要求する。上の Bearer は
-                    # MCP と REST / GraphQL が使う。
+                    # git smart HTTP 用（#1038）。**上の Bearer とは別の形式で持つこと**:
+                    # Basic base64(x-access-token:TOKEN)。
                     # base64 は -w0 で折り返しを止める。折り返しの \n が値に入ると、
                     # 上の改行と同じく「鍵が違う」と区別の付かない 401 になる。
                     ( umask 077; printf 'Basic %s' \

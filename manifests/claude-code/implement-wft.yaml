@@ -164,9 +164,7 @@ spec:
               # claude-code イメージには無い。専用ボリューム経由で渡す。
               # 作業ツリーの中に置くと git add -A が拾って PR に混入する
           env:
-            # GitHub は gateway 経由（#1038）。**この Pod は GitHub の資格情報を持たない** ——
-            # installation token は gateway 側にしかない。`gh` は GH_HOST を見て REST を
-            # /api/v3、GraphQL を /api/graphql に送る。
+            # GitHub は gateway 経由（#1038）。この Pod は GitHub の資格情報を持たない。
             - {name: GH_HOST, value: gh-rw.infra.tgy.io}
             # gateway のクライアントキー。**GitHub の資格情報ではない。**
             - name: GH_ENTERPRISE_TOKEN
@@ -275,9 +273,7 @@ spec:
                 | gh pr comment "$PR" --repo "$REPO" --body-file - || true
             fi
         env:
-          # GitHub は gateway 経由（#1038）。**この Pod は GitHub の資格情報を持たない** ——
-          # installation token は gateway 側にしかない。`gh` は GH_HOST を見て REST を
-          # /api/v3、GraphQL を /api/graphql に送る。
+          # GitHub は gateway 経由（#1038）。この Pod は GitHub の資格情報を持たない。
           - {name: GH_HOST, value: gh-rw.infra.tgy.io}
           # gateway のクライアントキー。**GitHub の資格情報ではない。**
           - name: GH_ENTERPRISE_TOKEN
@@ -333,9 +329,7 @@ spec:
       script:
         image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:022e23ed50d5db9b1710df78b36d5137cb318ce06cb32a1a0cd87907e99515b8
         env:
-          # GitHub は gateway 経由（#1038）。**この Pod は GitHub の資格情報を持たない** ——
-          # installation token は gateway 側にしかない。`gh` は GH_HOST を見て REST を
-          # /api/v3、GraphQL を /api/graphql に送る。
+          # GitHub は gateway 経由（#1038）。この Pod は GitHub の資格情報を持たない。
           - {name: GH_HOST, value: gh-rw.infra.tgy.io}
           # gateway のクライアントキー。**GitHub の資格情報ではない。**
           - name: GH_ENTERPRISE_TOKEN
@@ -543,9 +537,7 @@ spec:
             printf '%s' "$VERDICT" > /work/verdict.txt
             echo "verdict: $VERDICT"
         env:
-          # GitHub は gateway 経由（#1038）。**この Pod は GitHub の資格情報を持たない** ——
-          # installation token は gateway 側にしかない。`gh` は GH_HOST を見て REST を
-          # /api/v3、GraphQL を /api/graphql に送る。
+          # GitHub は gateway 経由（#1038）。この Pod は GitHub の資格情報を持たない。
           - {name: GH_HOST, value: gh-rw.infra.tgy.io}
           # gateway のクライアントキー。**GitHub の資格情報ではない。**
           - name: GH_ENTERPRISE_TOKEN
@@ -646,9 +638,7 @@ spec:
       script:
         image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:022e23ed50d5db9b1710df78b36d5137cb318ce06cb32a1a0cd87907e99515b8
         env:
-          # GitHub は gateway 経由（#1038）。**この Pod は GitHub の資格情報を持たない** ——
-          # installation token は gateway 側にしかない。`gh` は GH_HOST を見て REST を
-          # /api/v3、GraphQL を /api/graphql に送る。
+          # GitHub は gateway 経由（#1038）。この Pod は GitHub の資格情報を持たない。
           - {name: GH_HOST, value: gh-rw.infra.tgy.io}
           # gateway のクライアントキー。**GitHub の資格情報ではない。**
           - name: GH_ENTERPRISE_TOKEN
@@ -681,9 +671,7 @@ spec:
       script:
         image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:022e23ed50d5db9b1710df78b36d5137cb318ce06cb32a1a0cd87907e99515b8
         env:
-          # GitHub は gateway 経由（#1038）。**この Pod は GitHub の資格情報を持たない** ——
-          # installation token は gateway 側にしかない。`gh` は GH_HOST を見て REST を
-          # /api/v3、GraphQL を /api/graphql に送る。
+          # GitHub は gateway 経由（#1038）。この Pod は GitHub の資格情報を持たない。
           - {name: GH_HOST, value: gh-rw.infra.tgy.io}
           # gateway のクライアントキー。**GitHub の資格情報ではない。**
           - name: GH_ENTERPRISE_TOKEN

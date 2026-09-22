@@ -20,10 +20,7 @@ data:
     }
 
     export HOME=/tmp
-    # clone は gateway 経由（#1038）。**この Pod は GitHub の資格情報を持たない** ——
-    # ここに入るのは呼び出し元鍵で、gateway が Authorization を実 installation token に
-    # 付け替える。`token ` の形にするのは、Envoy の apiKeyAuth が明示的に剥がすのが
-    # `Bearer ` だけで、こちらは文字列そのものが照合対象になるため。
+    # 呼び出し元鍵を載せる。gateway が実 installation token に付け替える。
     git config --global "http.https://${GH_HOST}/.extraHeader" \
       "Authorization: token ${GH_ENTERPRISE_TOKEN}"
     git config --global --add safe.directory /work/src

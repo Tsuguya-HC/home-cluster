@@ -37,7 +37,7 @@
 # （いずれも Escalated）はここでは通知しない — manifests/monitoring/prometheusrule-taskflow.yaml が
 # taskflow_task_outcomes_total から Escalated を検知して既存の Alertmanager Discord 受け口に
 # 出すので、ここでも出すと同じ Escalated に Discord が 2 通鳴る（home-cluster #743）。
-# 完了 だけ残しているのは、日次 cron が実際に走って判定を出せたことのハートビートとしての
+# 完了 だけ残しているのは、週次 cron が実際に走って判定を出せたことのハートビートとしての
 # 価値のため。Success は PrometheusRule の対象外なので重複しない。
 #
 # 通知は終端の 報告 にだけ付ける。調査 の Success は「次のフェーズへ進む」であって人間への
@@ -170,7 +170,7 @@ spec:
   phase: 調査
   runner:
     type: Job
-  timeout: 25m
+  timeout: 45m
   maxInfraRetries: 1
   # prepare / publish はコントローラが Job 生成時に注入する（taskflow #73）。
   # 予約名 flow-workspace のマウントに subPath を書かなければ、この run（work/<runID>）が焼かれる
@@ -369,7 +369,7 @@ spec:
   phase: 報告
   runner:
     type: Job
-  timeout: 15m
+  timeout: 25m
   maxInfraRetries: 1
   workspace:
     volume: flow-workspace

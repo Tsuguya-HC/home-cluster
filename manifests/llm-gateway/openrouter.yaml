@@ -56,6 +56,10 @@ spec:
           modelNameOverride: meta/muse-spark-1.3-contributor
           weight: 1
           priority: 0
+      # 応答を受け切るまでの上限。thinking を含む 1 応答が数分かかるので短いと途中で切れ、
+      # クライアントは retry を繰り返して何も進まない。
+      timeouts:
+        request: 600s
 ---
 # OpenRouter は OpenAI 互換 API（/api/v1/chat/completions）。入力は Anthropic
 # （/anthropic/v1/messages）で受けて gateway が変換する。

@@ -42,7 +42,7 @@ Application が Unknown のまま止まる形で出る。
 
 ## Anthropic（Max の alias）
 
-- **用途**: `llm-gateway` の `review` / `investigate` alias（Max の OAuth トークンで Anthropic 直）
+- **用途**: `llm-gateway` の `review` / `investigate` / `orchestrate`（local-dev 専用）alias（Max の OAuth トークンで Anthropic 直）
 - **引く側**: Envoy データプレーン（`manifests/llm-gateway/netpol.yaml`）**だけ**。
   `claude-code` の handler も `argo` の `pluto-check` も gateway 経由で、直接は出ない。
   どれも CNP 側で直行を塞いであるので env 取り違えは drop で検出できる。ただし正しく設定して

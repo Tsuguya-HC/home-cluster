@@ -31,8 +31,8 @@ All policies are CiliumNetworkPolicy (CNP) and CiliumClusterwideNetworkPolicy (C
 | Workflow pods (claude-code) | SeaweedFS filer (seaweedfs) | 8333 | Artifact/log storage |
 | Workflow pods (rss) | SeaweedFS filer (seaweedfs) | 8333 | Artifact/log storage |
 | Workflow pods (claude-code) | Loki gateway (monitoring) | 8080 | Log query (logcli) |
-| Workflow pods (claude-code-build) | Envoy data plane (llm-gateway) | 10080 | LLM API (via alias). **Next stage; handler-side egress not implemented** |
-| Workflow pods (claude-code) | Envoy data plane (llm-gateway) | 10080 | LLM API (via alias); all claude-code handlers |
+| Workflow pods (claude-code-build) | Envoy data plane (llm-gateway) | 10080, 10443 | LLM API + GitHub (via alias) |
+| Workflow pods (claude-code) | Envoy data plane (llm-gateway) | 10080, 10443 | LLM API + GitHub (via alias); all claude-code handlers |
 | Envoy data plane (llm-gateway) | Envoy Gateway (envoy-gateway-system) | 18000 | xDS |
 | Envoy Gateway (envoy-gateway-system) | Agent Router (envoy-ai-gateway-system) | 1063 | extension server gRPC (xDS translation) |
 | Prometheus (monitoring) | Agent Router (envoy-ai-gateway-system) | 8080 | Metrics scrape |
@@ -91,7 +91,6 @@ All policies are CiliumNetworkPolicy (CNP) and CiliumClusterwideNetworkPolicy (C
 | Workflow pods (claude-code) | ArgoCD server (argocd) | 8080 | ArgoCD API access |
 | memory (memory) | qdrant (qdrant) | 6333 | Vector database |
 | memory (memory) | ollama (ollama) | 11434 | LLM inference |
-| Workflow pods (claude-code) | memory (memory) | 3000 | Memory API access |
 | Collector pods (trading) | SeaweedFS filer (seaweedfs) | 8333 | Market data ingestion |
 | aqua-checksum (argo) | SeaweedFS filer (seaweedfs) | 8333 | Workflow step log/artifact upload |
 | Collector pods (trading) | shared-pg (database) | 5432 | Market data ingestion |

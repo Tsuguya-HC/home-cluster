@@ -182,7 +182,7 @@ All policies are CiliumNetworkPolicy (CNP) and CiliumClusterwideNetworkPolicy (C
 
 | Component | Ingress | Egress |
 |---|---|---|
-| **claude-code** (claude-code=true) | (deny world) | kube-apiserver, llm-gateway (llm-gateway):10080, github.com + api.github.com + *.githubusercontent.com + index.crates.io + static.crates.io + registry.npmjs.org + discord.com + gitmcp.io :443, seaweedfs-filer (seaweedfs):8333, loki-gateway (monitoring):8080, prometheus (monitoring):9090, horenso (horenso):3000, task-dispatch-eventsource (argo):12002, argocd-server (argocd):8080 |
+| **claude-code** (claude-code=true) | (deny world) | kube-apiserver, envoy-gateway (llm-gateway):10080, 10443, github.com + api.github.com + *.githubusercontent.com + index.crates.io + static.crates.io + registry.npmjs.org + discord.com + gitmcp.io :443, seaweedfs-filer (seaweedfs):8333, loki-gateway (monitoring):8080, prometheus (monitoring):9090, horenso (horenso):3000, task-dispatch-eventsource (argo):12002, argocd-server (argocd):8080 |
 | **task-submitter** (task-submitter=true) | (deny world) | kube-apiserver, discord.com:443, seaweedfs-filer (seaweedfs):8333 |
 | **taskflow-pr-review** (taskflow-pr-review=true) | (none written = all denied) | github.com + api.github.com :443, llm-gateway (llm-gateway):10080 |
 | **taskflow-cnp-check** (taskflow-cnp-check=true) | (none written = all denied) | kube-apiserver:6443, github.com + api.github.com :443, llm-gateway (llm-gateway):10080, loki-gateway (monitoring):8080 |
@@ -194,7 +194,7 @@ All policies are CiliumNetworkPolicy (CNP) and CiliumClusterwideNetworkPolicy (C
 
 | Component | Ingress | Egress |
 |---|---|---|
-| **taskflow-implement** (taskflow-implement=true) | (none written = all denied) | llm-gateway-envoy (llm-gateway):10080, github.com + api.github.com + *.githubusercontent.com + index.crates.io + static.crates.io + registry.npmjs.org :443 |
+| **taskflow-implement** (taskflow-implement=true) | (none written = all denied) | envoy-gateway (llm-gateway):10080, 10443, *.githubusercontent.com + index.crates.io + static.crates.io + registry.npmjs.org :443 |
 
 ## image-build (2 policies)
 

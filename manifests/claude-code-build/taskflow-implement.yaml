@@ -29,7 +29,7 @@ metadata:
   namespace: claude-code-build
 automountServiceAccountToken: false
 ---
-# 出口は llm-gateway・GitHub・依存の取得先だけ。**api.anthropic.com も openrouter.ai も
+# 出口は llm-gateway・GitHub gateway・依存の取得先だけ。**api.anthropic.com も openrouter.ai も
 # 書かない** — env が効かずに外部 LLM へ直行する取り違えを、緑で通さないため。上流の選択は
 # gateway の仕事で、この Pod は alias しか知らない（#942）。ただし正しく設定されていても
 # 直行しうるため、下の DISABLE_TELEMETRY 等 3 本で止めてある
@@ -47,6 +47,10 @@ spec:
   egress:
     # 推論は llm-gateway 経由。in-cluster なので toFQDNs ではなく toEndpoints。
     # 対向の ingress は manifests/llm-gateway/netpol.yaml 側が claude-code-build を含む。
+    # 10080 は LLM（#942）、10443 は GitHub（#1038）。どちらも llm-gateway namespace の
+    # Envoy で、この 1 本が両方に当たる（manifests/claude-code/netpol.yaml と同じ形）。
+    # **github.com / api.github.com は書かない** — この Pod は GitHub の資格情報を持たず、
+    # gateway を通さない GitHub 呼び出しは設定の取り違えなので、緑で通さず drop させる。
     - toEndpoints:
         - matchLabels:
             app.kubernetes.io/managed-by: envoy-gateway
@@ -55,9 +59,9 @@ spec:
         - ports:
             - port: "10080"
               protocol: TCP
+            - port: "10443"
+              protocol: TCP
     - toFQDNs:
-        - matchName: "github.com"
-        - matchName: "api.github.com"
         - matchPattern: "*.githubusercontent.com"
         # 依存の取得。ここに無い宛先は失敗ではなくハングするので、対応する言語を
         # 足すときはここも足す（claude-md/build-sandbox.md にその前提を書いてある）
@@ -136,11 +140,8 @@ spec:
             emptyDir: {}
           - name: parts
             emptyDir: {}
+          # gateway の呼び出し元鍵をファイルで渡す先。agent 側の入口で読んで消す。
           - name: github-token
-            emptyDir: {}
-          # github-signed-commit.sh は argo-tools イメージにしか無い。作業ツリーの中に置くと
-          # git add -A が拾って PR に混入するので、専用ボリュームで渡す。
-          - name: helpers
             emptyDir: {}
           # Block スクラッチ。virtiofs を通らない唯一の経路で、FS はゲスト内にある。
           # Pod と同じ寿命（消えるときに PVC ごと消える）。QNAP が転けてもホスト kernel の
@@ -155,16 +156,18 @@ spec:
                   resources:
                     requests:
                       storage: 20Gi
-          - name: github-app
+          # 呼び出し元鍵（key-rotator が配る）。**GitHub の資格情報ではない** — gateway が
+          # 実 installation token に付け替える。見るのは下の github-key init だけ。
+          - name: github-gateway-key
             secret:
-              secretName: tf-coder-github-app-private-key
+              secretName: github-gateway-client-keys
               defaultMode: 0444
               items:
-                - key: private-key
-                  path: private-key
+                - key: taskflow-implement
+                  path: key
         initContainers:
-          # private な parts リポを引くための installation token を作る。App の鍵は
-          # この init と下の github-auth だけが見る（agent には渡さない）。
+          # private な parts リポを gateway の ro ホスト経由で引く（#1038）。鍵は ro の
+          # 呼び出し元鍵で、この init の env にだけある（agent には渡らない）。
           - name: parts
             image: registry.infra.tgy.io/tools/claude-code:latest@sha256:b9c60a7cd7918baea7d43482752833ad2c269cef2e3179c79e2307a02815cd25
             command: [parts]
@@ -177,8 +180,10 @@ spec:
                   configMapKeyRef:
                     name: parts-ref
                     key: sha
-              - name: GITHUB_APP_ID
-                value: "5009499"
+              - {name: GH_HOST, value: gh-ro.infra.tgy.io}
+              - name: GH_ENTERPRISE_TOKEN
+                valueFrom:
+                  secretKeyRef: {name: github-gateway-client-keys, key: taskflow-implement-parts}
             securityContext:
               runAsUser: 65532
               runAsNonRoot: true
@@ -188,7 +193,6 @@ spec:
             volumeMounts:
               - {name: parts, mountPath: /parts}
               - {name: tmp, mountPath: /tmp}
-              - {name: github-app, mountPath: /github-app, readOnly: true}
             resources:
               requests: {cpu: 50m, memory: 64Mi}
               # Kata では全コンテナに limits.cpu が無いと Pod レベルの cgroup quota が
@@ -199,33 +203,13 @@ spec:
               # （job.go:845）。実際に cargo のビルドは回っているので、この前提は厳密には
               # 成立していない — それでも足りているというだけ。
               limits: {cpu: 500m, memory: 256Mi}
-          # 対象リポ用の installation token。ファイルで渡し、agent 側の入口で消す。
-          - name: github-auth
+          # gateway の呼び出し元鍵をファイルに写す。env で渡すと setpriv で降りた後の
+          # claude にも継承されるので、ファイルにして agent 側の入口で読んで消す
+          # （旧 github-auth init が installation token でやっていたのと同じ形）。
+          - name: github-key
             image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:022e23ed50d5db9b1710df78b36d5137cb318ce06cb32a1a0cd87907e99515b8
             command: [sh, -c]
-            args:
-              - |
-                set -eu
-                # FLOW_INPUT が空なら既定リポ。空でないのに .repo が取れない（JSON が壊れて
-                # いる等）場合は、空指定と区別せず home-rss へ黙って流さない。
-                if [ -z "${FLOW_INPUT:-}" ]; then
-                  REPO=Tsuguya-HC/home-rss
-                else
-                  REPO=$(printf '%s' "$FLOW_INPUT" | jq -r '.repo // empty' 2>/dev/null || true)
-                  [ -n "$REPO" ] || { echo "FLOW_INPUT が JSON として読めないか .repo を持たない" >&2; exit 1; }
-                fi
-                case "$REPO" in
-                  Tsuguya-HC/*[!-A-Za-z0-9._]* | Tsuguya-HC/ | Tsuguya-HC/*/*)
-                    echo "repo の形が不正" >&2; exit 1 ;;
-                  Tsuguya-HC/?*) ;;
-                  *) echo "repo は Tsuguya-HC 配下だけ" >&2; exit 1 ;;
-                esac
-                GITHUB_REPO="$REPO" github-auth.sh
-            env:
-              - name: GITHUB_APP_ID
-                value: "5009499"
-              - name: HOME
-                value: /tmp
+            args: ["cp /github-gateway-key/key /github-token/token"]
             securityContext:
               runAsUser: 65532
               runAsNonRoot: true
@@ -233,25 +217,8 @@ spec:
               readOnlyRootFilesystem: true
               capabilities: {drop: [ALL]}
             volumeMounts:
-              - {name: github-app, mountPath: /github-app, readOnly: true}
+              - {name: github-gateway-key, mountPath: /github-gateway-key, readOnly: true}
               - {name: github-token, mountPath: /github-token}
-              - {name: tmp, mountPath: /tmp}
-            resources:
-              requests: {cpu: 10m, memory: 32Mi}
-              limits: {cpu: 100m, memory: 64Mi}
-          # github-signed-commit.sh を argo-tools から借りる。claude-code イメージには無い。
-          - name: helpers
-            image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:022e23ed50d5db9b1710df78b36d5137cb318ce06cb32a1a0cd87907e99515b8
-            command: [sh, -c]
-            args: ["cp /usr/local/bin/github-signed-commit.sh /helpers/"]
-            securityContext:
-              runAsUser: 65532
-              runAsNonRoot: true
-              allowPrivilegeEscalation: false
-              readOnlyRootFilesystem: true
-              capabilities: {drop: [ALL]}
-            volumeMounts:
-              - {name: helpers, mountPath: /helpers}
             resources:
               requests: {cpu: 10m, memory: 16Mi}
               limits: {cpu: 100m, memory: 64Mi}
@@ -282,7 +249,6 @@ spec:
               - {name: tmp, mountPath: /tmp}
               - {name: parts, mountPath: /parts, readOnly: true}
               - {name: github-token, mountPath: /github-token}
-              - {name: helpers, mountPath: /helpers, readOnly: true}
             command: [bash, -c]
             args:
               - |
@@ -344,11 +310,17 @@ spec:
                   '' | *[!0-9]*) give_up "spec.input.issue が数字ではない。実装は行っていない。" ;;
                 esac
 
-                # --- token はファイルから読んで即座に消す ---------------------------
-                # export しないので claude の環境には入らない。ファイルも消すので、
+                # --- 鍵はファイルから読んで即座に消す -------------------------------
+                # gateway の呼び出し元鍵（GitHub の資格情報ではない。gateway が実 token に
+                # 付け替える）。export しないので claude の環境には入らない。ファイルも消すので、
                 # プロンプトインジェクションでエージェントが読み出す経路を残さない。
-                GH_TOKEN=$(cat /github-token/token)
+                GH_KEY=$(cat /github-token/token)
                 rm -f /github-token/token
+                # GitHub は全部 gateway の rw ホスト経由（#1038）。gh は GH_HOST を見て
+                # REST を /api/v3、GraphQL を /api/graphql に投げ、GH_ENTERPRISE_TOKEN を
+                # `Authorization: token` で送る。どちらもコマンド単位で渡し、export しない。
+                GH_GATEWAY=gh-rw.infra.tgy.io
+                ghgw() { GH_HOST="$GH_GATEWAY" GH_ENTERPRISE_TOKEN="$GH_KEY" "$@"; }
 
                 # --- Block スクラッチ（virtiofs を通らない唯一の経路） --------------
                 # ここだけ素通しだと、失敗時に理由を書かずに即死し（set -eu 任せ）、
@@ -376,13 +348,14 @@ spec:
                 # （/workspace 直下は 0555 のままで、新しいディレクトリは作れない）。
                 for d in /workspace/*/; do chown 65533:65533 "$d" 2>/dev/null || true; done
 
-                # --- clone。token は URL にも .git/config にも書かない ----------------
+                # --- clone。鍵は URL にも .git/config にも書かない ------------------
                 # extraheader は clone/fetch のその1回のプロセスにだけ渡す（GIT_CONFIG_COUNT
                 # は export せず、コマンドの先頭に置いた単発の代入で済ませる）。images/claude-code
-                # の parts コマンドと同じ形（そちらは private な parts リポの clone に使う）。
-                AUTH_HEADER="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | openssl base64 -e -A)"
-                GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0="http.https://github.com/.extraheader" GIT_CONFIG_VALUE_0="$AUTH_HEADER" \
-                  git clone --quiet "https://github.com/${REPO}.git" /scratch/src \
+                # の parts コマンドと同じ形。`token ` の形にするのは、Envoy の apiKeyAuth が
+                # 剥がすのが `Bearer ` だけで、こちらは文字列そのものが照合対象になるため。
+                AUTH_HEADER="Authorization: token ${GH_KEY}"
+                GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0="http.https://${GH_GATEWAY}/.extraheader" GIT_CONFIG_VALUE_0="$AUTH_HEADER" \
+                  git clone --quiet "https://${GH_GATEWAY}/${REPO}.git" /scratch/src \
                   || give_up "${REPO} を clone できなかった。実装は行っていない。"
                 BASE_SHA=$(git -C /scratch/src rev-parse HEAD)
                 # dubious ownership の safe.directory はここで通す（chown 直後）。この後は
@@ -393,12 +366,11 @@ spec:
                 chown -R 65533:65533 /scratch/src
                 git config --global --add safe.directory /scratch/src
                 # エージェント（65533）は /scratch/src に書き放題なので、.git/hooks/pre-commit
-                # 経由で root（このあと GH_TOKEN 付きで署名コミットのスクリプトを叩く）を
+                # 経由で root（このあと GH_KEY 付きで署名コミットのスクリプトを叩く）を
                 # 乗っ取れる。コストゼロで塞ぐ。
                 git -C /scratch/src config core.hooksPath /dev/null
 
-                curl -sfL -H "Authorization: Bearer ${GH_TOKEN}" -H 'Accept: application/vnd.github+json' \
-                     -o /tmp/issue-raw.json "https://api.github.com/repos/${REPO}/issues/${ISSUE}" \
+                ghgw gh api "repos/${REPO}/issues/${ISSUE}" > /tmp/issue-raw.json \
                   || give_up "issue #${ISSUE} を取得できなかった。実装は行っていない。"
                 jq '{title, body}' < /tmp/issue-raw.json > /tmp/issue.json 2>/dev/null \
                   || give_up "issue #${ISSUE} の本文を読めなかった。実装は行っていない。"
@@ -677,18 +649,18 @@ spec:
                 # では前回と同じ名前になる。前回がここまで来ていたかをまず確かめる —
                 # 確かめずに ref 作成へ進むと、前回がコミットや PR まで到達していた場合に
                 # ただの 422 になり、実際に進んでいた分の状況が escalate から消える。
-                if GH_TOKEN="$GH_TOKEN" gh api "repos/${REPO}/git/refs/heads/${BRANCH}" >/dev/null 2>&1; then
+                if ghgw gh api "repos/${REPO}/git/refs/heads/${BRANCH}" >/dev/null 2>&1; then
                   give_up "ブランチ ${BRANCH} は前回の試行（infra retry）で既に作成済み。コミットや PR 作成まで進んでいたかはここからは分からない。人が repos/${REPO}/git/refs/heads/${BRANCH} と既存 PR を確認すること。"
                 fi
-                GH_TOKEN="$GH_TOKEN" gh api "repos/${REPO}/git/refs" \
+                ghgw gh api "repos/${REPO}/git/refs" \
                   -f ref="refs/heads/${BRANCH}" -f sha="$BASE_SHA" >/dev/null \
                   || give_up "ブランチ ${BRANCH} を作れなかった（直前の存在チェックでは無かった）。GitHub 側に何か残っているかは確認できていない。実装はこの Pod の Block スクラッチ（ゲスト内 ext4、Pod の GC で失われる）の中にある。回収するには Pod が消える前に同じ PVC を別の kata Pod でマウントし直す必要があり、通常は困難。"
                 # github-signed-commit.sh 自身も末尾で git fetch/reset する。clone のときと
-                # 同じ extraheader を渡す（remote に token を埋めていないので、渡さないと
+                # 同じ extraheader を渡す（remote に鍵を埋めていないので、渡さないと
                 # ここで認証エラーになり、コミットは API 経由で成功しているのに「作れなかった」
-                # と誤診する）。
-                GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0="http.https://github.com/.extraheader" GIT_CONFIG_VALUE_0="$AUTH_HEADER" \
-                  GH_TOKEN="$GH_TOKEN" /helpers/github-signed-commit.sh \
+                # と誤診する）。API 呼び出しは全部 gh api なので GH_HOST で gateway へ向く。
+                GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0="http.https://${GH_GATEWAY}/.extraheader" GIT_CONFIG_VALUE_0="$AUTH_HEADER" \
+                  ghgw /usr/local/bin/github-signed-commit.sh \
                   -r "$REPO" -b "$BRANCH" -m "Implement #${ISSUE}" \
                   || give_up "署名コミットを作れなかった。ブランチ ${BRANCH} は GitHub に作成済み（base の HEAD のまま、まだコミットは載っていない）。実装差分自体はこの Pod の Block スクラッチにしかなく、Pod が GC されると失われる。"
 
@@ -712,7 +684,7 @@ spec:
                 if [ -n "$ESCALATE_NOTE" ]; then
                   PR_BODY=$(printf '%s\n\n## エージェントが escalate に書いていたこと（テストは緑だったため PR は作成）\n\n%s\n' "$PR_BODY" "$ESCALATE_NOTE")
                 fi
-                PR_URL=$(GH_TOKEN="$GH_TOKEN" gh pr create --repo "$REPO" --head "$BRANCH" --base main --draft \
+                PR_URL=$(ghgw gh pr create --repo "$REPO" --head "$BRANCH" --base main --draft \
                   --title "Implement #${ISSUE}" \
                   --body "$PR_BODY") \
                   || give_up "PR を作れなかった。実装はブランチ ${BRANCH} として GitHub 側に push 済みで残っている。"

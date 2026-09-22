@@ -1,4 +1,4 @@
-# Max（Anthropic 直）向けの alias。issue #942 の表のうち `review` / `investigate` の 2 本と、手元用の `orchestrate`。
+# Max（Anthropic 直）向けの alias。issue #942 の表のうち `review` / `investigate` の 2 本と、手元用のモデル名ルート。
 #
 # handler ごとに alias を切るのは、`x-ai-eg-model` がそのまま帰属の単位になるため。
 # 今はどちらも同じモデル（sonnet）・同じバックエンドに解決されるが、分けておくと
@@ -75,21 +75,34 @@ spec:
       # クライアントは retry を繰り返して何も進まない。
       timeouts:
         request: 600s
-    # 手元の claude をオーケストレーターにする実験用（local-dev 専用）。判断はここ、
-    # 作業するサブエージェントは implement（OpenRouter）へ振る。handler 用の alias と
-    # 分けてあるのは、Max の枠を手元が食った分をログで切り分けるため。
+    # モデル名そのままのルート（手元の claude 用）。handler 用の alias と違い、名前が
+    # 上流のモデル ID と一致するので、何に投げているかが読めて Claude Code もモデルを認識する。
     - matches:
         - headers:
             - type: Exact
               name: x-ai-eg-model
-              value: orchestrate
+              value: claude-opus-5
             - type: RegularExpression
               name: x-llm-client
               value: "^(local-dev)$"
       modelsOwnedBy: Envoy AI Gateway
       backendRefs:
         - name: claude-max
-          modelNameOverride: claude-opus-5
+          weight: 1
+          priority: 0
+      timeouts:
+        request: 600s
+    - matches:
+        - headers:
+            - type: Exact
+              name: x-ai-eg-model
+              value: claude-sonnet-5
+            - type: RegularExpression
+              name: x-llm-client
+              value: "^(local-dev)$"
+      modelsOwnedBy: Envoy AI Gateway
+      backendRefs:
+        - name: claude-max
           weight: 1
           priority: 0
       timeouts:

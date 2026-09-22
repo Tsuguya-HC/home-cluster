@@ -46,6 +46,10 @@ spec:
           modelNameOverride: claude-sonnet-5
           weight: 1
           priority: 0
+      # 応答を受け切るまでの上限。thinking を含む 1 応答が数分かかるので短いと途中で切れ、
+      # クライアントは retry を繰り返して何も進まない。
+      timeouts:
+        request: 600s
     # 障害調査系（alert-investigate / cnp-check 等）。将来ここだけ従量課金の
     # Anthropic API キーへフォールバックする案が #942 にある。
     - matches:
@@ -67,6 +71,10 @@ spec:
           modelNameOverride: claude-sonnet-5
           weight: 1
           priority: 0
+      # 応答を受け切るまでの上限。thinking を含む 1 応答が数分かかるので短いと途中で切れ、
+      # クライアントは retry を繰り返して何も進まない。
+      timeouts:
+        request: 600s
 ---
 # Anthropic 入力 → Anthropic 出力の素通し。OpenRouter 側（OpenAI 変換）と違い、
 # 形の変換が入らない。

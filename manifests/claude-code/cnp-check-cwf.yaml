@@ -1,6 +1,6 @@
 # CNP カバレッジ点検の定期投入。
 #
-# 点検の本体は taskflow-cnp-check.yaml の TaskHandler / TaskFlow で、ここは毎日 Task を
+# 点検の本体は taskflow-cnp-check.yaml の TaskHandler / TaskFlow で、ここは毎週 Task を
 # 1 つ作るだけ（設計 §14「生成元はグラフを知らない」）。Step 0 で Argo Workflow として
 # 動かしていた本体は Task に移り、この cron は起票に縮んだ。
 #
@@ -151,9 +151,9 @@ metadata:
   namespace: claude-code
 spec:
   schedules:
-    - "0 3 * * *"
+    - "0 3 * * 0"
   timezone: Asia/Tokyo
-  # 前日の Task が残っていても起票は止めない。同時実行の上限は flow 側
+  # 前回の Task が残っていても起票は止めない。同時実行の上限は flow 側
   # （TaskFlow.spec.maxInFlight / dedupKey、taskflow #17）の仕事で、cron 1 本の
   # concurrencyPolicy では守れない（設計 §18）。ここでは起票 Workflow 同士の重複だけ防ぐ。
   concurrencyPolicy: Forbid

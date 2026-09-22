@@ -21,6 +21,9 @@ spec:
     # 対向の egress は claude-code の全 handler、claude-code-build の taskflow-implement、
     # argo の pluto-check が持つ（issue #942）。**新しい namespace から呼ぶときはここにも
     # 足すこと** — 片側だけだとエラーは出ず、接続がただ失敗する。
+    #
+    # local-dev（手元の claude CLI）は kubectl port-forward で入るのでこの CNP の対象外。
+    # 境界は pods/portforward の kube RBAC と securitypolicy.yaml の apiKeyAuth。
     - fromEndpoints:
         - matchLabels:
             io.kubernetes.pod.namespace: claude-code-build

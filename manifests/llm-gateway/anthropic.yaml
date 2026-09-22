@@ -1,4 +1,4 @@
-# Max（Anthropic 直）向けの alias。issue #942 の表のうち `review` / `investigate` の 2 本。
+# Max（Anthropic 直）向けの alias。issue #942 の表のうち `review` / `investigate` の 2 本と、手元用の `orchestrate`。
 #
 # handler ごとに alias を切るのは、`x-ai-eg-model` がそのまま帰属の単位になるため。
 # 今はどちらも同じモデル（sonnet）・同じバックエンドに解決されるが、分けておくと
@@ -73,6 +73,25 @@ spec:
           priority: 0
       # 応答を受け切るまでの上限。thinking を含む 1 応答が数分かかるので短いと途中で切れ、
       # クライアントは retry を繰り返して何も進まない。
+      timeouts:
+        request: 600s
+    # 手元の claude をオーケストレーターにする実験用（local-dev 専用）。判断はここ、
+    # 作業するサブエージェントは implement（OpenRouter）へ振る。handler 用の alias と
+    # 分けてあるのは、Max の枠を手元が食った分をログで切り分けるため。
+    - matches:
+        - headers:
+            - type: Exact
+              name: x-ai-eg-model
+              value: orchestrate
+            - type: RegularExpression
+              name: x-llm-client
+              value: "^(local-dev)$"
+      modelsOwnedBy: Envoy AI Gateway
+      backendRefs:
+        - name: claude-max
+          modelNameOverride: claude-opus-5
+          weight: 1
+          priority: 0
       timeouts:
         request: 600s
 ---

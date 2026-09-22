@@ -45,7 +45,7 @@ spec:
             # 新しい handler を足すときはここにも足す。
             - type: RegularExpression
               name: x-llm-client
-              value: "^(llm-gateway-smoke|taskflow-implement|tier-probe)$"
+              value: "^(llm-gateway-smoke|local-dev|taskflow-implement|tier-probe)$"
       # modelsOwnedBy / weight / priority は CRD の既定値。書かないと apiserver が埋めた値と
       # マニフェストが食い違い、**Application が永久に OutOfSync になる**（2026-09-17 実測）。
       # ignoreDifferences で隠さず明示するのは、upstream が既定値を変えたときに差分として

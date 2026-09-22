@@ -40,15 +40,8 @@
 # 5 分ローリング窓に入っている間だけ真になり、窓を抜けると自動的に resolve するので、
 # 同じ Task について repeatInterval（4h）まで鳴り続けることはない。
 #
-# ## cnp-check の Pod 内 notify サイドカーとの重複
-#
-# taskflow-cnp-check.yaml の `notify` サイドカーは元々 ok / escalate / ambiguous / no-verdict の
-# 4 通りすべてを Discord に出していた。escalate 系の 3 つ（＝ここでいう Escalated 終端）はこの
-# PrometheusRule と二重になるため、taskflow-cnp-check.yaml 側で撤去した（残すのは
-# 完了 = Success の 1 通だけ。design.md §9 的には成功の報告も本来不要だが、週次 cron が
-# 動いた確認という既存の価値を壊さないためあえて残す。二重になる懸念が無いのは、
-# Success はこの PrometheusRule の対象外だから）。pr-review は #743 で Pod 内通知を
-# 全廃済みなので、この rule だけが唯一の通知経路になる。
+# handler の Pod は人間に通知しない（pr-review は #743 で Pod 内通知を全廃）。
+# この rule が唯一の通知経路。
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:

@@ -115,7 +115,7 @@ spec:
   # work/<runID>/{ok,findings,escalate} と agent の subPath マウントが別物になり、判定を
   # 書く先が消えて NoAnswer → Escalated になる（2026-09-12 実測 2 回: fsGroup 有り #869 と
   # 無し #870 で同じ症状、つまり fsGroup は無関係。Kata の docs/Limitations.md、
-  # kata-containers #1728）。cnp-check / smoke-workspace と同じ形。
+  # kata-containers #1728）。smoke-workspace と同じ形。
   workspace:
     volume: flow-workspace
     mountPath: /workspace
@@ -128,7 +128,7 @@ spec:
         restartPolicy: Never
         runtimeClassName: kata
         serviceAccountName: agent-pr-reviewer
-        # TERM 後の sync（NFS 越し）に猶予を残す。taskflow-cnp-check.yaml と同じ。
+        # TERM 後の sync（NFS 越し）に猶予を残す。
         terminationGracePeriodSeconds: 60
         # runAsUser は必須。コントローラはこれと違う uid で /workspace 直下を 0555 に閉じるので、
         # エージェントは宣言ディレクトリにだけ書ける。
@@ -206,8 +206,6 @@ spec:
                 # 読んだか」が run ごとに変わり、指摘の再現ができなくなる。
                 ESCALATE=/workspace/escalate
                 # sync は Kata + NFS の workspace PVC に要る（下の agent コンテナと同じ理由）。
-                # cnp-check は runc に落としたのでこの罠を踏まない側になった
-                # （taskflow-cnp-check.yaml、sync は保険で残しているだけ）。
                 give_up() { printf '%s\n' "$1" > "$ESCALATE/report.md"; sync; exit 0; }
 
                 # repo も Task を作った側が指定できる（既定は taskflow）。org を固定して
@@ -271,11 +269,10 @@ spec:
                 # activeDeadlineSeconds の TERM は PID1 に飛ぶ。前面で claude を待っていると
                 # POSIX sh は前面コマンドの終了を待ってから trap を実行するため、猶予期間内に
                 # trap が発火しない。background + wait にして、TERM を受けたら子を落としてから
-                # flush する（taskflow-cnp-check.yaml と同じ）。
+                # flush する。
                 # `|| true` は省けない。このスクリプトは `set -e` で走り、trap の中も同じ。
                 # claude が既に終わっていると kill は 1 を返し、そこで trap が打ち切られて
-                # sync に届かず、終了コードも 143 でなく 1 になる（taskflow-cnp-check.yaml の
-                # 同じ trap は set -e が無いので裸のまま）。
+                # sync に届かず、終了コードも 143 でなく 1 になる。
                 trap 'kill -TERM $pid 2>/dev/null || true
                       i=0
                       while kill -0 $pid 2>/dev/null && [ $i -lt 10 ]; do sleep 1; i=$((i+1)); done
@@ -291,7 +288,7 @@ spec:
                 #
                 # sync は Kata + NFS の workspace PVC に要る。書き戻しが残ったまま exit すると
                 # Kata のゲストエージェントが応答を失い、Pod 内の全コンテナが 255 になる
-                # （taskflow-cnp-check.yaml の実測）。書いた本人が flush する。
+                # （smoke-workspace の実測）。書いた本人が flush する。
                 sync
             env:
               - name: HOME

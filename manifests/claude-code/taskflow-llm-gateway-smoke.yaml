@@ -194,7 +194,7 @@ spec:
                 # `|| true` は省けない。このスクリプトは `set -e` で走り、trap の中も同じなので、
                 # claude が既に終わっていると kill は 1 を返し、そこで trap が打ち切られて
                 # sync に届かない（終了コードも 143 でなく 1 になる）。
-                # taskflow-pr-review.yaml / taskflow-cnp-check.yaml に実測付きの記録がある。
+                # taskflow-pr-review.yaml に記録がある。
                 trap 'kill -TERM $pid 2>/dev/null || true
                       i=0
                       while kill -0 $pid 2>/dev/null && [ $i -lt 10 ]; do sleep 1; i=$((i+1)); done

@@ -36,7 +36,6 @@ All policies are CiliumNetworkPolicy (CNP) and CiliumClusterwideNetworkPolicy (C
 | Envoy data plane (llm-gateway) | Envoy Gateway (envoy-gateway-system) | 18000 | xDS |
 | Envoy Gateway (envoy-gateway-system) | Agent Router (envoy-ai-gateway-system) | 1063 | extension server gRPC (xDS translation) |
 | Prometheus (monitoring) | Agent Router (envoy-ai-gateway-system) | 8080 | Metrics scrape |
-| taskflow-cnp-check (claude-code) | Loki gateway (monitoring) | 8080 | Log query (cnp-check investigation) |
 | PXE sync pods (argo) | SeaweedFS filer (seaweedfs) | 8333 | Artifact/log storage |
 | Etcd backup (argo) | SeaweedFS filer (seaweedfs) | 8333 | Backup storage |
 | Kanidm backup (argo) | SeaweedFS filer (seaweedfs) | 8333 | Backup storage |
@@ -165,7 +164,7 @@ All policies are CiliumNetworkPolicy (CNP) and CiliumClusterwideNetworkPolicy (C
 | **kube-state-metrics** | prometheus → 8080 | kube-apiserver |
 | **prometheus-operator** | kube-apiserver/remote-node, prometheus → 10250 | kube-apiserver |
 | **loki** | loki-gateway, loki-canary → 3100 | kube-apiserver, seaweedfs-filer (seaweedfs):8333, self:7946 (memberlist) |
-| **loki-gateway** | grafana, alloy, loki-canary, claude-code (claude-code), taskflow-cnp-check (claude-code) → 8080 | loki:3100 |
+| **loki-gateway** | grafana, alloy, loki-canary, claude-code (claude-code) → 8080 | loki:3100 |
 | **loki-canary** | host → 3500 | loki-gateway:8080, loki:3100 |
 | **alloy** | host → 12345 | kube-apiserver, loki-gateway:8080 |
 | **tempo** | grafana, prometheus → 3200 | seaweedfs-filer (seaweedfs):8333, prometheus:9090 (metrics remote_write) |
@@ -178,15 +177,12 @@ All policies are CiliumNetworkPolicy (CNP) and CiliumClusterwideNetworkPolicy (C
 |---|---|---|
 | **talos-build** (talos-build=true) | (deny world) | kube-apiserver, ghcr.io + github.com + api.github.com + uploads.github.com + *.githubusercontent.com + dl-cdn.alpinelinux.org + discord.com :443, seaweedfs-filer (seaweedfs):8333 |
 
-## claude-code (7 policies)
+## claude-code (4 policies)
 
 | Component | Ingress | Egress |
 |---|---|---|
 | **claude-code** (claude-code=true) | (deny world) | kube-apiserver, envoy-gateway (llm-gateway):10080, 10443, github.com + api.github.com + *.githubusercontent.com + index.crates.io + static.crates.io + registry.npmjs.org + discord.com + gitmcp.io :443, seaweedfs-filer (seaweedfs):8333, loki-gateway (monitoring):8080, prometheus (monitoring):9090, horenso (horenso):3000, task-dispatch-eventsource (argo):12002, argocd-server (argocd):8080 |
-| **task-submitter** (task-submitter=true) | (deny world) | kube-apiserver, discord.com:443, seaweedfs-filer (seaweedfs):8333 |
 | **taskflow-pr-review** (taskflow-pr-review=true) | (none written = all denied) | github.com + api.github.com :443, llm-gateway (llm-gateway):10080 |
-| **taskflow-cnp-check** (taskflow-cnp-check=true) | (none written = all denied) | kube-apiserver:6443, github.com + api.github.com :443, llm-gateway (llm-gateway):10080, loki-gateway (monitoring):8080 |
-| **taskflow-cnp-report** (taskflow-cnp-report=true) | (none written = all denied) | discord.com + github.com + api.github.com :443, llm-gateway (llm-gateway):10080 |
 | **taskflow-openrouter-smoke** (taskflow-openrouter-smoke=true) | (none written = all denied) | openrouter.ai:443 |
 | **taskflow-llm-gateway-smoke** (taskflow-llm-gateway-smoke=true) | (none written = all denied) | llm-gateway (llm-gateway):10080 (the service port is 80; the CNP uses the backend port 10080) |
 

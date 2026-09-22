@@ -1,6 +1,6 @@
 # taskflow の配管だけを通すスモーク flow。LLM も Kata も通信も無し、数秒で終わる。
 #
-# コントローラやサイドカーを上げたあと、cnp-check（25 分・API 課金）を待たずに
+# コントローラやサイドカーを上げたあと、LLM を使う flow（数十分・枠を消費）を待たずに
 # 「prepare が out/ を敷く → handler が書く → publish が封じて termination log に返す →
 # コントローラが遷移する」の一周を確かめる。handler は AI 専用ではない（設計 §4）の実例でもある。
 #

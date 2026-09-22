@@ -39,7 +39,7 @@ spec:
             # 新しい handler を足すときはここにも足す。
             - type: RegularExpression
               name: x-llm-client
-              value: "^(adjudicator|alert-investigate|claude-code-agent|claude-code-generic|cnp-planner|cnp-reporter|implement|implement-verify|pluto-check|pr-review|task-executor|task-executor-write|wf-creator|wf-improver|llm-gateway-smoke)$"
+              value: "^(adjudicator|alert-investigate|claude-code-agent|claude-code-generic|implement|implement-verify|pluto-check|pr-review|task-executor|task-executor-write|wf-creator|wf-improver|llm-gateway-smoke)$"
       modelsOwnedBy: Envoy AI Gateway
       backendRefs:
         - name: claude-max
@@ -50,7 +50,7 @@ spec:
       # クライアントは retry を繰り返して何も進まない。
       timeouts:
         request: 600s
-    # 障害調査系（alert-investigate / cnp-check 等）。将来ここだけ従量課金の
+    # 障害調査系（alert-investigate 等）。将来ここだけ従量課金の
     # Anthropic API キーへフォールバックする案が #942 にある。
     - matches:
         - headers:
@@ -64,7 +64,7 @@ spec:
             # 新しい handler を足すときはここにも足す。
             - type: RegularExpression
               name: x-llm-client
-              value: "^(adjudicator|alert-investigate|claude-code-agent|claude-code-generic|cnp-planner|cnp-reporter|implement|implement-verify|pluto-check|pr-review|task-executor|task-executor-write|wf-creator|wf-improver|llm-gateway-smoke)$"
+              value: "^(adjudicator|alert-investigate|claude-code-agent|claude-code-generic|implement|implement-verify|pluto-check|pr-review|task-executor|task-executor-write|wf-creator|wf-improver|llm-gateway-smoke)$"
       modelsOwnedBy: Envoy AI Gateway
       backendRefs:
         - name: claude-max

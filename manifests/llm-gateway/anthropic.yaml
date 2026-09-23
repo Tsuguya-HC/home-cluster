@@ -2,9 +2,7 @@
 #
 # handler ごとに alias を切るのは、`x-ai-eg-model` がそのまま帰属の単位になるため。
 # 今はどちらも同じモデル（sonnet）・同じバックエンドに解決されるが、分けておくと
-# 「どの handler が Max の枠を食っているか」がログで分かれる。OpenRouter 経路と違って
-# こちらは Anthropic ネイティブの素通しなので、トークン数も取れる見込み（#954 の
-# 非互換は OpenAI 形式の usage チャンクの話）。**未実測なので、載せたら確かめること。**
+# 「どの handler が Max の枠を食っているか」がログで分かれる。
 apiVersion: aigateway.envoyproxy.io/v1beta1
 kind: AIGatewayRoute
 metadata:
@@ -108,8 +106,6 @@ spec:
       timeouts:
         request: 600s
 ---
-# Anthropic 入力 → Anthropic 出力の素通し。OpenRouter 側（OpenAI 変換）と違い、
-# 形の変換が入らない。
 apiVersion: aigateway.envoyproxy.io/v1beta1
 kind: AIServiceBackend
 metadata:

@@ -38,7 +38,7 @@ Application が Unknown のまま止まる形で出る。
 
 | Domain | Required | Notes |
 |---|---|---|
-| `openrouter.ai` | Yes | API（OpenAI 互換は `/api/v1`）。サブドメインは使わない |
+| `openrouter.ai` | Yes | API（Anthropic 互換の `/api/v1/messages`）。サブドメインは使わない |
 
 ## Anthropic（Max の alias）
 

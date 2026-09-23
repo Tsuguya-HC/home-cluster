@@ -13,14 +13,6 @@ spec:
   # これが無いと metadataKey 自体が存在せず、アクセスログの gen_ai.usage.* が空になる（#948）。
   # EnvoyProxy の telemetry.accessLog（manifests/llm-gateway/gateway.yaml）と対で機能する。
   #
-  # **ただし OpenRouter 相手ではトークン数は 0 のまま出る（2026-09-17 実測）。**
-  # extproc は OpenAI 仕様どおり「choices が空で usage を持つチャンク」でしか usage を
-  # 拾わない（internal/translator/openai_helper.go の handleChunk）。OpenRouter は
-  # **usage チャンクに choices を 1 つ入れる**仕様で（クライアントが choices[0].delta で
-  # 落ちないための意図的な逸脱、同社ドキュメントに明記）、この分岐に入らない。
-  # upstream 同士の非互換で、設定側の回避手段は無い（bodyMutation はリクエスト側なので効かない）。
-  # llmRequestCosts 自体は残す — Anthropic / Bedrock など他の上流を足したときには効くため。
-  #
   # 実測メモ: AIGatewayRoute を変えても**データプレーンの Pod は置き換わらない**。
   # filter config の Secret は同名のまま中身が更新され、extproc が 5 秒間隔で読み直す
   # （cmd/extproc/mainlib/main.go の startConfigWatcher）。反映は kubelet の volume 更新
@@ -115,8 +107,8 @@ spec:
       timeouts:
         request: 600s
 ---
-# OpenRouter は OpenAI 互換 API（/api/v1/chat/completions）。入力は Anthropic
-# （/anthropic/v1/messages）で受けて gateway が変換する。
+# Anthropic 形式の素通し（/api/v1/messages）。OpenAI 形式に戻すとアクセスログの
+# gen_ai.usage.* が 0 になる（#954）。
 apiVersion: aigateway.envoyproxy.io/v1beta1
 kind: AIServiceBackend
 metadata:
@@ -124,7 +116,7 @@ metadata:
   namespace: llm-gateway
 spec:
   schema:
-    name: OpenAI
+    name: Anthropic
     prefix: /api/v1
   backendRef:
     name: openrouter

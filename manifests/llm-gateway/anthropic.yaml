@@ -81,7 +81,7 @@ spec:
         - headers:
             - type: Exact
               name: x-ai-eg-model
-              value: claude-opus-5
+              value: claude-opus-5-5
             - type: RegularExpression
               name: x-llm-client
               value: "^(local-dev)$"

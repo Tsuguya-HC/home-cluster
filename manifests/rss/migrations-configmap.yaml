@@ -41,3 +41,9 @@ data:
     DROP TABLE IF EXISTS read_status;
     DROP TABLE IF EXISTS articles;
     DROP TABLE IF EXISTS feeds;
+  20260922000000_add_article_image_url.sql: |
+    -- migrate:up
+    ALTER TABLE articles ADD COLUMN image_url TEXT;
+
+    -- migrate:down
+    ALTER TABLE articles DROP COLUMN image_url;

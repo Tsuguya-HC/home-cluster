@@ -155,4 +155,4 @@ spec:
         完了: ok
   terminals:
     完了: Success
-  reworkBudget: 0
+  maxRunsPerPhase: 1

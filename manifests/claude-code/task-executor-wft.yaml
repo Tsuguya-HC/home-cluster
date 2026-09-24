@@ -42,7 +42,7 @@ spec:
         runAsGroup: 65532
         fsGroup: 65532
       container:
-        image: registry.infra.tgy.io/tools/claude-code:latest@sha256:b9c60a7cd7918baea7d43482752833ad2c269cef2e3179c79e2307a02815cd25
+        image: registry.infra.tgy.io/tools/claude-code:latest@sha256:f9975ee734aff717fc5ed3422c48bb19cf69b9ae783a85a7ebe361a1cc802095
         command: [sh, -c]
         args:
           - |

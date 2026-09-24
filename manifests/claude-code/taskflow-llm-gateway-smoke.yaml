@@ -295,4 +295,4 @@ spec:
         Escalated: escalate
   terminals:
     完了: Success
-  reworkBudget: 0
+  maxRunsPerPhase: 1

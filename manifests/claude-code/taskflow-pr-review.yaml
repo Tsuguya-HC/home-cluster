@@ -389,4 +389,4 @@ spec:
     要修正: Failure
   # 差し戻しはまだ無い。自己ループ（レビュー → レビュー: more）は 1 周が役に立つと
   # 確かめてから足す（taskflow #39）。
-  reworkBudget: 0
+  maxRunsPerPhase: 1

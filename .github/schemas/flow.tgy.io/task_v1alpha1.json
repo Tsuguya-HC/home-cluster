@@ -188,11 +188,6 @@
      "description": "Phase is a status name. It is a free string chosen by whoever writes the\nflow: this framework does not know what the work is, so it has no business\nnaming its stages. \"調査\" and \"Planning\" are equally valid.\n\nThree names are the framework's rather than the author's. Two of them are\nanswers it decides — see ReservedPhases — and the third is PhaseFinally,\nwhich is not an answer at all but the name a cleanup run is recorded under.",
      "type": "string"
     },
-    "reworkBudget": {
-     "description": "ReworkBudget remaining. Counted down by the controller as reworks are\ntaken, never declared by the flow.",
-     "format": "int32",
-     "type": "integer"
-    },
     "runID": {
      "description": "RunID of the current or last run. It counts the runs this task has\ndecided its way through, not the attempts it took to start them: an\ninfrastructure retry leaves it alone, so the numbers on the results/\nshelf run without gaps (ADR-0004).",
      "format": "int32",

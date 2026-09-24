@@ -146,7 +146,7 @@ spec:
         fsGroup: 65532
       initContainers:
         - name: setup
-          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:022e23ed50d5db9b1710df78b36d5137cb318ce06cb32a1a0cd87907e99515b8
+          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:9e1dd7b0bf77791b3b4769b46fe93a74da5c350fe0d25d670791e5c84f69e712
           command: [sh, -c]
           args:
             - |
@@ -327,7 +327,7 @@ spec:
         labels:
           agent.tgy.io/phase: checks
       script:
-        image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:022e23ed50d5db9b1710df78b36d5137cb318ce06cb32a1a0cd87907e99515b8
+        image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:9e1dd7b0bf77791b3b4769b46fe93a74da5c350fe0d25d670791e5c84f69e712
         env:
           # GitHub は gateway 経由（#1038）。この Pod は GitHub の資格情報を持たない。
           - {name: GH_HOST, value: gh-rw.infra.tgy.io}
@@ -461,7 +461,7 @@ spec:
         fsGroup: 65532
       initContainers:
         - name: prepare
-          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:022e23ed50d5db9b1710df78b36d5137cb318ce06cb32a1a0cd87907e99515b8
+          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:9e1dd7b0bf77791b3b4769b46fe93a74da5c350fe0d25d670791e5c84f69e712
           command: [sh, -c]
           args:
             - |
@@ -595,7 +595,7 @@ spec:
           - {name: check}
           - {name: review}
       script:
-        image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:022e23ed50d5db9b1710df78b36d5137cb318ce06cb32a1a0cd87907e99515b8
+        image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:9e1dd7b0bf77791b3b4769b46fe93a74da5c350fe0d25d670791e5c84f69e712
         command: [sh]
         source: |
           set -u
@@ -636,7 +636,7 @@ spec:
     # PR の状態は判定の「結果」であって判定そのものではない。
     - name: ready-for-review
       script:
-        image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:022e23ed50d5db9b1710df78b36d5137cb318ce06cb32a1a0cd87907e99515b8
+        image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:9e1dd7b0bf77791b3b4769b46fe93a74da5c350fe0d25d670791e5c84f69e712
         env:
           # GitHub は gateway 経由（#1038）。この Pod は GitHub の資格情報を持たない。
           - {name: GH_HOST, value: gh-rw.infra.tgy.io}
@@ -669,7 +669,7 @@ spec:
       inputs:
         parameters: [{name: verdict}]
       script:
-        image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:022e23ed50d5db9b1710df78b36d5137cb318ce06cb32a1a0cd87907e99515b8
+        image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:9e1dd7b0bf77791b3b4769b46fe93a74da5c350fe0d25d670791e5c84f69e712
         env:
           # GitHub は gateway 経由（#1038）。この Pod は GitHub の資格情報を持たない。
           - {name: GH_HOST, value: gh-rw.infra.tgy.io}

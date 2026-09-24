@@ -65,7 +65,7 @@ spec:
             secretName: github-app-private-key
       initContainers:
         - name: github-auth
-          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:022e23ed50d5db9b1710df78b36d5137cb318ce06cb32a1a0cd87907e99515b8
+          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:9e1dd7b0bf77791b3b4769b46fe93a74da5c350fe0d25d670791e5c84f69e712
           command: [github-auth.sh]
           env:
             - name: GITHUB_APP_ID
@@ -200,7 +200,7 @@ spec:
             secretName: github-app-private-key
       initContainers:
         - name: github-auth
-          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:022e23ed50d5db9b1710df78b36d5137cb318ce06cb32a1a0cd87907e99515b8
+          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:9e1dd7b0bf77791b3b4769b46fe93a74da5c350fe0d25d670791e5c84f69e712
           command: [github-auth.sh]
           env:
             - name: GITHUB_APP_ID
@@ -416,7 +416,7 @@ spec:
             limits:
               memory: 64Mi
       container:
-        image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:022e23ed50d5db9b1710df78b36d5137cb318ce06cb32a1a0cd87907e99515b8
+        image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:9e1dd7b0bf77791b3b4769b46fe93a74da5c350fe0d25d670791e5c84f69e712
         command: [sh, -c]
         args:
           - |

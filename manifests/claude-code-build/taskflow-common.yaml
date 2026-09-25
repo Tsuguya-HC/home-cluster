@@ -1,4 +1,4 @@
-# taskflow-implement 用の parts-ref。同じ ConfigMap を manifests/claude-code/taskflow-common.yaml
+# claude-code-build の handler が参照する parts-ref。同じ ConfigMap を manifests/claude-code/taskflow-common.yaml
 # にも置いてあるのは、configMapKeyRef が namespace ローカルだから — claude-code-build は
 # privileged PSA のために別 namespace に分けてある（manifests/claude-code-build/namespace.yaml）。
 # 経緯とこの ConfigMap の設計判断は manifests/claude-code/taskflow-common.yaml のコメントを参照。
@@ -11,4 +11,4 @@ metadata:
 data:
   # renovate: datasource=git-refs depName=https://github.com/Tsuguya-HC/parts
   branch: main
-  sha: 4660ff531408c3dc1991f6234836adbbbdda15df
+  sha: aedd108d87eb42d2f7cd2a28edd3ae4a7888f7ca

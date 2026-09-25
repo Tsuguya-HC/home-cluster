@@ -1,6 +1,9 @@
 # issue を受けて実装し、draft PR を出す flow。実装は OpenRouter の安いモデル、レビューは
 # 別 flow の Claude、という分担の実装側（docs/kata-storage.md / manifests/claude-code/）。
 #
+# 入口は 調査（taskflow-investigate.yaml、#939）。症状がコードのどこで起きているかを先に
+# 確かめ、実装 handler はその報告を results の棚から読む。
+#
 # TDD を約束ではなく事実で進める。claude を 2 回呼び、その間でスクリプトがテストを走らせる:
 #
 #   1. baseline  変更前に全部通ることを確認     … 通らなければ前提が壊れている → escalate
@@ -246,6 +249,10 @@ spec:
                 devicePath: /dev/scratch
             volumeMounts:
               - {name: flow-workspace, mountPath: /workspace}
+              # 過去の全 run の棚（taskflow ADR-0003 / ADR-0013 決定6）。調査の報告を読む。
+              # inputs ビューに並ぶのは直前の答えだけなので、実装に入る辺が 調査 以外にも
+              # 増えると inputs では調査の報告に届かなくなる。だから棚から読む。
+              - {name: flow-workspace, mountPath: /results, subPath: results, readOnly: true}
               - {name: tmp, mountPath: /tmp}
               - {name: parts, mountPath: /parts, readOnly: true}
               - {name: github-token, mountPath: /github-token}
@@ -375,6 +382,18 @@ spec:
                 jq '{title, body}' < /tmp/issue-raw.json > /tmp/issue.json 2>/dev/null \
                   || give_up "issue #${ISSUE} の本文を読めなかった。実装は行っていない。"
                 chmod 0644 /tmp/issue.json
+
+                # 調査の報告。located/ は調査 handler の語彙で、この flow では調査が start なので
+                # 必ず棚にある。無いのは flow の組み替えを誤ったときで、黙って issue の文面だけで
+                # 進むと #939 の穴（症状の場所を推定で決める）に戻るので降りる。
+                # 調査 は Task あたり 1 回しか走らない前提で候補は 0 件か 1 件。調査 を複数回
+                # 走らせる flow にするなら、この選び方（辞書順の tail -1）を runID の数値順に直すこと。
+                INVESTIGATION=$(ls /results/*/located/report.md 2>/dev/null | tail -1 || true)
+                [ -n "$INVESTIGATION" ] \
+                  || give_up "調査の報告（results/*/located/report.md）が棚に無い。実装は行っていない。flow の start と 調査 の binding を確認すること。"
+                cp "$INVESTIGATION" /tmp/investigation.md \
+                  || give_up "調査の報告を読めなかった。実装は行っていない。"
+                chmod 0644 /tmp/investigation.md
 
                 # --- テストの回し方はリポの形から決める（入力からは受け取らない） ----
                 if [ -f /scratch/src/Cargo.toml ]; then
@@ -560,6 +579,14 @@ spec:
                   give_up_file /tmp/giveup.txt
                 fi
 
+                # skill が「テストは書かない」と判断して escalate/report.md に理由を書いて
+                # 降りていることがある（この場合 git status は空のまま）。この後の
+                # give_up が同じファイルを上書きすると skill の書いた理由が消えるので、
+                # ここで先に拾って終わる。done/ は書かれていないのでそのまま空。
+                if [ -s /workspace/escalate/report.md ]; then
+                  sync; exit 0
+                fi
+
                 if [ -f /scratch/out/no-test.md ]; then
                   { echo "テストで赤を作れない要求だと判断された。実装には進んでいない。"
                     echo
@@ -679,8 +706,8 @@ spec:
                 else
                   MODEL_NOTE="alias ${LLM_ALIAS}（llm-gateway 経由。応答したモデルは特定できなかった）"
                 fi
-                PR_BODY=$(printf 'closes #%s\n\n実装 handler（%s）が TDD で書いた。テストを先に書き、赤を観測してから実装している。\n\n## テストの回\n\n%s\n\n## 実装の回\n\n%s\n' \
-                    "$ISSUE" "$MODEL_NOTE" "$(cat /tmp/tests-report.md)" "$(cat /workspace/done/report.md 2>/dev/null || echo '(報告なし)')")
+                PR_BODY=$(printf 'closes #%s\n\n実装 handler（%s）が TDD で書いた。テストを先に書き、赤を観測してから実装している。\n\n## 調査\n\n%s\n\n## テストの回\n\n%s\n\n## 実装の回\n\n%s\n' \
+                    "$ISSUE" "$MODEL_NOTE" "$(cat /tmp/investigation.md)" "$(cat /tmp/tests-report.md)" "$(cat /workspace/done/report.md 2>/dev/null || echo '(報告なし)')")
                 if [ -n "$ESCALATE_NOTE" ]; then
                   PR_BODY=$(printf '%s\n\n## エージェントが escalate に書いていたこと（テストは緑だったため PR は作成）\n\n%s\n' "$PR_BODY" "$ESCALATE_NOTE")
                 fi
@@ -754,9 +781,15 @@ metadata:
   namespace: claude-code-build
 spec:
   profile: investigate
-  start: 実装
+  start: 調査
   workspace: {}
   bindings:
+    # 症状が見つからない・要求が定まらないなら実装に進まず人間へ。
+    調査:
+      handler: investigator
+      next:
+        実装: located
+        Escalated: escalate
     実装:
       handler: implementer
       next:

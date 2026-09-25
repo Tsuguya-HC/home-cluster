@@ -62,7 +62,7 @@ spec:
             # 新しい handler を足すときはここにも足す。
             - type: RegularExpression
               name: x-llm-client
-              value: "^(adjudicator|alert-investigate|claude-code-agent|claude-code-generic|implement|implement-verify|pluto-check|pr-review|task-executor|task-executor-write|wf-creator|wf-improver|llm-gateway-smoke)$"
+              value: "^(adjudicator|alert-investigate|claude-code-agent|claude-code-generic|implement|implement-verify|pluto-check|pr-review|task-executor|task-executor-write|taskflow-investigate|wf-creator|wf-improver|llm-gateway-smoke)$"
       modelsOwnedBy: Envoy AI Gateway
       backendRefs:
         - name: claude-max

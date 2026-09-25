@@ -32,6 +32,7 @@ data:
     horenso-verify ro claude-code/github-gateway-client-keys/horenso-verify
     taskflow-implement rw claude-code-build/github-gateway-client-keys/taskflow-implement
     taskflow-implement-parts ro claude-code-build/github-gateway-client-keys/taskflow-implement-parts
+    taskflow-investigate ro claude-code-build/github-gateway-client-keys/taskflow-investigate
 ---
 apiVersion: v1
 kind: ConfigMap

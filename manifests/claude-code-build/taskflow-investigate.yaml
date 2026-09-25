@@ -1,0 +1,282 @@
+# implement flow の入口（#939）。issue の症状がコードのどこで起きているかを、実装の前に確かめる。
+# 直さない・テストを書かない・ビルドしない。成果物は located/report.md だけで、実装 handler が
+# results の棚から `located/` という名前で探す — ディレクトリ名を変えるなら両方を変える。
+#
+# **agent コンテナに GitHub の鍵を渡さないこと。** clone と issue の取得は fetch init が済ませる。
+# Kata なのは、信頼できない入力（issue 本文・リポジトリの中身）を読んだエージェントが Bash を
+# 実行するため。
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: agent-investigator
+  namespace: claude-code-build
+automountServiceAccountToken: false
+---
+# 10080 が LLM、10443 が GitHub（init だけが使う。agent からも届くが鍵が無いので 401）。
+# github.com / api.github.com を書かないこと — gateway を通らない GitHub 呼び出しは設定の
+# 取り違えなので、drop させて検出する。
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: taskflow-investigate
+  namespace: claude-code-build
+spec:
+  endpointSelector:
+    matchLabels:
+      taskflow-investigate: "true"
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/managed-by: envoy-gateway
+            io.kubernetes.pod.namespace: llm-gateway
+      toPorts:
+        - ports:
+            - port: "10080"
+              protocol: TCP
+            - port: "10443"
+              protocol: TCP
+---
+apiVersion: flow.tgy.io/v1alpha1
+kind: TaskHandler
+metadata:
+  name: investigator
+  namespace: claude-code-build
+spec:
+  phase: 調査
+  runner:
+    type: Job
+  timeout: 20m
+  maxInfraRetries: 1
+  workspace:
+    volume: flow-workspace
+    mountPath: /workspace
+  jobTemplate:
+    template:
+      metadata:
+        labels:
+          taskflow-investigate: "true"
+      spec:
+        restartPolicy: Never
+        runtimeClassName: kata
+        serviceAccountName: agent-investigator
+        automountServiceAccountToken: false
+        # TERM 後の sync（NFS 越し）に猶予を残す。
+        terminationGracePeriodSeconds: 60
+        # runAsUser は必須（taskflow のコントローラが Job 構築時に検査する）。
+        securityContext:
+          runAsUser: 65533
+          runAsGroup: 65533
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        volumes:
+          # fetch init が書き、agent が読む。判定の置き場には使えない（Kata の emptyDir は
+          # VM 内にあり、publish サイドカーからは読めない）。
+          - name: tmp
+            emptyDir: {}
+          - name: parts
+            emptyDir: {}
+          # 呼び出し元鍵。**GitHub の資格情報ではない** — gateway が installation token に
+          # 付け替える。init にだけマウントする。
+          - name: github-gateway-key
+            secret:
+              secretName: github-gateway-client-keys
+              defaultMode: 0444
+              items:
+                - key: taskflow-investigate
+                  path: key
+        initContainers:
+          - name: parts
+            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:f9975ee734aff717fc5ed3422c48bb19cf69b9ae783a85a7ebe361a1cc802095
+            command: [sh, -c]
+            args:
+              - |
+                GH_ENTERPRISE_TOKEN=$(cat /github-gateway-key/key) exec parts \
+                  -s investigate -c verdict-protocol -c untrusted-input -c sandbox-limits
+            env:
+              - name: HOME
+                value: /tmp
+              - name: PARTS_REF
+                valueFrom:
+                  configMapKeyRef:
+                    name: parts-ref
+                    key: sha
+              - {name: GH_HOST, value: gh-ro.infra.tgy.io}
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities: {drop: [ALL]}
+            volumeMounts:
+              - {name: parts, mountPath: /parts}
+              - {name: tmp, mountPath: /tmp}
+              - {name: github-gateway-key, mountPath: /github-gateway-key, readOnly: true}
+            resources:
+              requests: {cpu: 50m, memory: 64Mi}
+              # Kata では全コンテナに limits.cpu が無いと、agent の cpu limit が VM サイズに
+              # 伝わらない。
+              limits: {cpu: 500m, memory: 256Mi}
+          # 失敗しても exit 0 で /tmp/fetch-error に書くこと。init が落ちると Pod が上がらず、
+          # escalate に理由を書く者がいなくなる。
+          - name: fetch
+            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:f9975ee734aff717fc5ed3422c48bb19cf69b9ae783a85a7ebe361a1cc802095
+            command: [sh, -c]
+            args:
+              - |
+                set -eu
+                fail() { printf '%s\n' "$1" > /tmp/fetch-error; exit 0; }
+
+                # この値は URL にもプロンプトにも入る。形を確かめてからしか使わない。
+                REPO=$(printf '%s' "${FLOW_INPUT:-}" | jq -r '.repo // empty' 2>/dev/null || true)
+                case "$REPO" in
+                  Tsuguya-HC/*[!-A-Za-z0-9._]* | Tsuguya-HC/ | Tsuguya-HC/*/* | Tsuguya-HC/. | Tsuguya-HC/..)
+                    fail "spec.input.repo の形が不正。調査は行っていない。" ;;
+                  Tsuguya-HC/?*) ;;
+                  *) fail "spec.input.repo は Tsuguya-HC 配下だけを指定できる。調査は行っていない。" ;;
+                esac
+                ISSUE=$(printf '%s' "${FLOW_INPUT:-}" | jq -r '.issue // empty' 2>/dev/null || true)
+                case "$ISSUE" in
+                  '' | *[!0-9]*) fail "spec.input.issue が数字ではない。調査は行っていない。" ;;
+                esac
+
+                KEY=$(cat /github-gateway-key/key)
+                GW=gh-ro.infra.tgy.io
+                # 鍵は argv に載せない（-c ではなく GIT_CONFIG_* で渡す）。
+                # 浅くしないこと。「その機能が既にあるか」を git log で確かめるのが調査の本体。
+                GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0="http.https://${GW}/.extraheader" \
+                  GIT_CONFIG_VALUE_0="Authorization: token ${KEY}" \
+                  git clone --quiet "https://${GW}/${REPO}.git" /tmp/src \
+                  || fail "${REPO} を clone できなかった。調査は行っていない。"
+                git -C /tmp/src config core.hooksPath /dev/null
+
+                GH_HOST="$GW" GH_ENTERPRISE_TOKEN="$KEY" gh api "repos/${REPO}/issues/${ISSUE}" > /tmp/issue-raw.json \
+                  || fail "issue #${ISSUE} を取得できなかった。調査は行っていない。"
+                jq '{title, body, created_at}' < /tmp/issue-raw.json > /tmp/issue.json 2>/dev/null \
+                  || fail "issue #${ISSUE} の本文を読めなかった。調査は行っていない。"
+                rm -f /tmp/issue-raw.json
+
+                # agent はここに書かれた値だけを使う（検証済み）。
+                printf '%s\n' "$REPO" > /tmp/repo
+                printf '%s\n' "$ISSUE" > /tmp/issue-number
+            env:
+              - name: HOME
+                value: /tmp
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities: {drop: [ALL]}
+            volumeMounts:
+              - {name: tmp, mountPath: /tmp}
+              - {name: github-gateway-key, mountPath: /github-gateway-key, readOnly: true}
+            resources:
+              requests: {cpu: 100m, memory: 128Mi}
+              limits: {cpu: "1", memory: 512Mi}
+        containers:
+          - name: agent
+            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:f9975ee734aff717fc5ed3422c48bb19cf69b9ae783a85a7ebe361a1cc802095
+            workingDir: /workspace
+            command: [sh, -c]
+            args:
+              - |
+                set -eu
+                ESCALATE=/workspace/escalate
+                # sync は Kata + NFS の workspace PVC に要る。書き戻しを残して exit すると
+                # Pod 内の全コンテナが 255 になる。
+                give_up() { printf '%s\n' "$1" > "$ESCALATE/report.md"; sync; exit 0; }
+
+                if [ -f /tmp/fetch-error ]; then
+                  give_up "$(cat /tmp/fetch-error)"
+                fi
+                if [ ! -d /tmp/src/.git ] || [ ! -s /tmp/issue.json ] || [ ! -s /tmp/repo ] || [ ! -s /tmp/issue-number ]; then
+                  give_up "取り込み（fetch init）が完了していない。調査は行っていない。"
+                fi
+                REPO=$(cat /tmp/repo)
+                ISSUE=$(cat /tmp/issue-number)
+
+                # 404 = 認証が通り、パスにルートが無い（正常）。401 / 500 は配線の問題で、
+                # claude を走らせても打ち切りまで何も進まない。
+                code=$(curl -s --max-time 5 -o /dev/null -w '%{http_code}' \
+                  -H "Authorization: Bearer $ANTHROPIC_AUTH_TOKEN" \
+                  "${ANTHROPIC_BASE_URL}/" || true)
+                [ "$code" = 404 ] \
+                  || give_up "llm-gateway に接続できない（HTTP ${code:-なし}）。調査は行っていない。401 はクライアントキー、500 は llm-gateway の SecurityPolicy を確認すること。"
+
+                cd /tmp/src
+                # 15m は Job の timeout（20m）より短くして、打ち切り後に escalate へ理由を書く時間を残す。
+                timeout -k 10 15m claude -p "/investigate ${REPO} の issue #${ISSUE}" \
+                  --plugin-dir /parts \
+                  --append-system-prompt-file /parts/CLAUDE.md \
+                  --verbose \
+                  --output-format stream-json \
+                  --dangerously-skip-permissions \
+                  --allowedTools "Bash,Read,Write,Grep,Glob" \
+                  --model investigate \
+                  --max-turns 80 < /dev/null &
+                pid=$!
+                # 前面で待つと POSIX sh は TERM の trap を claude の終了まで遅らせる。
+                # `|| true` は set -e の下で trap を最後まで走らせるのに要る。
+                # $pid は timeout のプロセスで、TERM は timeout 経由 claude にも伝わる（実測確認済み）。
+                trap 'kill -TERM $pid 2>/dev/null || true
+                      i=0
+                      while kill -0 $pid 2>/dev/null && [ $i -lt 10 ]; do sleep 1; i=$((i+1)); done
+                      kill -KILL $pid 2>/dev/null || true
+                      sync || true
+                      exit 143' TERM INT
+                rc=0
+                wait $pid || rc=$?
+                echo "claude exited with $rc"
+                # 判定はディレクトリで出る。終了コードで escalate に書き足すと、既に located/ に
+                # 書かれていた場合に答えが 2 つになる。timeout による打ち切り（124/137/143）だけは
+                # 例外 — located/ が空なら、報告が一切書かれていないので escalate に理由を残す。
+                case "$rc" in
+                  124 | 137 | 143)
+                    if [ -z "$(ls -A /workspace/located 2>/dev/null)" ]; then
+                      give_up "claude が 15m で打ち切られた。llm-gateway の疎通を確認すること。調査の報告は書かれていない。"
+                    fi
+                    ;;
+                esac
+                sync
+            env:
+              - name: HOME
+                value: /tmp
+              - name: ANTHROPIC_BASE_URL
+                value: http://llm-gateway.llm-gateway.svc.cluster.local/anthropic
+              # 3 本とも外さないこと。ANTHROPIC_BASE_URL を向けても api.anthropic.com へ
+              # 直行する通信がある（#998）。
+              - name: DISABLE_TELEMETRY
+                value: "1"
+              - name: DISABLE_ERROR_REPORTING
+                value: "1"
+              - name: CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC
+                value: "1"
+              # gateway のクライアントキー。**LLM の資格情報ではない。**
+              - name: ANTHROPIC_AUTH_TOKEN
+                valueFrom:
+                  secretKeyRef:
+                    name: llm-gateway-client-keys
+                    key: taskflow-investigate
+              # 空にしないと OAuth 側が優先されて Anthropic 直行になる（CNP で落ちる）。
+              - name: ANTHROPIC_API_KEY
+                value: ""
+              - name: ANTHROPIC_CUSTOM_HEADERS
+                value: "x-tf-handler: taskflow-investigate"
+              # サブエージェントは親のモデルを継がない。固定しないと gateway にルートが無い。
+              - name: CLAUDE_CODE_SUBAGENT_MODEL
+                value: investigate
+            securityContext:
+              # readOnlyRootFilesystem は付けていない。claude CLI が rootfs のどこに書くかを
+              # 確かめていない。
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop: [ALL]
+            volumeMounts:
+              - {name: flow-workspace, mountPath: /workspace}
+              - {name: tmp, mountPath: /tmp}
+              - {name: parts, mountPath: /parts, readOnly: true}
+            resources:
+              requests:
+                cpu: 500m
+                memory: 512Mi
+              limits:
+                # Kata では limit がそのまま VM のサイズ。cpu limit を書かないと 1 vCPU になる。
+                cpu: "2"
+                memory: 4Gi

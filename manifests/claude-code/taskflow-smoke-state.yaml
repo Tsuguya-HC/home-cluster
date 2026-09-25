@@ -3,7 +3,7 @@
 #
 # 確かめていること:
 #   - State のフェーズで **Job が作られない**。代わりにコントローラが答えの置き場（ConfigMap）を
-#     1 つ作り、`status.currentRun.verdictBox` にその名前と `deadline` が載る
+#     1 つ作り、`status.currentRuns[0].verdictBox` にその名前と `deadline` が載る
 #   - 置き場が空で作られ、注釈に語彙（`flow.tgy.io/choices`）とフェーズ名が乗る。
 #     ラベルは framework 産の 3 つ（managed-by / task-uid / run-id）
 #   - `data.verdict` に宣言ディレクトリ名を書くと遷移する。`data.reason` は history の reason に出る
@@ -21,7 +21,7 @@
 #   EOF
 #
 # 答え方（誰が書いたかは framework から見えない。書ける権限＝素の RBAC が決める）:
-#   box=$(kubectl -n claude-code get task <name> -o jsonpath='{.status.currentRun.verdictBox}')
+#   box=$(kubectl -n claude-code get task <name> -o jsonpath='{.status.currentRuns[0].verdictBox}')
 #   kubectl -n claude-code patch configmap "$box" --type merge -p '{"data":{"verdict":"ok","reason":"手で承認"}}'
 #
 # 期待: Task が 完了 (Success)。history は 2 行で、1 行目が `承認/1/ok/Declared` かつ runner: State、

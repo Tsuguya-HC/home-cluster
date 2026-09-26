@@ -87,7 +87,7 @@ spec:
                   path: key
         initContainers:
           - name: parts
-            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:1625fed3647f11f035b02976767b548637aba728b1c5dd4c6f4ee8739fc2dd8e
+            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:960f3d3e88c28add4d14787303df9a78936fe75128c8e88c0aad1b3078e0f546
             command: [sh, -c]
             args:
               - |
@@ -118,7 +118,7 @@ spec:
           # 失敗しても exit 0 で /tmp/fetch-error に書くこと。init が落ちると Pod が上がらず、
           # escalate に理由を書く者がいなくなる。
           - name: fetch
-            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:1625fed3647f11f035b02976767b548637aba728b1c5dd4c6f4ee8739fc2dd8e
+            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:960f3d3e88c28add4d14787303df9a78936fe75128c8e88c0aad1b3078e0f546
             command: [sh, -c]
             args:
               - |
@@ -172,7 +172,7 @@ spec:
               limits: {cpu: "1", memory: 512Mi}
         containers:
           - name: agent
-            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:1625fed3647f11f035b02976767b548637aba728b1c5dd4c6f4ee8739fc2dd8e
+            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:960f3d3e88c28add4d14787303df9a78936fe75128c8e88c0aad1b3078e0f546
             workingDir: /workspace
             command: [sh, -c]
             args:

@@ -32,6 +32,27 @@ CHECKERS = {
 ROOTS = ["manifests", "kustomize"]
 
 
+def _check_script(key: str, body: str) -> str | None:
+    """key の拡張子でチェッカーを選び body を検査する。
+
+    チェッカーが無ければ None（対象外）。通れば ""。落ちればエラー文字列。
+    """
+    cmd = CHECKERS.get(Path(key).suffix)
+    if cmd is None:
+        return None
+    if shutil.which(cmd[0]) is None:
+        # 見つからないものを黙って飛ばすと、検査したつもりの緑になる
+        return f"{cmd[0]} が無い"
+    with tempfile.TemporaryDirectory() as d:
+        f = Path(d) / Path(key).name
+        f.write_text(body)
+        r = subprocess.run([*cmd, str(f)], capture_output=True, text=True)
+    if r.returncode != 0:
+        # 一時ディレクトリ名は読み手の役に立たないので落とす
+        return (r.stderr or r.stdout).replace(str(f), key).strip()
+    return ""
+
+
 def main() -> int:
     checked = 0
     failed = []
@@ -47,29 +68,59 @@ def main() -> int:
                 if not isinstance(doc, dict) or doc.get("kind") != "ConfigMap":
                     continue
                 for key, body in (doc.get("data") or {}).items():
-                    cmd = CHECKERS.get(Path(key).suffix)
-                    if cmd is None or not isinstance(body, str):
+                    if not isinstance(body, str):
+                        continue
+                    result = _check_script(key, body)
+                    if result is None:
                         continue
                     checked += 1
-                    if shutil.which(cmd[0]) is None:
-                        # 見つからないものを黙って飛ばすと、検査したつもりの
-                        # 緑になる
-                        print(f"::error file={path}::{key}: {cmd[0]} が無い")
-                        failed.append(f"{path}:{key}")
-                        continue
-                    with tempfile.TemporaryDirectory() as d:
-                        f = Path(d) / Path(key).name
-                        f.write_text(body)
-                        r = subprocess.run(
-                            [*cmd, str(f)], capture_output=True, text=True
-                        )
-                    if r.returncode != 0:
-                        # 一時ディレクトリ名は読み手の役に立たないので落とす
-                        detail = (r.stderr or r.stdout).replace(str(f), key).strip()
-                        print(f"::error file={path}::{key}: {detail}")
+                    if result:
+                        print(f"::error file={path}::{key}: {result}")
                         failed.append(f"{path}:{key}")
                     else:
                         print(f"ok  {path}  {key}")
+
+    # kustomization.yaml の configMapGenerator[].files は ConfigMap の data を
+    # 直に書かず、ディスク上のファイルを参照する。上のループは YAML に埋め込まれた
+    # 文字列しか見ないので、ここを辿らないと fetch-pr.sh や plan.py のようなファイルは
+    # 検査対象から漏れたまま緑になる。
+    for root in ROOTS:
+        for kfile in sorted(Path(root).rglob("kustomization.yaml")):
+            try:
+                kdoc = yaml.safe_load(kfile.read_text())
+            except yaml.YAMLError as e:
+                print(f"::error file={kfile}::YAML として読めません: {e}")
+                failed.append(str(kfile))
+                continue
+            if not isinstance(kdoc, dict):
+                continue
+            for gen in kdoc.get("configMapGenerator") or []:
+                if not isinstance(gen, dict):
+                    continue
+                for entry in gen.get("files") or []:
+                    if not isinstance(entry, str):
+                        continue
+                    # `key=path` 形式にも対応（無ければ key はファイル名）。
+                    key, sep, rel = entry.partition("=")
+                    if not sep:
+                        rel, key = key, Path(key).name
+                    src = kfile.parent / rel
+                    if not src.is_file():
+                        print(
+                            f"::error file={kfile}::configMapGenerator files: "
+                            f"{entry} が指すファイルが無い"
+                        )
+                        failed.append(f"{kfile}:{entry}")
+                        continue
+                    result = _check_script(key, src.read_text())
+                    if result is None:
+                        continue
+                    checked += 1
+                    if result:
+                        print(f"::error file={src}::{key}: {result}")
+                        failed.append(f"{src}:{key}")
+                    else:
+                        print(f"ok  {src}  {key}")
 
     if failed:
         print(f"\n{len(failed)} 件が構文検査に落ちた。")

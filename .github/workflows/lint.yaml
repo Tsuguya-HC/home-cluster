@@ -95,6 +95,7 @@ jobs:
               - 'manifests/**'
               - 'apps/**'
               - 'argocd/**'
+              - 'kustomize/**'
               - '.github/schemas/**'
               - '.github/workflows/_kubeconform.yml'
               - 'aqua.yaml'

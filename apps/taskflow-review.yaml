@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: taskflow-review
+  namespace: argocd
+spec:
+  project: argo
+  source:
+    repoURL: https://github.com/Tsuguya-HC/home-cluster.git
+    targetRevision: main
+    path: kustomize/taskflow-review
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: claude-code-build
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true

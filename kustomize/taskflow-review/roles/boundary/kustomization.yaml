@@ -1,0 +1,12 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+nameSuffix: -boundary
+patches:
+  - target:
+      kind: TaskHandler
+    patch: |-
+      - op: replace
+        path: /spec/phase
+        value: boundary

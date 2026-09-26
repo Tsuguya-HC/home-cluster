@@ -176,7 +176,7 @@ spec:
           - name: parts
             image: registry.infra.tgy.io/tools/claude-code:latest@sha256:960f3d3e88c28add4d14787303df9a78936fe75128c8e88c0aad1b3078e0f546
             command: [parts]
-            args: [-s, implement-tests, -s, implement, -c, verdict-protocol, -c, untrusted-input, -c, build-sandbox]
+            args: [-s, implement-tests, -s, implement, -s, fix-tests, -s, fix, -c, verdict-protocol, -c, untrusted-input, -c, build-sandbox]
             env:
               - name: HOME
                 value: /tmp
@@ -284,6 +284,9 @@ spec:
               # inputs ビューに並ぶのは直前の答えだけなので、実装に入る辺が 調査 以外にも
               # 増えると inputs では調査の報告に届かなくなる。だから棚から読む。
               - {name: flow-workspace, mountPath: /results, subPath: results, readOnly: true}
+              # この run に至った答え（taskflow ADR-0013 決定6）。仕分けからの差し戻しなら
+              # inputs/仕分け/ に採用した指摘が並び、それが修正モードの合図になる。
+              - {name: flow-workspace, mountPath: /inputs, subPath: inputs, readOnly: true}
               - {name: tmp, mountPath: /tmp}
               - {name: parts, mountPath: /parts, readOnly: true}
               - {name: github-token, mountPath: /github-token}
@@ -407,6 +410,46 @@ spec:
                 # 経由で root（このあと GH_KEY 付きで署名コミットのスクリプトを叩く）を
                 # 乗っ取れる。コストゼロで塞ぐ。
                 git -C /scratch/src config core.hooksPath /dev/null
+
+                BRANCH="agent/issue-${ISSUE}-${FLOW_TASK_UID%%-*}"
+                # 修正モード: 仕分けが差し戻した指摘を、同じ PR のブランチに積む。新しい PR は
+                # 作らない。署名コミットのスクリプトはリモートのブランチの先頭を親にし、ローカルの
+                # HEAD との差分を載せるので、作業ツリーはブランチの先頭に合わせておく。
+                FIX=
+                if [ -d /inputs/仕分け ]; then
+                  FIX=1
+                  [ -s /inputs/仕分け/report.md ] \
+                    || give_up "仕分けから差し戻されたが、inputs/仕分け/report.md が無い。修正は行っていない。"
+                  cp /inputs/仕分け/report.md /tmp/triage.md && chmod 0644 /tmp/triage.md \
+                    || give_up "仕分けの報告を読めなかった。修正は行っていない。"
+                  # この仕分けに対する直しかどうかを署名コミットの件名で識別する ID。
+                  TRIAGE_ID=$(sha256sum /tmp/triage.md | cut -c1-12)
+                  # 棚の番号は数値順に読む（辞書順では 10 が 2 より前に来る）。最後が最新の PR。
+                  PR_URL=
+                  for f in $(ls -d /results/*/done/pr-url 2>/dev/null | sort -t/ -k3,3n); do
+                    PR_URL=$(head -1 "$f")
+                  done
+                  case "$PR_URL" in
+                    "https://github.com/${REPO}/pull/"*) PR=${PR_URL##*/} ;;
+                    *) give_up "差し戻し先の PR が棚（results/*/done/pr-url）に見つからない。修正は行っていない。" ;;
+                  esac
+                  case "$PR" in
+                    '' | *[!0-9]*) give_up "棚の PR の URL が不正（${PR_URL}）。修正は行っていない。" ;;
+                  esac
+                  GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0="http.https://${GH_GATEWAY}/.extraheader" GIT_CONFIG_VALUE_0="$AUTH_HEADER" \
+                    git -C /scratch/src fetch --quiet origin "refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}" \
+                    || give_up "PR のブランチ ${BRANCH} を取得できなかった。修正は行っていない。"
+                  git -C /scratch/src checkout --quiet -B "$BRANCH" "origin/${BRANCH}" \
+                    || give_up "PR のブランチ ${BRANCH} に切り替えられなかった。修正は行っていない。"
+                  # infra retry で同じ仕分けの直しが二重に積まれるのを防ぐ。件名は固定文字列で
+                  # 比較する（grep の正規表現にすると、件名に紛れ込んだ特殊文字が誤って
+                  # パターン扱いされる）。
+                  FIX_SUBJECT="Address review of #${ISSUE} (triage ${TRIAGE_ID})"
+                  if [ "$(git -C /scratch/src log -1 --format=%s)" = "$FIX_SUBJECT" ]; then
+                    give_up "この仕分けに対する直しは前回の試行（infra retry）で既に積まれている（コミット $(git -C /scratch/src rev-parse HEAD)）。PR へのコメントと done の書き込みまで進んだかはここからは分からない。人が PR ${PR_URL} を確認すること。"
+                  fi
+                  chown -R 65533:65533 /scratch/src
+                fi
 
                 ghgw gh api "repos/${REPO}/issues/${ISSUE}" > /tmp/issue-raw.json \
                   || give_up "issue #${ISSUE} を取得できなかった。実装は行っていない。"
@@ -578,6 +621,14 @@ spec:
                   give_up_file /tmp/giveup.txt
                 fi
 
+                if [ -n "$FIX" ]; then
+                  TESTS_PROMPT="/fix-tests ${REPO} の PR #${PR}（issue #${ISSUE}）"
+                  IMPL_PROMPT="/fix ${REPO} の PR #${PR}（issue #${ISSUE}）"
+                else
+                  TESTS_PROMPT="/implement-tests ${REPO} の issue #${ISSUE}"
+                  IMPL_PROMPT="/implement ${REPO} の issue #${ISSUE}"
+                fi
+
                 # --- 2. テストだけ書かせる ----------------------------------------
                 check_gateway \
                   || give_up "llm-gateway に接続できない。実装は行っていない。llm-gateway namespace の Envoy と、claude-code-build 側／llm-gateway 側の CNP を確認すること。"
@@ -587,7 +638,7 @@ spec:
                 # || で括って set -e の対象から外す。
                 CLAUDE_RC=0
                 run_agent /tmp/claude-tests.log 15m \
-                  -p "/implement-tests ${REPO} の issue #${ISSUE}" \
+                  -p "$TESTS_PROMPT" \
                   --plugin-dir /parts \
                   --append-system-prompt-file /parts/CLAUDE.md \
                   --verbose --output-format stream-json \
@@ -635,12 +686,19 @@ spec:
                   } > /tmp/giveup.txt
                   give_up_file /tmp/giveup.txt
                 fi
+                # 修正モードでは、どの指摘もテストにできなかったとき（untestable.md だけ）は
+                # テストが無いまま直しへ進む。赤は観測できないので飛ばす。
+                SKIP_RED=
                 if [ -z "$(git -C /scratch/src status --porcelain)" ]; then
-                  give_up "テストが 1 行も書かれなかった。実装には進んでいない。"
+                  if [ -n "$FIX" ] && [ -s /scratch/out/untestable.md ]; then
+                    SKIP_RED=1
+                  else
+                    give_up "テストが 1 行も書かれなかった。実装には進んでいない。"
+                  fi
                 fi
 
                 # --- 3. 赤の観測（この handler の本体） ---------------------------
-                if run_tests /tmp/red.log; then
+                if [ -z "$SKIP_RED" ] && run_tests /tmp/red.log; then
                   git -C /scratch/src diff > /tmp/tests.diff || true
                   { echo "書かれたテストが最初から通ってしまう。要求を検証していないので実装に進んでいない。"
                     echo
@@ -654,6 +712,9 @@ spec:
                 fi
                 cp /scratch/out/tests-report.md /tmp/tests-report.md 2>/dev/null || echo '(報告なし)' > /tmp/tests-report.md
                 chmod 0644 /tmp/tests-report.md
+                if [ -s /scratch/out/untestable.md ]; then
+                  cp /scratch/out/untestable.md /tmp/untestable.md && chmod 0644 /tmp/untestable.md
+                fi
 
                 # --- 4. 実装させる ------------------------------------------------
                 # 1 回目（/implement-tests）のモデルが /workspace/done に report.md を残して
@@ -664,7 +725,7 @@ spec:
                   || give_up "llm-gateway に接続できない。PR は作っていない。llm-gateway namespace の Envoy と、claude-code-build 側／llm-gateway 側の CNP を確認すること。"
                 CLAUDE_RC=0
                 run_agent /tmp/claude-implement.log 30m \
-                  -p "/implement ${REPO} の issue #${ISSUE}" \
+                  -p "$IMPL_PROMPT" \
                   --plugin-dir /parts \
                   --append-system-prompt-file /parts/CLAUDE.md \
                   --verbose --output-format stream-json \
@@ -707,11 +768,50 @@ spec:
                 fi
 
                 # --- 6. PR（handler が作る。エージェントには触らせない） ------------
-                BRANCH="agent/issue-${ISSUE}-${FLOW_TASK_UID%%-*}"
                 cd /scratch/src
                 git config user.name "tgy-cluster-bot[bot]"
                 git config user.email "tgy-cluster-bot[bot]@users.noreply.github.com"
                 git add -A
+
+                # 実モデルの特定と escalate の拾い上げは、PR 作成と修正モードの両方で使う。
+                # implement skill が「テストは間違っている」と判断して escalate/ に理由を
+                # 書いて降りた後でも、緑判定が通れば先へ進んでしまう。捨てずに本文へ
+                # 畳み込む（下で escalate ディレクトリを空にする前に読む）。
+                ESCALATE_NOTE=$(cat /workspace/escalate/report.md 2>/dev/null || true)
+                # gateway 経由になったので、この Pod が知っているのは alias だけ（実モデルは
+                # gateway 側で決まる）。「どのモデルが書いたか」は PR を読む人が要る情報なので、
+                # stream-json の応答が名乗った実モデルを拾う。拾えなければ拾えないと書く —
+                # alias をモデル名のふりをさせない。
+                ACTUAL_MODEL=$(grep -o '"model":"[^"]*"' /tmp/claude-implement.log 2>/dev/null \
+                  | cut -d'"' -f4 | grep -v "^$LLM_ALIAS$" | head -1)
+                if [ -n "$ACTUAL_MODEL" ]; then
+                  MODEL_NOTE="${ACTUAL_MODEL}（llm-gateway の alias ${LLM_ALIAS} 経由）"
+                else
+                  MODEL_NOTE="alias ${LLM_ALIAS}（llm-gateway 経由。応答したモデルは特定できなかった）"
+                fi
+
+                if [ -n "$FIX" ]; then
+                  GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0="http.https://${GH_GATEWAY}/.extraheader" GIT_CONFIG_VALUE_0="$AUTH_HEADER" \
+                    ghgw /usr/local/bin/github-signed-commit.sh \
+                    -r "$REPO" -b "$BRANCH" -m "$FIX_SUBJECT" \
+                    || give_up "差し戻しの直しを署名コミットにできなかった。PR ${PR_URL} のブランチには何も積まれていない可能性が高い（GitHub 側を確認すること）。直しの差分はこの Pod の Block スクラッチにしかない。"
+                  # 直しの経緯は PR のコメントに残す。本文を書き換えると最初の実装の記録が消える。
+                  # コメントに失敗してもコミットは積まれているので、Task は止めず報告に書く。
+                  printf '## 差し戻しの直し\n\n実装 handler（%s）が、レビューの仕分けが採用した指摘を直した。\n\n## 仕分け\n\n%s\n\n## テストの回\n\n%s\n\n## 直しの回\n\n%s\n' \
+                    "$MODEL_NOTE" "$(cat /tmp/triage.md)" "$(cat /tmp/tests-report.md)" "$(cat /workspace/done/report.md 2>/dev/null || echo '(報告なし)')" > /tmp/fix-comment.md
+                  if [ -n "$ESCALATE_NOTE" ]; then
+                    printf '\n## エージェントが escalate に書いていたこと（テストは緑だったため直しは積んだ）\n\n%s\n' "$ESCALATE_NOTE" >> /tmp/fix-comment.md
+                  fi
+                  COMMENT_NOTE=
+                  jq -Rs '{body: .}' < /tmp/fix-comment.md \
+                    | ghgw gh api "repos/${REPO}/issues/${PR}/comments" --input - >/dev/null 2>&1 \
+                    || COMMENT_NOTE="（PR へのコメントに失敗した。直しはブランチに積んである）"
+                  find /workspace/escalate -mindepth 1 -delete 2>/dev/null || true
+                  printf '%s%s\n' "$PR_URL" "$COMMENT_NOTE" >> /workspace/done/report.md
+                  printf '%s\n' "$PR_URL" > /workspace/done/pr-url
+                  sync
+                  exit 0
+                fi
 
                 # BRANCH は FLOW_TASK_UID から決定論的に決まるので、同じ Task の infra retry
                 # では前回と同じ名前になる。前回がここまで来ていたかをまず確かめる —
@@ -732,21 +832,6 @@ spec:
                   -r "$REPO" -b "$BRANCH" -m "Implement #${ISSUE}" \
                   || give_up "署名コミットを作れなかった。ブランチ ${BRANCH} は GitHub に作成済み（base の HEAD のまま、まだコミットは載っていない）。実装差分自体はこの Pod の Block スクラッチにしかなく、Pod が GC されると失われる。"
 
-                # implement skill が「テストは間違っている」と判断して escalate/ に理由を
-                # 書いて降りた後でも、緑判定が通れば PR まで進んでしまう。捨てずに PR 本文へ
-                # 畳み込む（下で escalate ディレクトリを空にする前に読む）。
-                ESCALATE_NOTE=$(cat /workspace/escalate/report.md 2>/dev/null || true)
-                # gateway 経由になったので、この Pod が知っているのは alias だけ（実モデルは
-                # gateway 側で決まる）。「どのモデルが書いたか」は PR を読む人が要る情報なので、
-                # stream-json の応答が名乗った実モデルを拾う。拾えなければ拾えないと書く —
-                # alias をモデル名のふりをさせない。
-                ACTUAL_MODEL=$(grep -o '"model":"[^"]*"' /tmp/claude-implement.log 2>/dev/null \
-                  | cut -d'"' -f4 | grep -v "^$LLM_ALIAS$" | head -1)
-                if [ -n "$ACTUAL_MODEL" ]; then
-                  MODEL_NOTE="${ACTUAL_MODEL}（llm-gateway の alias ${LLM_ALIAS} 経由）"
-                else
-                  MODEL_NOTE="alias ${LLM_ALIAS}（llm-gateway 経由。応答したモデルは特定できなかった）"
-                fi
                 PR_BODY=$(printf 'closes #%s\n\n実装 handler（%s）が TDD で書いた。テストを先に書き、赤を観測してから実装している。\n\n## 調査\n\n%s\n\n## テストの回\n\n%s\n\n## 実装の回\n\n%s\n' \
                     "$ISSUE" "$MODEL_NOTE" "$(cat /tmp/investigation.md)" "$(cat /tmp/tests-report.md)" "$(cat /workspace/done/report.md 2>/dev/null || echo '(報告なし)')")
                 if [ -n "$ESCALATE_NOTE" ]; then
@@ -763,6 +848,9 @@ spec:
                 # 以外の置き土産が残ってディレクトリが空にならないので、中身ごと空にする。
                 find /workspace/escalate -mindepth 1 -delete 2>/dev/null || true
                 printf '%s\n' "$PR_URL" >> /workspace/done/report.md
+                # 後段（レビューの各フェーズと、差し戻された次の実装）が棚から PR を引く口。
+                # report.md の最終行は人向けで、形を約束しない。
+                printf '%s\n' "$PR_URL" > /workspace/done/pr-url
                 sync
             env:
               # 推論は llm-gateway 経由（#942）。**この Pod は LLM の資格情報を持たない** —
@@ -831,10 +919,45 @@ spec:
       next:
         実装: located
         Escalated: escalate
+    # 仕分けから差し戻されたときも同じ handler（inputs/仕分け/ があれば修正モード）。
     実装:
       handler: implementer
       next:
-        完了: done
+        観点出し: done
+        Escalated: escalate
+    # Jev が選んだ観点と、毎回の general を起動する（#1081）。general は always に置かない —
+    # 分岐元が 1 つも書かないと always があっても NoAnswer なので（ADR-0013 決定1）、
+    # 観点出しが必ず書ける行き先として残す。
+    観点出し:
+      handler: review-planner
+      next:
+        general: general
+        failpath: failpath
+        boundary: boundary
+        runtime: runtime
+        states: states
+        precedent: precedent
+        ui: ui
+        Escalated: escalate
+      join:
+        phase: 仕分け
+        always: [documented, tests]
+    general: {handler: review-general, next: {仕分け: reviewed, Escalated: escalate}}
+    failpath: {handler: review-failpath, next: {仕分け: reviewed, Escalated: escalate}}
+    boundary: {handler: review-boundary, next: {仕分け: reviewed, Escalated: escalate}}
+    runtime: {handler: review-runtime, next: {仕分け: reviewed, Escalated: escalate}}
+    states: {handler: review-states, next: {仕分け: reviewed, Escalated: escalate}}
+    precedent: {handler: review-precedent, next: {仕分け: reviewed, Escalated: escalate}}
+    ui: {handler: review-ui, next: {仕分け: reviewed, Escalated: escalate}}
+    documented: {handler: review-documented, next: {仕分け: reviewed, Escalated: escalate}}
+    tests: {handler: review-tests, next: {仕分け: reviewed, Escalated: escalate}}
+    # maxRunsPerPhase が 1 のうちは、実装へ戻ろうとした時点で RunLimitReached → Escalated
+    # （採用した指摘は fix/report.md に残る）。
+    仕分け:
+      handler: review-triage
+      next:
+        完了: clean
+        実装: fix
         Escalated: escalate
   terminals:
     完了: Success

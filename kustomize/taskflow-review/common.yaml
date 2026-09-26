@@ -1,0 +1,90 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: agent-reviewer
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: review-planner
+automountServiceAccountToken: false
+---
+# 10080 が LLM、10443 が GitHub（init だけが使う。agent からも届くが鍵が無いので 401）。
+# github.com / api.github.com を書かないこと — gateway を通らない GitHub 呼び出しは設定の
+# 取り違えなので、drop させて検出する。
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: taskflow-review
+spec:
+  endpointSelector:
+    matchLabels:
+      taskflow-review: "true"
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/managed-by: envoy-gateway
+            io.kubernetes.pod.namespace: llm-gateway
+      toPorts:
+        - ports:
+            - port: "10080"
+              protocol: TCP
+            - port: "10443"
+              protocol: TCP
+---
+# 観点出しは GitHub（gateway の 10443）と Jev（OpenRouter の decisions API）だけ。
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: taskflow-review-planner
+spec:
+  endpointSelector:
+    matchLabels:
+      taskflow-review-planner: "true"
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/managed-by: envoy-gateway
+            io.kubernetes.pod.namespace: llm-gateway
+      toPorts:
+        - ports:
+            - port: "10443"
+              protocol: TCP
+    - toFQDNs:
+        - matchName: openrouter.ai
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+---
+# 仕分けは再現のためにビルドとテストを回すので、依存の取得先にも出る。ここに無い宛先は
+# 失敗ではなくハングする。対応する言語を足すときはここも足す。
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: taskflow-review-triage
+spec:
+  endpointSelector:
+    matchLabels:
+      taskflow-review-triage: "true"
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/managed-by: envoy-gateway
+            io.kubernetes.pod.namespace: llm-gateway
+      toPorts:
+        - ports:
+            - port: "10080"
+              protocol: TCP
+            - port: "10443"
+              protocol: TCP
+    - toFQDNs:
+        - matchPattern: "*.githubusercontent.com"
+        - matchName: "index.crates.io"
+        - matchName: "static.crates.io"
+        - matchName: "registry.npmjs.org"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP

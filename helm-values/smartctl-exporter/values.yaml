@@ -27,9 +27,12 @@ serviceMonitor:
   # ラベルが `instance`（Pod IP）になり、アラートが鳴っても人が IP からノードを
   # 引き直すことになる。加えて Pod が作り直されると系列の同一性が切れるので、
   # 過去と比較するアラートがそのノードについて黙る。
+  # action は CRD の default と同じ値。書かないと ArgoCD が永久 OutOfSync になる
+  # (docs/known-issues.md「CRD の default 値が ArgoCD を OutOfSync にする」)。
   relabelings:
     - sourceLabels: [__meta_kubernetes_pod_node_name]
       targetLabel: node
+      action: replace
 
 # chart 同梱のアラート (キーは複数形の prometheusRules)。
 # ただし media_errors / available_spare は NVMe 用メトリクスで SATA では発火しない。

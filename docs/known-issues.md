@@ -405,7 +405,7 @@ kubectl diff --server-side --field-manager=argocd-controller -f <manifest>
 
 **先回りして全部書く必要はない**: 同条件（live のみに存在する CRD default）でも Synced のままのものが、実測スイープで数十件規模ある。CRD に限っても TracingPolicy（実在の schema default 109 件）、TaskFlow（`.spec.ttl` 等、3 件）、CNPG Cluster（41 件）、SpinApp（11 件）、ExternalSecret（14 件）などが該当し Synced のまま。実測で OutOfSync になったものだけ git に写す。
 
-**実績（実測で OutOfSync だったもの）**: 2026-03-07 `clusterpolicy-verify-images.yaml`、2026-09-19 `clusterpolicy-require-kata-runtime.yaml` + `manifests/llm-gateway/securitypolicy.yaml`（`SecurityPolicy/llm-gateway-client-keys`）、2026-09-21 `manifests/llm-gateway/github-mcp.yaml`（`HTTPRoute/github-mcp-ro` + `HTTPRoute/github-mcp-rw`）、2026-09-21 `manifests/llm-gateway/github-mcp-gateway.yaml`（`Gateway/github-mcp` の `listeners[].allowedRoutes` と `tls.certificateRefs[].group` / `.kind`）。
+**実績（実測で OutOfSync だったもの）**: 2026-03-07 `clusterpolicy-verify-images.yaml`、2026-09-19 `clusterpolicy-require-kata-runtime.yaml` + `manifests/llm-gateway/securitypolicy.yaml`（`SecurityPolicy/llm-gateway-client-keys`）、2026-09-21 `manifests/llm-gateway/github-mcp.yaml`（`HTTPRoute/github-mcp-ro` + `HTTPRoute/github-mcp-rw`）、2026-09-21 `manifests/llm-gateway/github-mcp-gateway.yaml`（`Gateway/github-mcp` の `listeners[].allowedRoutes` と `tls.certificateRefs[].group` / `.kind`）、2026-09-26 `helm-values/smartctl-exporter/values.yaml`（`ServiceMonitor` の `endpoints[].relabelings[].action`。chart 経由の values でも同じ）。
 
 **listener を足すまで表面化しなかった例がある。** `Gateway/github-mcp` は listener 1 本の間は `allowedRoutes` が live のみでも Synced だったが、2 本目以降を足した時点で OutOfSync になった。「今 Synced だから書かなくてよい」は、そのオブジェクトの形が変わるまでの話。
 

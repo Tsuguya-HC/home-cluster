@@ -73,9 +73,8 @@ ExternalSecret: `manifests/secrets/talos-build-secureboot-signing-keys.yaml`
 talos-build アプリを同期したときに `talos-extension-bump` Sensor が起動する経路（version 未指定
 ＝最新 release を解決）。後者は `manifests/talos-build/` が変われば発火するので、拡張の digest
 更新だけでなく argo-tools の digest bump のような無関係な変更でも走る。焼き直すと
-`installer:<version>` が同じタグに上書きされ、home-infra の cluster.yaml の talosVersion を追う Renovate の
-`minimumReleaseAge` がイメージの created から測るためリセットされる——`plan-build` はこれを
-止めるために居る。
+`installer:<version>` が同じタグに上書きされるだけで意味がない。`plan-build` は無関係な
+変更のたびに 16 分×2 のビルドを丸ごと走らせないために居る。
 
 比較材料は、run ごとに Argo が `status.storedWorkflowTemplateSpec` へ凍結する imager の引数（拡張の digest
 とカーネル引数）と、`resolve-version` が出した版。**署名鍵のローテーションと、同じ版のまま

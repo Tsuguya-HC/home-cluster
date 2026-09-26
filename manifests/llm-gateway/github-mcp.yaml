@@ -76,6 +76,21 @@ spec:
         kind: Secret
         name: github-mcp-credential-rw
 ---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: HTTPRouteFilter
+metadata:
+  name: github-mcp-credential-issues
+  namespace: llm-gateway
+spec:
+  credentialInjection:
+    header: Authorization
+    overwrite: true
+    credential:
+      valueRef:
+        group: ""
+        kind: Secret
+        name: github-mcp-credential-issues
+---
 # 読み取り専用ロール。App は tgy-hc-tf-reviewer（contents:read + issues:read）。
 #
 # **パスの書き換えで GitHub 側のツールセットを固定する。** 呼ぶ側は /ro しか知らず、
@@ -167,6 +182,49 @@ spec:
           port: 443
           weight: 1
 ---
+# 起票ロール（#1081）。App は tgy-hc-tf-issuer（issues:write のみ）。ツールセットは
+# issue の道具だけ（/mcp/x/issues）。App が issue 以外を書けないので、パスの絞りと
+# 二重になる。
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: github-mcp-issues
+  namespace: llm-gateway
+spec:
+  parentRefs:
+    - name: github-mcp
+      kind: Gateway
+      group: gateway.networking.k8s.io
+      # listener を明示する。書かないと hostnames を持たないこのルートが
+      # HTTPS listener（#1038 の REST / GraphQL / git 用）にも張り付き、
+      # gh-ro / gh-rw のホスト名でも MCP が開く。
+      sectionName: http
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /issues
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            hostname: api.githubcopilot.com
+            path:
+              type: ReplaceFullPath
+              replaceFullPath: /mcp/x/issues
+        - type: ExtensionRef
+          extensionRef:
+            group: gateway.envoyproxy.io
+            kind: HTTPRouteFilter
+            name: github-mcp-credential-issues
+      backendRefs:
+        # weight は CRD の既定値。書かないと apiserver が埋めた値とマニフェストが
+        # 食い違い、Application が永久に OutOfSync になる。
+        - name: github-mcp
+          kind: Backend
+          group: gateway.envoyproxy.io
+          port: 443
+          weight: 1
+---
 # **ロールの分離はここ。** ルート単位に別の鍵集合を持たせることで、ro の鍵で rw の
 # ルートは叩けない（2026-09-20 に実測。他ルートの鍵は 401）。
 #
@@ -218,6 +276,26 @@ spec:
       - group: ""
         kind: Secret
         name: github-mcp-rw-client-keys
+    extractFrom:
+      - headers: [x-github-client]
+    sanitize: true
+    forwardClientIDHeader: x-github-client-id
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: github-mcp-issues
+  namespace: llm-gateway
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: github-mcp-issues
+  apiKeyAuth:
+    credentialRefs:
+      - group: ""
+        kind: Secret
+        name: github-mcp-issues-client-keys
     extractFrom:
       - headers: [x-github-client]
     sanitize: true

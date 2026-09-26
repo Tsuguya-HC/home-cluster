@@ -26,12 +26,19 @@ subjects:
 # 参照先の中身が入れ替わっても静かに通る。実際この層は、ro と rw が同じ Secret を
 # 指したまま一度実装された（レビューで発見）。
 #
-# 往復は 3 つで、**肯定側を 1 つ必ず含める**。否定側だけだと「認証が壊れて
-# 何もかも 401」という状態が全部緑に見える。
+# 往復は 2 ロール分、計 7 つで、**ロールごとに肯定側を 1 つ必ず含める**。
+# 否定側だけだと「認証が壊れて何もかも 401」という状態が全部緑に見える。
 #
-#   1. ro の鍵 → /rw  : 401。ロール分離そのもの
-#   2. 無効な鍵 → /ro : 401。認証が生きている
-#   3. ro の鍵 → /ro  : 200。1 と 2 が「全部 401」で成立していないこと
+#   ro の鍵    → /rw     : 401。ロール分離そのもの
+#   ro の鍵    → /issues : 401。起票ロール（#1081）との分離
+#   issues の鍵 → /ro    : 401。逆方向。起票ロールの鍵が ro のルートへ回り込まないこと
+#   issues の鍵 → /rw    : 401。同上、rw のルートへ回り込まないこと
+#   無効な鍵   → /ro     : 401。認証が生きている
+#   ro の鍵    → /ro     : 200。上の否定側だけで「全部 401」が成立していないこと
+#   issues の鍵 → /issues : 200。同上、issues ロール側の肯定側
+#
+# **片道（ro→/issues）だけでは「issues ロールも分離されている」とは言えない。**
+# issues の鍵が ro/rw のルートに届かないことを確かめて初めて分離と言える。
 #
 # **CNP に api.githubcopilot.com を書かない。** 書かなければ、この Pod が
 # gateway を迂回して直接 GitHub へ出ようとした時点で drop されて落ちる。
@@ -114,9 +121,11 @@ spec:
         env:
           - name: HOME
             value: /tmp
-          # 読み取り専用ロールの鍵。**この workflow に rw の鍵は渡さない** ——
-          # 渡せば「rw の鍵で rw に入れる」ことしか確かめられず、分離の検査に
-          # ならない。ここで要るのは「ro の鍵が rw に届かない」の側。
+          # smoke に渡すのは ro と issues（起票ロール、#1081）の smoke 専用鍵だけ。
+          # **rw の鍵は渡さない** —— rw は contents・pull requests を書ける鍵なので、
+          # smoke の Pod には置かない。ro・issues の鍵はそれぞれ自分のルート以外に
+          # 届かないはずの鍵で、ロールの取り違えを検知する往復に使う。rw ロールに
+          # ついては、この往復（rw の鍵で他のルートに入れないこと）を確かめていない。
           #
           # smoke 専用の client ID（1Password の property `github-mcp-smoke`）を使う。
           # pr-review handler 用の ID を借りると、gateway のアクセスログで
@@ -127,6 +136,16 @@ spec:
               secretKeyRef:
                 name: github-mcp-ro-client-keys
                 key: github-mcp-smoke
+          # 起票ロールの smoke 専用の client ID（1Password の property
+          # `github-mcp-smoke-issues`）。本物の起票 handler 用の ID を借りると、
+          # gateway のアクセスログで smoke と本物の handler が区別できなくなり、
+          # smoke 側から鍵が漏れればそれは本番鍵の漏洩になる。片方だけ revoke する
+          # こともできない。
+          - name: SMOKE_ISSUES_KEY
+            valueFrom:
+              secretKeyRef:
+                name: github-mcp-issues-client-keys
+                key: github-mcp-smoke-issues
         volumeMounts:
           - name: tmp
             mountPath: /tmp
@@ -166,12 +185,17 @@ spec:
               fi
             }
 
-            # ロール分離。ro の鍵は rw のルートに届かない。
+            # ロール分離。ro の鍵は rw・issues のルートに届かない。
             probe "ro-key-on-rw-route" /rw "$SMOKE_KEY" 401
+            probe "ro-key-on-issues-route" /issues "$SMOKE_KEY" 401
+            # 逆方向。issues の鍵は ro・rw のルートに届かない。
+            probe "issues-key-on-ro-route" /ro "$SMOKE_ISSUES_KEY" 401
+            probe "issues-key-on-rw-route" /rw "$SMOKE_ISSUES_KEY" 401
             # 認証が生きている。どのロールにも属さない値は通らない。
             probe "invalid-key-on-ro-route" /ro "not-a-real-key" 401
-            # 肯定側。上の 2 つが「全部 401」で成立していないことを示す。
+            # 肯定側。上の否定側だけで「全部 401」が成立していないことを示す。
             probe "ro-key-on-ro-route" /ro "$SMOKE_KEY" 200
+            probe "issues-key-on-issues-route" /issues "$SMOKE_ISSUES_KEY" 200
 
             [ "$FAILED" -eq 0 ] || exit 1
             echo "github-mcp boundary intact"

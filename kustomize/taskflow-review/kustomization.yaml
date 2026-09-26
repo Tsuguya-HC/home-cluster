@@ -17,6 +17,7 @@ resources:
   - roles/precedent
   - roles/ui
   - triage/handler.yaml
+  - filer/handler.yaml
 
 # TaskHandler は CRD なので、kustomize は中の ConfigMap 参照を書き換えない。
 # ハッシュを付けると参照が切れる。

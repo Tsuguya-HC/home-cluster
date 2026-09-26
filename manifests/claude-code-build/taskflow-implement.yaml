@@ -141,6 +141,8 @@ spec:
         volumes:
           - name: tmp
             emptyDir: {}
+          - name: pgdata
+            emptyDir: {}
           - name: parts
             emptyDir: {}
           # gateway の呼び出し元鍵をファイルで渡す先。agent 側の入口で読んで消す。
@@ -172,7 +174,7 @@ spec:
           # private な parts リポを gateway の ro ホスト経由で引く（#1038）。鍵は ro の
           # 呼び出し元鍵で、この init の env にだけある（agent には渡らない）。
           - name: parts
-            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:1625fed3647f11f035b02976767b548637aba728b1c5dd4c6f4ee8739fc2dd8e
+            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:960f3d3e88c28add4d14787303df9a78936fe75128c8e88c0aad1b3078e0f546
             command: [parts]
             args: [-s, implement-tests, -s, implement, -c, verdict-protocol, -c, untrusted-input, -c, build-sandbox]
             env:
@@ -225,6 +227,35 @@ spec:
             resources:
               requests: {cpu: 10m, memory: 16Mi}
               limits: {cpu: 100m, memory: 64Mi}
+          # 対象リポの e2e（e2e/run.sh）が使う使い捨ての PostgreSQL（#1072）。native sidecar
+          # なので agent が終われば一緒に止まり、startupProbe が通るまで agent は始まらない。
+          # 127.0.0.1 だけで待ち受け、認証は trust（Pod の外からは届かず、中の agent には
+          # 使わせるのが目的）。データは Pod と一緒に消える。
+          # 5432 から動かさないこと: 対象リポの component は postgres://*:5432 にしか繋げない。
+          - name: postgres
+            image: postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
+            restartPolicy: Always
+            command: [docker-entrypoint.sh]
+            args: [postgres, -c, listen_addresses=127.0.0.1, -c, fsync=off]
+            env:
+              - {name: POSTGRES_HOST_AUTH_METHOD, value: trust}
+              - {name: PGDATA, value: /pgdata/db}
+            startupProbe:
+              exec:
+                command: [pg_isready, -h, 127.0.0.1, -U, postgres]
+              periodSeconds: 2
+              failureThreshold: 60
+            securityContext:
+              runAsUser: 70
+              runAsGroup: 70
+              runAsNonRoot: true
+              allowPrivilegeEscalation: false
+              capabilities: {drop: [ALL]}
+            volumeMounts:
+              - {name: pgdata, mountPath: /pgdata}
+            resources:
+              requests: {cpu: 100m, memory: 128Mi}
+              limits: {cpu: "1", memory: 512Mi}
         # LLM の API キーはこの Pod のどのコンテナにも無い（#942）。
         #
         # エージェントは信頼できない入力（issue 本文）を読んで Bash を実行する。キーが
@@ -235,7 +266,7 @@ spec:
         # agent が知っているのは gateway の URL と alias だけ。
         containers:
           - name: agent
-            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:1625fed3647f11f035b02976767b548637aba728b1c5dd4c6f4ee8739fc2dd8e
+            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:960f3d3e88c28add4d14787303df9a78936fe75128c8e88c0aad1b3078e0f546
             workingDir: /workspace
             securityContext:
               # VM の中の特権。ホストには及ばない（containerd が
@@ -405,8 +436,15 @@ spec:
                   TEST_CMD="cargo test --workspace --target ${HOST_TRIPLE}"
                 elif [ -f /scratch/src/package.json ]; then
                   TEST_CMD="pnpm test"
+                  NEEDS_PNPM_INSTALL=1
                 else
                   give_up "テストの回し方が分からないリポジトリ（Cargo.toml も package.json も無い）。実装は行っていない。"
+                fi
+                # e2e を持つリポでは、変更前・赤・緑の確認に e2e も含める。DB はサイドカー。
+                E2E_DATABASE_URL=
+                if [ -f /scratch/src/e2e/run.sh ]; then
+                  E2E_DATABASE_URL="postgres://postgres@127.0.0.1:5432/postgres?sslmode=disable"
+                  TEST_CMD="${TEST_CMD} && bash e2e/run.sh"
                 fi
 
                 as_agent() {
@@ -419,6 +457,7 @@ spec:
                         CLAUDE_CODE_SUBAGENT_MODEL="$LLM_ALIAS" \
                         CARGO_HOME=/scratch/cargo \
                         XDG_DATA_HOME=/scratch/xdg-data \
+                        E2E_DATABASE_URL="$E2E_DATABASE_URL" \
                         "$@"
                 }
                 # setpriv が（イメージの入れ替わり等で）黙って降格に失敗すると、この後の
@@ -518,7 +557,9 @@ spec:
                 # cargo は $TEST_CMD 自体が必要な crate を取得するのでここでは何もしない。
                 # pnpm は fresh clone に node_modules が無いと `pnpm test` がテストランナーを
                 # 見つけられず baseline から必ず落ちるので、先に install しておく。
-                if [ "$TEST_CMD" = "pnpm test" ]; then
+                # NEEDS_PNPM_INSTALL で判定する（package.json 分岐でのみ立つ）— TEST_CMD の
+                # 文字列一致だと e2e を足した後の "pnpm test && bash e2e/run.sh" が外れる。
+                if [ -n "${NEEDS_PNPM_INSTALL:-}" ]; then
                   if ! supervise as_agent sh -c "cd /scratch/src && pnpm install --frozen-lockfile" > /tmp/pnpm-install.log 2>&1; then
                     { echo "pnpm install --frozen-lockfile に失敗した。実装は行っていない。"
                       echo

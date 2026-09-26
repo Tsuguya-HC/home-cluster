@@ -24,6 +24,7 @@ rules:
     resourceNames:
       - github-mcp-credential-ro
       - github-mcp-credential-rw
+      - github-mcp-credential-issues
       # git smart HTTP 用（#1038）。同じトークンだが Basic 形式で、rotator が
       # 同じ run の中で書く。ここに足し忘れると rotator が 403 で落ちる。
       - github-git-credential-ro

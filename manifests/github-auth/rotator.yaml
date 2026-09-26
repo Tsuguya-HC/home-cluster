@@ -24,7 +24,7 @@ metadata:
 # **`github-mcp-credential-*`（llm-gateway ns）は GitOps 管理外。** この CronJob が
 # `kubectl apply --server-side` で実行時に直接書くだけで、この機能を revert しても
 # 消えない（llm-gateway namespace ごと消える revert ではないため）。手動で消すなら
-# `kubectl delete secret -n llm-gateway github-mcp-credential-ro github-mcp-credential-rw \
+# `kubectl delete secret -n llm-gateway github-mcp-credential-ro github-mcp-credential-rw github-mcp-credential-issues \
 #   github-git-credential-ro github-git-credential-rw`。
 # github-auth namespace 側（この CronJob 自身や SA）は namespace ごと prune されるので
 # 手当て不要。
@@ -79,6 +79,10 @@ spec:
               secret:
                 secretName: tf-coder-github-app-private-key
                 defaultMode: 0440
+            - name: key-issues
+              secret:
+                secretName: tf-issuer-github-app-private-key
+                defaultMode: 0440
             - name: github-app
               emptyDir: {}
             - name: github-token
@@ -112,6 +116,9 @@ spec:
                 - name: key-rw
                   mountPath: /keys/rw
                   readOnly: true
+                - name: key-issues
+                  mountPath: /keys/issues
+                  readOnly: true
                 - name: github-app
                   mountPath: /github-app
                 - name: github-token
@@ -122,7 +129,7 @@ spec:
               args:
                 - |
                   set -eu
-                  for role in ro rw; do
+                  for role in ro rw issues; do
                     cp "/keys/${role}/private-key" /github-app/private-key
                     GITHUB_APP_ID=$(cat "/keys/${role}/app-id")
                     export GITHUB_APP_ID
@@ -157,6 +164,12 @@ spec:
                       --from-file=credential=/tmp/credential \
                       --dry-run=client -o yaml \
                       | kubectl apply --server-side --force-conflicts -f -
+                    # 起票ロールは MCP だけで使い、git は通さない。
+                    if [ "$role" = issues ]; then
+                      rm -f /github-app/private-key /github-token/token /tmp/credential
+                      echo "rotated: ${role}"
+                      continue
+                    fi
                     # git smart HTTP 用（#1038）。**上の Bearer とは別の形式で持つこと**:
                     # Basic base64(x-access-token:TOKEN)。
                     # base64 は -w0 で折り返しを止める。折り返しの \n が値に入ると、

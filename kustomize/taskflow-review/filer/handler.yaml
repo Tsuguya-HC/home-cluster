@@ -1,0 +1,370 @@
+# 起票（#1081）。仕分けが「この PR では直さない」「確かめられなかった」として残した候補を、
+# issue にする・既存の issue に足す・起票しない、のどれかに決めて GitHub に書く。
+#
+# GitHub への書き込みは MCP の /issues ルートだけ（issue の道具だけ、トークンは issues:write
+# だけの App）。agent が持つのは gateway のクライアント鍵で、GitHub の資格情報ではない。
+# **agent に Bash を渡さない** — 書く手段を MCP の道具に限るため。
+#
+# 投稿先のリポと件数は gateway では縛れない（トークンは org の全リポに効く）ので、agent の後に
+# この App が作った issue を数え、外れていれば Escalated にする。
+apiVersion: flow.tgy.io/v1alpha1
+kind: TaskHandler
+metadata:
+  name: review-file-issues
+spec:
+  phase: 起票
+  runner:
+    type: Job
+  timeout: 25m
+  maxInfraRetries: 1
+  workspace:
+    volume: flow-workspace
+    mountPath: /workspace
+  jobTemplate:
+    template:
+      metadata:
+        labels:
+          taskflow-review: "true"
+      spec:
+        restartPolicy: Never
+        runtimeClassName: kata
+        serviceAccountName: agent-reviewer
+        automountServiceAccountToken: false
+        terminationGracePeriodSeconds: 60
+        # runAsUser は必須（taskflow のコントローラが Job 構築時に検査する）。
+        securityContext:
+          runAsUser: 65533
+          runAsGroup: 65533
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        volumes:
+          - name: tmp
+            emptyDir: {}
+          - name: parts
+            emptyDir: {}
+          # gh-ro の呼び出し元鍵。init の取り込みと、agent の後の数え直しだけが使う。
+          - name: github-gateway-key
+            secret:
+              secretName: github-gateway-client-keys
+              defaultMode: 0444
+              items:
+                - key: taskflow-review
+                  path: key
+        initContainers:
+          - name: parts
+            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:960f3d3e88c28add4d14787303df9a78936fe75128c8e88c0aad1b3078e0f546
+            command: [sh, -c]
+            args:
+              - GH_ENTERPRISE_TOKEN=$(cat /github-gateway-key/key) exec parts -s review-file-issues -c untrusted-input
+            env:
+              - name: HOME
+                value: /tmp
+              - name: PARTS_REF
+                valueFrom:
+                  configMapKeyRef:
+                    name: parts-ref
+                    key: sha
+              - {name: GH_HOST, value: gh-ro.infra.tgy.io}
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities: {drop: [ALL]}
+            volumeMounts:
+              - {name: parts, mountPath: /parts}
+              - {name: tmp, mountPath: /tmp}
+              - {name: github-gateway-key, mountPath: /github-gateway-key, readOnly: true}
+            resources:
+              requests: {cpu: 50m, memory: 64Mi}
+              # Kata では全コンテナに limits.cpu が無いと、agent の cpu limit が VM サイズに
+              # 伝わらない。
+              limits: {cpu: 500m, memory: 256Mi}
+          # 失敗しても exit 0 で /tmp/fetch-error に書くこと。init が落ちると Pod が上がらず、
+          # escalate に理由を書く者がいなくなる。
+          - name: fetch
+            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:960f3d3e88c28add4d14787303df9a78936fe75128c8e88c0aad1b3078e0f546
+            command: [sh, -c]
+            args:
+              - |
+                set -eu
+                fail() { printf '%s\n' "$1" > /tmp/fetch-error; exit 0; }
+
+                REPO=$(printf '%s' "${FLOW_INPUT:-}" | jq -r '.repo // empty' 2>/dev/null || true)
+                case "$REPO" in
+                  Tsuguya-HC/*[!-A-Za-z0-9._]* | Tsuguya-HC/ | Tsuguya-HC/*/* | Tsuguya-HC/. | Tsuguya-HC/..)
+                    fail "spec.input.repo の形が不正。起票は行っていない。" ;;
+                  Tsuguya-HC/?*) ;;
+                  *) fail "spec.input.repo は Tsuguya-HC 配下だけを指定できる。起票は行っていない。" ;;
+                esac
+                ISSUE=$(printf '%s' "${FLOW_INPUT:-}" | jq -r '.issue // empty' 2>/dev/null || true)
+                case "$ISSUE" in
+                  '' | *[!0-9]*) fail "spec.input.issue が数字ではない。起票は行っていない。" ;;
+                esac
+
+                # 棚の番号は数値順に読む（辞書順では 10 が 2 より前に来る）。
+                PR_URL=
+                for f in $(printf '%s\n' /results/*/done/pr-url | sort -t/ -k3,3n); do
+                  [ -f "$f" ] || continue
+                  PR_URL=$(head -1 "$f")
+                done
+                case "$PR_URL" in
+                  "https://github.com/${REPO}/pull/"*) PR=${PR_URL##*/} ;;
+                  *) fail "対象の PR が棚（results/*/done/pr-url）に見つからない。起票は行っていない。" ;;
+                esac
+                case "$PR" in
+                  '' | *[!0-9]*) fail "棚の PR の URL が不正（${PR_URL}）。起票は行っていない。" ;;
+                esac
+
+                # 全周回の仕分けの報告。clean / fix は仕分けの語彙。
+                mkdir -p /tmp/triage || fail "/tmp/triage を作れなかった。起票は行っていない。"
+                for f in $(printf '%s\n' /results/*/clean/report.md /results/*/fix/report.md | sort -t/ -k3,3n); do
+                  [ -f "$f" ] || continue
+                  n=${f#/results/}; n=${n%%/*}
+                  cp "$f" "/tmp/triage/${n}.md" || fail "仕分けの報告をコピーできなかった（${f}）。起票は行っていない。"
+                done
+                [ -n "$(ls -A /tmp/triage)" ] || fail "仕分けの報告が棚に無い。起票は行っていない。"
+
+                KEY=$(cat /github-gateway-key/key) || fail "GitHub の鍵を読めなかった。起票は行っていない。"
+                [ -n "$KEY" ] || fail "GitHub の鍵が空だった。起票は行っていない。"
+                timeout 60 env GH_HOST=gh-ro.infra.tgy.io GH_ENTERPRISE_TOKEN="$KEY" gh api "repos/${REPO}/pulls/${PR}" > /tmp/pr-raw.json \
+                  || fail "PR #${PR} を取得できなかった（タイムアウトを含む）。起票は行っていない。"
+                jq '{number, title, html_url}' < /tmp/pr-raw.json > /tmp/pr.json 2>/dev/null \
+                  || fail "PR #${PR} を読めなかった。起票は行っていない。"
+                timeout 60 env GH_HOST=gh-ro.infra.tgy.io GH_ENTERPRISE_TOKEN="$KEY" gh api "repos/${REPO}/issues/${ISSUE}" > /tmp/issue-raw.json \
+                  || fail "issue #${ISSUE} を取得できなかった（タイムアウトを含む）。起票は行っていない。"
+                jq '{number, title, body, html_url}' < /tmp/issue-raw.json > /tmp/issue.json 2>/dev/null \
+                  || fail "issue #${ISSUE} を読めなかった。起票は行っていない。"
+                rm -f /tmp/pr-raw.json /tmp/issue-raw.json
+
+                printf '%s\n' "$REPO" > /tmp/repo || fail "/tmp/repo を書けなかった。起票は行っていない。"
+                printf '%s\n' "$PR" > /tmp/pr-number || fail "/tmp/pr-number を書けなかった。起票は行っていない。"
+                printf '%s\n' "$ISSUE" > /tmp/issue-number || fail "/tmp/issue-number を書けなかった。起票は行っていない。"
+            env:
+              - name: HOME
+                value: /tmp
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities: {drop: [ALL]}
+            volumeMounts:
+              - {name: tmp, mountPath: /tmp}
+              - {name: github-gateway-key, mountPath: /github-gateway-key, readOnly: true}
+              # 過去の全 run の棚（taskflow ADR-0003）。PR の URL と全周回の仕分けを読む。
+              - {name: flow-workspace, mountPath: /results, subPath: results, readOnly: true}
+            resources:
+              requests: {cpu: 100m, memory: 128Mi}
+              limits: {cpu: "1", memory: 512Mi}
+        containers:
+          - name: agent
+            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:960f3d3e88c28add4d14787303df9a78936fe75128c8e88c0aad1b3078e0f546
+            workingDir: /workspace
+            command: [sh, -c]
+            args:
+              - |
+                set -eu
+                # Job の期限に達するとコントローラは理由を読まずに settle するので、その手前で自分から降りる。
+                DEADLINE=$(( $(date +%s) + 17*60 ))
+                checked=""
+                ESCALATE=/workspace/escalate
+                FILED=/workspace/filed
+                give_up() {
+                  find "$FILED" -mindepth 1 -delete 2>/dev/null || true
+                  printf '%s\n' "$1" > "$ESCALATE/report.md"; sync; exit 0
+                }
+
+                if [ -f /tmp/fetch-error ]; then
+                  give_up "$(cat /tmp/fetch-error)"
+                fi
+                REPO=$(cat /tmp/repo); PR=$(cat /tmp/pr-number); ISSUE=$(cat /tmp/issue-number)
+
+                code=$(curl -s --max-time 5 -o /dev/null -w '%{http_code}' \
+                  -H "Authorization: Bearer $ANTHROPIC_AUTH_TOKEN" \
+                  "${ANTHROPIC_BASE_URL}/" || true)
+                [ "$code" = 404 ] \
+                  || give_up "llm-gateway に接続できない（HTTP ${code:-なし}）。起票は行っていない。"
+
+                # MCP の設定。鍵はファイルに置く（argv に載せない）。--strict-mcp-config で
+                # これ以外の MCP サーバーを読ませない。
+                ( umask 077
+                  jq -n --arg key "$MCP_CLIENT_KEY" '{mcpServers: {github: {type: "http",
+                    url: "http://github-mcp.llm-gateway.svc.cluster.local/issues",
+                    headers: {"x-github-client": $key}}}}' > /tmp/mcp.json )
+
+                # 数え直しの起点。GitHub の created は秒単位なので、少し前から数える。
+                START=$(date -u -d '-1 minute' +%Y-%m-%dT%H:%M:%SZ)
+
+                # sub-issue の付け外しと既存コメントの書き換えはこの起票の仕事に要らない。agent に Bash が無いので、この 2 つを塞げば実際に使える手段は無い。
+                timeout -k 10 10m claude -p "/review-file-issues ${REPO} の PR #${PR}（issue #${ISSUE}）" \
+                  --plugin-dir /parts \
+                  --append-system-prompt-file /parts/CLAUDE.md \
+                  --mcp-config /tmp/mcp.json --strict-mcp-config \
+                  --verbose \
+                  --output-format stream-json \
+                  --dangerously-skip-permissions \
+                  --allowedTools "Read,Write,Glob,Grep,mcp__github" \
+                  --disallowedTools "mcp__github__sub_issue_write,mcp__github__update_issue_comment" \
+                  --model review \
+                  --max-turns 80 < /dev/null &
+                pid=$!
+                trap 'kill -TERM $pid 2>/dev/null || true
+                      i=0
+                      while kill -0 $pid 2>/dev/null && [ $i -lt 10 ]; do sleep 1; i=$((i+1)); done
+                      kill -KILL $pid 2>/dev/null || true
+                      sync || true
+                      exit 143' TERM INT
+                rc=0
+                wait $pid || rc=$?
+                trap - TERM INT
+                echo "claude exited with $rc"
+                rm -f /tmp/mcp.json
+
+                # 事後確認の途中で打ち切られても、理由が分からないまま黙って終わらせない。
+                trap 'give_up "事後確認の途中で打ち切られた。何件どこに作られたかは確かめられていない。"' TERM INT
+
+                # --- 数え直し: この App が今回作った issue / 対象外への影響 -----------
+                # 検索の索引は作成から数十秒遅れて更新される。1 回の数え直しだと索引の
+                # 遅れをすり抜けるので、60 秒ごとに 2 回数え、どちらかで見つかれば
+                # 該当として扱う。数えられなかったときは黙って通さない（数え直しが
+                # この handler の縛りの本体）。
+                # 本文の編集は Events API に残らないため、この数え直しでは捕まえられない。
+                # POSIX sh は前面のコマンドが終わるまで trap を実行しない。gh の呼び出しは
+                # 裏で動かし wait で待つことで、途中の TERM に即応できるようにする。
+                bg() { "$@" & bgpid=$!; wait "$bgpid"; }
+                # 内部の期限まで 60 秒を切ったら、そこまでに確かめた範囲を書いて自分から降りる。
+                check_deadline() {
+                  [ $(( DEADLINE - $(date +%s) )) -ge 60 ] \
+                    || give_up "事後確認が時間内に終わらなかった（内部の期限）。確かめられた範囲: ${checked:-なし}。"
+                }
+                recheck() {
+                  KEY=$(cat /github-gateway-key/key)
+
+                  check_deadline
+                  if ! bg timeout 30 env GH_HOST=gh-ro.infra.tgy.io GH_ENTERPRISE_TOKEN="$KEY" gh api -X GET search/issues \
+                       -f q="org:Tsuguya-HC author:app/tgy-hc-tf-issuer is:issue created:>=${START}" \
+                       -f per_page=100 > /tmp/created.json 2>/tmp/created.err; then
+                    give_up "起票の後の数え直し（作られた issue の検索）に失敗した。何件どこに作られたかは確かめられていない。$(tail -3 /tmp/created.err)"
+                  fi
+                  total=$(jq '.total_count' /tmp/created.json) \
+                    || give_up "起票の後の数え直し（作られた issue の件数）を読めなかった。何件どこに作られたかは確かめられていない。"
+                  elsewhere=$(jq -r --arg r "https://api.github.com/repos/${REPO}" \
+                    '[.items[] | select(.repository_url != $r) | .html_url] | join(" ")' /tmp/created.json) \
+                    || give_up "起票の後の数え直し（作られた issue の内訳）を読めなかった。何件どこに作られたかは確かめられていない。"
+                  if [ -n "$elsewhere" ]; then
+                    give_up "対象のリポ（${REPO}）以外に issue が作られた: ${elsewhere}。人が確認して閉じること。"
+                  fi
+                  if [ "$total" -gt 5 ]; then
+                    give_up "1 回の起票の上限（5 件）を超えて ${total} 件作られた。人が確認すること。$(jq -r '[.items[].html_url] | join(" ")' /tmp/created.json)"
+                  fi
+                  checked="${checked}作られた issue の検索 "
+
+                  # この App が対象外のリポにコメントを付けていないか。
+                  check_deadline
+                  if ! bg timeout 30 env GH_HOST=gh-ro.infra.tgy.io GH_ENTERPRISE_TOKEN="$KEY" gh api -X GET search/issues \
+                       -f q="org:Tsuguya-HC commenter:app/tgy-hc-tf-issuer updated:>=${START} -repo:${REPO}" \
+                       -f per_page=100 > /tmp/commented.json 2>/tmp/commented.err; then
+                    give_up "起票の後の数え直し（対象外へのコメントの検索）に失敗した。何件どこに書かれたかは確かめられていない。$(tail -3 /tmp/commented.err)"
+                  fi
+                  commented_total=$(jq '.total_count' /tmp/commented.json) \
+                    || give_up "起票の後の数え直し（対象外へのコメントの件数）を読めなかった。何件どこに書かれたかは確かめられていない。"
+                  if [ "$commented_total" -gt 0 ]; then
+                    give_up "対象のリポ（${REPO}）以外にこの App がコメントを付けた: $(jq -r '[.items[].html_url] | join(" ")' /tmp/commented.json)。人が確認すること。"
+                  fi
+                  checked="${checked}対象外へのコメントの検索 "
+
+                  # この App が issue を閉じていないか（org 全体、直近分）。
+                  check_deadline
+                  if ! bg timeout 30 env GH_HOST=gh-ro.infra.tgy.io GH_ENTERPRISE_TOKEN="$KEY" gh api -X GET search/issues \
+                       -f q="org:Tsuguya-HC is:issue is:closed closed:>=${START}" \
+                       -f per_page=20 > /tmp/closed.json 2>/tmp/closed.err; then
+                    give_up "起票の後の数え直し（閉じられた issue の検索）に失敗した。何件閉じられたかは確かめられていない。$(tail -3 /tmp/closed.err)"
+                  fi
+                  closed_total=$(jq '.total_count' /tmp/closed.json) \
+                    || give_up "起票の後の数え直し（閉じられた issue の件数）を読めなかった。何件閉じられたかは確かめられていない。"
+                  if [ "$closed_total" -gt 10 ]; then
+                    give_up "窓の間に org 全体で closed の 10 件を超えて閉じられた（${closed_total} 件）ため、全件を確かめていない。人が確認すること。"
+                  fi
+                  if ! jq -r '.items[] | (.repository_url | sub("https://api.github.com/repos/"; "")) + " " + (.number|tostring)' /tmp/closed.json > /tmp/closed-list; then
+                    give_up "起票の後の数え直し（閉じられた issue の内訳）を読めなかった。何件閉じられたかは確かめられていない。"
+                  fi
+                  checked="${checked}閉じられた issue の検索 "
+                  while IFS=' ' read -r crepo cnum; do
+                    [ -n "$crepo" ] || continue
+                    # 1 周目で確かめ済みの issue は 2 周目で取り直さない。
+                    key="${crepo}#${cnum}"
+                    if grep -qxF "$key" /tmp/events-checked 2>/dev/null; then
+                      continue
+                    fi
+                    check_deadline
+                    if ! bg timeout 30 env GH_HOST=gh-ro.infra.tgy.io GH_ENTERPRISE_TOKEN="$KEY" gh api "repos/${crepo}/issues/${cnum}/events" > /tmp/events.json 2>/tmp/events.err; then
+                      give_up "起票の後の数え直し（issue #${cnum} の events 取得）に失敗した。閉じたのがこの App かは確かめられていない。$(tail -3 /tmp/events.err)"
+                    fi
+                    closer_count=$(jq '[.[] | select(.event == "closed" and .actor.login == "tgy-hc-tf-issuer[bot]")] | length' /tmp/events.json) \
+                      || give_up "起票の後の数え直し（issue #${cnum} の events の読み取り）に失敗した。閉じたのがこの App かは確かめられていない。"
+                    if [ "$closer_count" -gt 0 ]; then
+                      give_up "この App が issue を閉じた形跡がある: https://github.com/${crepo}/issues/${cnum}。人が確認すること。"
+                    fi
+                    printf '%s\n' "$key" >> /tmp/events-checked
+                  done < /tmp/closed-list
+                }
+                sleep 60
+                recheck
+                sleep 60
+                recheck
+
+                case "$rc" in
+                  124 | 137 | 143)
+                    if [ -z "$(ls -A "$FILED" 2>/dev/null)" ] && [ -z "$(ls -A "$ESCALATE" 2>/dev/null)" ]; then
+                      give_up "claude が 10m で打ち切られた。起票の報告は書かれていない（作られた issue: ${total} 件）。"
+                    fi
+                    ;;
+                esac
+                sync
+            env:
+              - name: HOME
+                value: /tmp
+              - name: ANTHROPIC_BASE_URL
+                value: http://llm-gateway.llm-gateway.svc.cluster.local/anthropic
+              # 3 本とも外さないこと。ANTHROPIC_BASE_URL を向けても api.anthropic.com へ
+              # 直行する通信がある（#998）。
+              - name: DISABLE_TELEMETRY
+                value: "1"
+              - name: DISABLE_ERROR_REPORTING
+                value: "1"
+              - name: CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC
+                value: "1"
+              # gateway のクライアントキー。**LLM の資格情報ではない。**
+              - name: ANTHROPIC_AUTH_TOKEN
+                valueFrom:
+                  secretKeyRef:
+                    name: llm-gateway-client-keys
+                    key: taskflow-review
+              # 空にしないと OAuth 側が優先されて Anthropic 直行になる（CNP で落ちる）。
+              - name: ANTHROPIC_API_KEY
+                value: ""
+              - name: ANTHROPIC_CUSTOM_HEADERS
+                value: "x-tf-handler: taskflow-review-file-issues"
+              # サブエージェントは親のモデルを継がない。固定しないと gateway にルートが無い。
+              - name: CLAUDE_CODE_SUBAGENT_MODEL
+                value: review
+              # GitHub MCP gateway のクライアント鍵。**GitHub の資格情報ではない。**
+              - name: MCP_CLIENT_KEY
+                valueFrom:
+                  secretKeyRef:
+                    name: github-mcp-issues-client-keys
+                    key: taskflow-file-issues
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop: [ALL]
+            volumeMounts:
+              - {name: flow-workspace, mountPath: /workspace}
+              - {name: tmp, mountPath: /tmp}
+              - {name: parts, mountPath: /parts, readOnly: true}
+              - {name: github-gateway-key, mountPath: /github-gateway-key, readOnly: true}
+            resources:
+              requests:
+                cpu: 500m
+                memory: 512Mi
+              limits:
+                cpu: "2"
+                memory: 2Gi

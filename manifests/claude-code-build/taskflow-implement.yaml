@@ -85,9 +85,9 @@ spec:
   phase: 実装
   runner:
     type: Job
-  # claude 2 回 + テスト 3 回 + 依存の取得。Rust のフルビルドは実測 19〜22 分だったので、
-  # pr-review の 30m では足りない。
-  timeout: 60m
+  # 打ち切りはこれだけ（claude の回ごとには切らない）。競合を落ちるテストにする回は
+  # 15 分を超えた（2026-09-26 実測）。
+  timeout: 120m
   maxInfraRetries: 1
   # 判定（done / escalate）の置き場。Block スクラッチには置けない — FS がゲスト内にあるので
   # publish サイドカーから読めない（docs/kata-storage.md）。重い作業は Block、渡すものは workspace。
@@ -553,38 +553,13 @@ spec:
                 }
                 # claude は作業ツリー（/scratch/src）ではなく workingDir の /workspace で
                 # 起動してしまうので、run_tests と同じく sh -c 越しに cd する。
-                #
-                # timeout は gateway が一時的に落ちて claude CLI が長時間ブロックしたときに、
-                # Job 全体の timeout: 60m を丸ごと・maxInfraRetries を診断情報ゼロで消費するのを
-                # 防ぐための下限。exec するので timeout の終了コードがそのまま run_agent の
-                # 戻り値になり、claude 自身の非ゼロ終了と呼び出し側で区別できる。
-                #
-                # イメージの timeout は GNU coreutils。打ち切り時の終了コードは 124 で、TERM を
-                # 無視されて -k の KILL まで行けば 137（2026-09-20 実測。イメージ内で
-                # `timeout -k 10 1 sleep 30` → 124、`timeout -k 2 1 bash -c 'trap "" TERM; sleep 30'`
-                # → 137）。下の判定が 143 も受け続けるのは、このイメージが alpine だった頃の
-                # BusyBox applet が SIGTERM の 143 を返していたため（同じ実測で確認）。イメージを
-                # 旧 digest に戻したときに、打ち切りを claude 自身の失敗と取り違えないようにする。
-                # 143 は supervise() の trap が Job の TERM（activeDeadlineSeconds 到達）を
-                # 受けたときの exit コードでもあるが、その経路では trap が直接 exit するので
-                # このあと CLAUDE_RC を読む行に到達すること自体がない。つまり CLAUDE_RC の
-                # 比較まで来ている時点で 124 / 143 なら、それは run_agent 内の timeout が出した
-                # ものと確定できる（実測で「その行に到達しない」ことを確認済み）。
                 run_agent() {
-                  log="$1"; timeout_dur="$2"; shift 2
-                  supervise as_agent sh -c "cd /scratch/src && exec timeout -k 10 '$timeout_dur' claude \"\$@\"" claude "$@" < /dev/null > "$log" 2>&1
-                }
-                # stream-json の末尾は思考の進捗行で埋まり、何をしていたかが読めない。
-                # 切り詰めは jq の中で行う（jq の文字列スライスはコードポイント単位。
-                # cut -c はこのイメージの LC_CTYPE=POSIX ではバイト単位になり、日本語の
-                # 境界にかかると不正な UTF-8 が escalate report に混ざる）。
-                last_tools() {
-                  jq -Rrc 'fromjson? | select(.type == "assistant") | .message.content[]? | select(.type == "tool_use") | .input | tojson | .[0:400]' "$1" 2>/dev/null \
-                    | tail -10
+                  log="$1"; shift
+                  supervise as_agent sh -c "cd /scratch/src && exec claude \"\$@\"" claude "$@" < /dev/null > "$log" 2>&1
                 }
                 # gateway に繋がらない（Envoy が落ちている・CNP が閉じている）と、claude は
                 # upstream の 5xx とは違って error_status:null/"unknown" のまま延々リトライし続け、
-                # run_agent の timeout（15m/30m）に達するまで気付けない（実測。相手がブローカー
+                # Job の timeout に達するまで気付けない（実測。相手がブローカー
                 # だった頃と同じ症状）。claude を呼ぶ前に生死だけ先に見て、繋がらないなら呼ばずに
                 # 確定した報告を残す。
                 # 鍵まで見る。gateway には SecurityPolicy が掛かっていて、返る値で状態が割れる:
@@ -647,7 +622,7 @@ spec:
                 # 到達すること自体がない（done も escalate も書かれず NoAnswer になる）。
                 # || で括って set -e の対象から外す。
                 CLAUDE_RC=0
-                run_agent /tmp/claude-tests.log 15m \
+                run_agent /tmp/claude-tests.log \
                   -p "$TESTS_PROMPT" \
                   --plugin-dir /parts \
                   --append-system-prompt-file /parts/CLAUDE.md \
@@ -658,21 +633,10 @@ spec:
                   --max-turns 60 || CLAUDE_RC=$?
                 # 終了コードを握り潰すと、モデル slug 無効・認証失敗・クレジット切れが
                 # 全部「テストが 1 行も書かれなかった」に化ける。実態を先に報告する。
-                # 124/143 は run_agent 内の timeout 由来（打ち切り）で、claude 自身の失敗では
-                # ない。どちらの値がどのイメージから出るかは run_agent の定義側に書いてある。
-                if [ "$CLAUDE_RC" -eq 124 ] || [ "$CLAUDE_RC" -eq 143 ]; then
-                  { echo "テストの回の claude が 15m で終わらず打ち切られた（timeout の exit ${CLAUDE_RC}）。下の tool 呼び出しで何に時間を使ったかを見ること。呼び出しが途中で途絶えているなら llm-gateway との疎通を疑う。実装には進んでいない。"
-                    echo
-                    echo "最後の tool 呼び出し:"
-                    last_tools /tmp/claude-tests.log
-                  } > /tmp/giveup.txt
-                  give_up_file /tmp/giveup.txt
-                elif [ "$CLAUDE_RC" -ne 0 ]; then
+                if [ "$CLAUDE_RC" -ne 0 ]; then
                   { echo "テストの回の claude が失敗した（exit ${CLAUDE_RC}）。実装には進んでいない。"
-                    # 137 は run_agent 内の timeout が -k で KILL した場合と OOMKill の
-                    # どちらでも出る値で、この情報だけでは決まらない。決めたと嘘をつかない。
                     if [ "$CLAUDE_RC" -eq 137 ]; then
-                      echo "（137 は timeout の -k による KILL か OOMKill のどちらか。kubectl describe pod で OOMKilled を確認すること）"
+                      echo "（137 は KILL。kubectl describe pod で OOMKilled かを確認すること）"
                     fi
                     echo
                     echo "stream-json の末尾:"
@@ -734,7 +698,7 @@ spec:
                 check_gateway \
                   || give_up "llm-gateway に接続できない。${NOT_PUSHED}llm-gateway namespace の Envoy と、claude-code-build 側／llm-gateway 側の CNP を確認すること。"
                 CLAUDE_RC=0
-                run_agent /tmp/claude-implement.log 30m \
+                run_agent /tmp/claude-implement.log \
                   -p "$IMPL_PROMPT" \
                   --plugin-dir /parts \
                   --append-system-prompt-file /parts/CLAUDE.md \
@@ -743,20 +707,10 @@ spec:
                   --allowedTools "Bash,Read,Write,Edit,Glob,Grep" \
                   --model "$LLM_ALIAS" \
                   --max-turns 120 || CLAUDE_RC=$?
-                # 124/143 は run_agent 内の timeout 由来（打ち切り）。上のテストの回と同じ理由。
-                if [ "$CLAUDE_RC" -eq 124 ] || [ "$CLAUDE_RC" -eq 143 ]; then
-                  { echo "実装の回の claude が 30m で終わらず打ち切られた（timeout の exit ${CLAUDE_RC}）。下の tool 呼び出しで何に時間を使ったかを見ること。呼び出しが途中で途絶えているなら llm-gateway との疎通を疑う。${NOT_PUSHED}"
-                    echo
-                    echo "最後の tool 呼び出し:"
-                    last_tools /tmp/claude-implement.log
-                  } > /tmp/giveup.txt
-                  give_up_file /tmp/giveup.txt
-                elif [ "$CLAUDE_RC" -ne 0 ]; then
+                if [ "$CLAUDE_RC" -ne 0 ]; then
                   { echo "実装の回の claude が失敗した（exit ${CLAUDE_RC}）。${NOT_PUSHED}"
-                    # 137 は run_agent 内の timeout が -k で KILL した場合と OOMKill の
-                    # どちらでも出る値で、この情報だけでは決まらない。決めたと嘘をつかない。
                     if [ "$CLAUDE_RC" -eq 137 ]; then
-                      echo "（137 は timeout の -k による KILL か OOMKill のどちらか。kubectl describe pod で OOMKilled を確認すること）"
+                      echo "（137 は KILL。kubectl describe pod で OOMKilled かを確認すること）"
                     fi
                     echo
                     echo "stream-json の末尾:"

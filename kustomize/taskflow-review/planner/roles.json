@@ -1,0 +1,54 @@
+{
+  "roles": [
+    {
+      "name": "states",
+      "threshold": 0.50,
+      "trigger": "新しい enum 値・状態・結果種別・フェーズ・予約名・run の種類を足す、状態遷移や終端の規則・不変条件を変える、単数だった実体を複数にする（並列・fork）",
+      "jev": {
+        "instructions": "Does this change add or redefine states, outcome kinds, phases, enum values or transitions that other code has to handle, or turn something that was single into several (parallel branches, multiple runs)?",
+        "true": "The description, file list or hunk headers show new enum constants, status or phase values, outcome/ending kinds, terminal states, transition rules, state-machine or reconcile logic that branches on those values, invariants about which state holds what, or a change from one current item to many.",
+        "false": "No new value kinds or transitions: documentation only, tests only, packaging or configuration, or a change that handles an existing fixed set of cases without adding or redefining any."
+      }
+    },
+    {
+      "name": "failpath",
+      "threshold": 0.90,
+      "trigger": "複数ステップの副作用（ファイル・API オブジェクト・DB・status の作成 / 削除 / rename / 書き込み）を足す・並べ替える、リトライ・タイムアウト・後始末・クラッシュ復旧・エラー伝播を触る、既存オブジェクトの移行・後付け・互換を扱う",
+      "jev": {
+        "instructions": "Does this change perform or reorder multi-step side effects, or touch retry, timeout, cleanup, error propagation, idempotency, or migration of already-existing objects and data?",
+        "true": "The change creates, deletes, renames or writes several things in sequence (files, Kubernetes objects, database rows, status), adds retries, timeouts, deadlines, cleanup or garbage collection, catches or combines errors, adds backfill or migration for existing objects, or mentions upgrade, rollback, crash, restart or partial failure.",
+        "false": "A single self-contained step with no persistent side effects between calls, or documentation, tests or configuration only."
+      }
+    },
+    {
+      "name": "boundary",
+      "threshold": 0.85,
+      "trigger": "外部由来の値（HTTP 入力・ユーザー指定 URL・アップロード / 取り込むファイル・handler や他者が書く文字列やファイル・共有ボリューム上のパス・トークン）を読む・保存する・ログ / status / metric ラベルに載せる、所有権・認可・資格情報・ネットワーク到達・依存の取得方法を変える",
+      "jev": {
+        "instructions": "Does this change handle values that originate outside the trusted code, or change authorization, ownership checks, credentials, outbound network access, or how dependencies and base images are fetched and verified?",
+        "true": "The change reads request bodies, URLs, uploaded or imported files, strings written by users, agents or other tenants, files or symlinks on shared volumes, tokens or environment secrets; puts such values into storage, logs, status fields or metric labels; or changes ownership/authorization checks, credentials, network egress, package pinning, checksums or setuid/privileges in images.",
+        "false": "All inputs come from the code itself or from already validated trusted configuration, and the change touches no permission, credential, network or supply-chain aspect."
+      }
+    },
+    {
+      "name": "runtime",
+      "threshold": 0.70,
+      "trigger": "依存・ベースイメージの追加や版上げ、Dockerfile・シェルスクリプト・CI ワークフロー・Renovate 設定の変更、chmod / mkdir / rename などのファイルシステム操作や外部コマンド・プロセス起動の追加、デプロイ先からの新しい外部通信",
+      "jev": {
+        "instructions": "Does this change rely on how the execution environment actually behaves: file ownership and permissions, process startup, shell utilities, container base images, dependency versions, build, CI or Renovate configuration, or network reachability from the deployed service?",
+        "true": "The file list includes Dockerfiles, shell scripts, CI workflows, Renovate config or dependency manifests with version changes; or the hunks add file-system operations (chmod, mkdir, rename, remove) on shared volumes, process or logger startup code, calls to external commands, or new outbound connections from a deployed service.",
+        "false": "Pure in-memory logic, documentation or tests using only the standard library, with no dependency, image, build, CI, file-system or network aspect."
+      }
+    },
+    {
+      "name": "precedent",
+      "threshold": 0.45,
+      "trigger": "新しい定数・名前・関数・型・引数の形・ヘルパー・フラグ・モジュールを足す、既存と同種の操作（兄弟の経路、別サービスの同じ処理、同じ判定）を追加する、コードをパッケージ・サービス間で動かす / 共有する",
+      "jev": {
+        "instructions": "Does this change add new constants, names, functions, types, parameters, flags or modules, or add an operation of a kind the project already performs somewhere else, or move or share code across packages or services?",
+        "true": "The hunk headers or description show new functions, helpers, constants, types or flags; a second path doing what an existing one does (a sibling command, another service, another caller of the same check); literals or rules repeated between code, schema markers, tests, CI or scripts; or code moved or extracted into another package or shared module.",
+        "false": "The change only edits the body of existing functions without adding names or parallel paths, or touches documentation, tests or configuration only."
+      }
+    }
+  ]
+}

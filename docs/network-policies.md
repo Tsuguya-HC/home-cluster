@@ -186,12 +186,15 @@ All policies are CiliumNetworkPolicy (CNP) and CiliumClusterwideNetworkPolicy (C
 | **taskflow-openrouter-smoke** (taskflow-openrouter-smoke=true) | (none written = all denied) | openrouter.ai:443 |
 | **taskflow-llm-gateway-smoke** (taskflow-llm-gateway-smoke=true) | (none written = all denied) | llm-gateway (llm-gateway):10080 (the service port is 80; the CNP uses the backend port 10080) |
 
-## claude-code-build (2 policies)
+## claude-code-build (5 policies)
 
 | Component | Ingress | Egress |
 |---|---|---|
 | **taskflow-implement** (taskflow-implement=true) | (none written = all denied) | envoy-gateway (llm-gateway):10080, 10443, *.githubusercontent.com + index.crates.io + static.crates.io + registry.npmjs.org :443 |
 | **taskflow-investigate** (taskflow-investigate=true) | (none written = all denied) | envoy-gateway (llm-gateway):10080, 10443 |
+| **taskflow-review** (taskflow-review=true) | (none written = all denied) | envoy-gateway (llm-gateway):10080, 10443 |
+| **taskflow-review-planner** (taskflow-review-planner=true) | (none written = all denied) | envoy-gateway (llm-gateway):10443, openrouter.ai:443 |
+| **taskflow-review-triage** (taskflow-review-triage=true) | (none written = all denied) | envoy-gateway (llm-gateway):10080, 10443, *.githubusercontent.com + index.crates.io + static.crates.io + registry.npmjs.org :443 |
 
 ## image-build (2 policies)
 

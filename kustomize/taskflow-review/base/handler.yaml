@@ -1,0 +1,256 @@
+# implement flow のレビュー（#1081）。観点ごとの枝は全部この 1 つの形で、違うのは
+# フェーズだけ。どの skill を引くかは FLOW_PHASE から決める（parts init の case が唯一の対応表）。
+#
+# **agent コンテナに GitHub の鍵を渡さないこと。** clone と PR・issue の取得は fetch init が済ませる。
+# Kata なのは、信頼できない入力（PR の diff・issue 本文・リポジトリの中身）を読んだエージェントが
+# Bash を実行するため。
+apiVersion: flow.tgy.io/v1alpha1
+kind: TaskHandler
+metadata:
+  name: review
+spec:
+  phase: set-by-overlay
+  runner:
+    type: Job
+  timeout: 20m
+  maxInfraRetries: 1
+  workspace:
+    volume: flow-workspace
+    mountPath: /workspace
+  jobTemplate:
+    template:
+      metadata:
+        labels:
+          taskflow-review: "true"
+      spec:
+        restartPolicy: Never
+        runtimeClassName: kata
+        serviceAccountName: agent-reviewer
+        automountServiceAccountToken: false
+        # TERM 後の sync（NFS 越し）に猶予を残す。
+        terminationGracePeriodSeconds: 60
+        # runAsUser は必須（taskflow のコントローラが Job 構築時に検査する）。
+        securityContext:
+          runAsUser: 65533
+          runAsGroup: 65533
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        # 観点出しは複数の枝を同時に起動するので、同じラベルの Job がノードに固まらないよう
+        # preferred で散らす。required にはしない — 埋まっていると Pending 固定になるリスクが
+        # あるため。
+        affinity:
+          podAntiAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+              - weight: 100
+                podAffinityTerm:
+                  labelSelector:
+                    matchLabels:
+                      taskflow-review: "true"
+                  namespaceSelector: {}
+                  topologyKey: kubernetes.io/hostname
+        volumes:
+          # init が書き、agent が読む。判定の置き場には使えない（Kata の emptyDir は
+          # VM 内にあり、publish サイドカーからは読めない）。
+          - name: tmp
+            emptyDir: {}
+          - name: parts
+            emptyDir: {}
+          - name: scripts
+            configMap:
+              name: review-scripts
+          # 呼び出し元鍵。**GitHub の資格情報ではない** — gateway が installation token に
+          # 付け替える。init にだけマウントする。
+          - name: github-gateway-key
+            secret:
+              secretName: github-gateway-client-keys
+              defaultMode: 0444
+              items:
+                - key: taskflow-review
+                  path: key
+        initContainers:
+          - name: parts
+            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:960f3d3e88c28add4d14787303df9a78936fe75128c8e88c0aad1b3078e0f546
+            command: [sh, -c]
+            args:
+              - |
+                set -eu
+                # フェーズ名は TaskFlow の binding のキー。ここに無いフェーズにこの handler を
+                # 束ねると Pod が上がらない（parts が引く名前を決められないため）。
+                case "${FLOW_PHASE:-}" in
+                  general | documented | tests | failpath | boundary | runtime | states | precedent | ui)
+                    SKILL="review-${FLOW_PHASE}"
+                    set -- -c review-role -c verdict-protocol -c untrusted-input -c sandbox-limits ;;
+                  *)
+                    echo "この handler が知らないフェーズ: ${FLOW_PHASE:-（空）}" >&2
+                    exit 1 ;;
+                esac
+                printf '%s\n' "$SKILL" > /tmp/skill
+                GH_ENTERPRISE_TOKEN=$(cat /github-gateway-key/key) exec parts -s "$SKILL" "$@"
+            env:
+              - name: HOME
+                value: /tmp
+              - name: PARTS_REF
+                valueFrom:
+                  configMapKeyRef:
+                    name: parts-ref
+                    key: sha
+              - {name: GH_HOST, value: gh-ro.infra.tgy.io}
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities: {drop: [ALL]}
+            volumeMounts:
+              - {name: parts, mountPath: /parts}
+              - {name: tmp, mountPath: /tmp}
+              - {name: github-gateway-key, mountPath: /github-gateway-key, readOnly: true}
+            resources:
+              requests: {cpu: 50m, memory: 64Mi}
+              # Kata では全コンテナに limits.cpu が無いと、agent の cpu limit が VM サイズに
+              # 伝わらない。
+              limits: {cpu: 500m, memory: 256Mi}
+          - name: fetch
+            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:960f3d3e88c28add4d14787303df9a78936fe75128c8e88c0aad1b3078e0f546
+            command: [sh, /etc/review-scripts/fetch-pr.sh]
+            env:
+              - name: HOME
+                value: /tmp
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities: {drop: [ALL]}
+            volumeMounts:
+              - {name: tmp, mountPath: /tmp}
+              - {name: scripts, mountPath: /etc/review-scripts, readOnly: true}
+              - {name: github-gateway-key, mountPath: /github-gateway-key, readOnly: true}
+              # 過去の全 run の棚（taskflow ADR-0003）。PR の URL と前の仕分けを読む。
+              - {name: flow-workspace, mountPath: /results, subPath: results, readOnly: true}
+            resources:
+              requests: {cpu: 100m, memory: 128Mi}
+              limits: {cpu: "1", memory: 512Mi}
+        containers:
+          - name: agent
+            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:960f3d3e88c28add4d14787303df9a78936fe75128c8e88c0aad1b3078e0f546
+            workingDir: /workspace
+            command: [sh, -c]
+            args:
+              - |
+                set -eu
+                ESCALATE=/workspace/escalate
+                # sync は Kata + NFS の workspace PVC に要る。書き戻しを残して exit すると
+                # Pod 内の全コンテナが 255 になる。
+                give_up() { printf '%s\n' "$1" > "$ESCALATE/report.md"; sync; exit 0; }
+
+                if [ -f /tmp/fetch-error ]; then
+                  give_up "$(cat /tmp/fetch-error)"
+                fi
+                if [ ! -d /tmp/src/.git ] || [ ! -s /tmp/pr.diff ] || [ ! -s /tmp/repo ] || [ ! -s /tmp/pr-number ] || [ ! -s /tmp/skill ]; then
+                  give_up "取り込み（fetch init）が完了していないか、PR の diff が空。レビューは行っていない。"
+                fi
+                REPO=$(cat /tmp/repo)
+                PR=$(cat /tmp/pr-number)
+                SKILL=$(cat /tmp/skill)
+                # どの handler からの呼び出しかを gateway に名乗る。アクセスログの tf.handler に出る。
+                # 値は ASCII に限る（フェーズ名ではなく skill 名を使う）。
+                export ANTHROPIC_CUSTOM_HEADERS="x-tf-handler: taskflow-${SKILL}"
+
+                # 404 = 認証が通り、パスにルートが無い（正常）。401 / 500 は配線の問題で、
+                # claude を走らせても打ち切りまで何も進まない。
+                code=$(curl -s --max-time 5 -o /dev/null -w '%{http_code}' \
+                  -H "Authorization: Bearer $ANTHROPIC_AUTH_TOKEN" \
+                  "${ANTHROPIC_BASE_URL}/" || true)
+                [ "$code" = 404 ] \
+                  || give_up "llm-gateway に接続できない（HTTP ${code:-なし}）。レビューは行っていない。401 はクライアントキー、500 は llm-gateway の SecurityPolicy を確認すること。"
+
+                cd /tmp/src
+                git checkout --quiet pr
+                # 15m は Job の timeout（20m）より短くして、打ち切り後に escalate へ理由を書く時間を残す。
+                timeout -k 10 15m claude -p "/${SKILL} ${REPO} の PR #${PR}" \
+                  --plugin-dir /parts \
+                  --append-system-prompt-file /parts/CLAUDE.md \
+                  --verbose \
+                  --output-format stream-json \
+                  --dangerously-skip-permissions \
+                  --allowedTools "Bash,Read,Write,Grep,Glob" \
+                  --model review \
+                  --max-turns 80 < /dev/null &
+                pid=$!
+                # 前面で待つと POSIX sh は TERM の trap を claude の終了まで遅らせる。
+                # `|| true` は set -e の下で trap を最後まで走らせるのに要る。
+                trap 'kill -TERM $pid 2>/dev/null || true
+                      i=0
+                      while kill -0 $pid 2>/dev/null && [ $i -lt 10 ]; do sleep 1; i=$((i+1)); done
+                      kill -KILL $pid 2>/dev/null || true
+                      sync || true
+                      exit 143' TERM INT
+                rc=0
+                wait $pid || rc=$?
+                echo "claude exited with $rc"
+                # 判定はディレクトリで出る。終了コードで escalate に書き足すと、既に答えが
+                # 書かれていた場合に答えが 2 つになる。timeout による打ち切り（124/137/143）で
+                # escalate 以外が全部空のときだけ、理由を残す。
+                case "$rc" in
+                  124 | 137 | 143)
+                    wrote=
+                    for d in /workspace/*/; do
+                      [ "$d" = "$ESCALATE/" ] && continue
+                      [ -n "$(ls -A "$d" 2>/dev/null)" ] && wrote=1
+                    done
+                    if [ -z "$wrote" ]; then
+                      give_up "claude が 15m で打ち切られた。llm-gateway の疎通を確認すること。報告は書かれていない。"
+                    fi
+                    ;;
+                esac
+                sync
+            env:
+              - name: HOME
+                value: /tmp
+              - name: ANTHROPIC_BASE_URL
+                value: http://llm-gateway.llm-gateway.svc.cluster.local/anthropic
+              # 3 本とも外さないこと。ANTHROPIC_BASE_URL を向けても api.anthropic.com へ
+              # 直行する通信がある（#998）。
+              - name: DISABLE_TELEMETRY
+                value: "1"
+              - name: DISABLE_ERROR_REPORTING
+                value: "1"
+              - name: CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC
+                value: "1"
+              # gateway のクライアントキー。**LLM の資格情報ではない。**
+              - name: ANTHROPIC_AUTH_TOKEN
+                valueFrom:
+                  secretKeyRef:
+                    name: llm-gateway-client-keys
+                    key: taskflow-review
+              # 空にしないと OAuth 側が優先されて Anthropic 直行になる（CNP で落ちる）。
+              - name: ANTHROPIC_API_KEY
+                value: ""
+              # サブエージェントは親のモデルを継がない。固定しないと gateway にルートが無い。
+              - name: CLAUDE_CODE_SUBAGENT_MODEL
+                value: review
+              # テストは実行しない前提だが、go が依存を取りに行くと許可の無い宛先で
+              # タイムアウトまでハングする。
+              - name: GOPROXY
+                value: "off"
+              - name: GOTOOLCHAIN
+                value: local
+            securityContext:
+              # readOnlyRootFilesystem は付けていない。claude CLI が rootfs のどこに書くかを
+              # 確かめていない。
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop: [ALL]
+            volumeMounts:
+              - {name: flow-workspace, mountPath: /workspace}
+              # この run に至った答え（taskflow ADR-0013 決定6）。選ばれた観点には観点出しのメモが
+              # 並ぶ。always の観点では空。
+              - {name: flow-workspace, mountPath: /inputs, subPath: inputs, readOnly: true}
+              - {name: tmp, mountPath: /tmp}
+              - {name: parts, mountPath: /parts, readOnly: true}
+            resources:
+              requests:
+                cpu: 500m
+                memory: 512Mi
+              limits:
+                # Kata では limit がそのまま VM のサイズ。cpu limit を書かないと 1 vCPU になる。
+                cpu: "2"
+                memory: 4Gi

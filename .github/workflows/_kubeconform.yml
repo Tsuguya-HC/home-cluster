@@ -38,3 +38,30 @@ jobs:
             -schema-location '.github/schemas/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
             -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
             -summary apps/ argocd/
+
+      - name: Validate kustomize renders
+        run: |
+          set -euo pipefail
+          # Depth 1 only: a nested kustomization.yaml is a component a parent
+          # kustomization consumes, not something applied on its own. Iterating
+          # depth 1 also means a new top-level directory is picked up without
+          # touching this step.
+          #
+          # --enable-helm is a no-op for a kustomization that doesn't declare
+          # helmCharts, and lets kubectl expand the ones that do.
+          count=0
+          for dir in kustomize/*/; do
+            [ -f "${dir}kustomization.yaml" ] || continue
+            count=$((count + 1))
+            echo ">>> ${dir}"
+            kubectl kustomize --enable-helm "$dir" \
+              | kubeconform -strict -ignore-missing-schemas \
+                -schema-location default \
+                -schema-location '.github/schemas/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+                -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+                -summary
+          done
+          if [ "$count" -eq 0 ]; then
+            echo "::error::no kustomization.yaml found directly under kustomize/; the discovery above is broken"
+            exit 1
+          fi

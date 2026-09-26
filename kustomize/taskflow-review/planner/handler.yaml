@@ -1,0 +1,74 @@
+# 観点出し（#1081）。PR の事実を Jev に渡して、起動する観点をディレクトリで答える。
+# LLM のエージェントも対象リポのコードも動かさない（スクリプトだけ）ので runc で、OpenRouter の
+# 鍵も直接持つ。エージェントを足すなら、鍵を gateway 側へ移してから。
+apiVersion: flow.tgy.io/v1alpha1
+kind: TaskHandler
+metadata:
+  name: review-planner
+spec:
+  phase: 観点出し
+  runner:
+    type: Job
+  timeout: 10m
+  maxInfraRetries: 1
+  workspace:
+    volume: flow-workspace
+    mountPath: /workspace
+  jobTemplate:
+    template:
+      metadata:
+        labels:
+          taskflow-review-planner: "true"
+      spec:
+        restartPolicy: Never
+        serviceAccountName: review-planner
+        automountServiceAccountToken: false
+        # runAsUser は必須（taskflow のコントローラが Job 構築時に検査する）。
+        securityContext:
+          runAsUser: 65533
+          runAsGroup: 65533
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        volumes:
+          - name: tmp
+            emptyDir: {}
+          - name: config
+            configMap:
+              name: review-planner
+          # 呼び出し元鍵。**GitHub の資格情報ではない** — gateway が installation token に
+          # 付け替える。
+          - name: github-gateway-key
+            secret:
+              secretName: github-gateway-client-keys
+              defaultMode: 0444
+              items:
+                - key: taskflow-review
+                  path: key
+        containers:
+          - name: planner
+            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:960f3d3e88c28add4d14787303df9a78936fe75128c8e88c0aad1b3078e0f546
+            workingDir: /workspace
+            command: [python3, /etc/review-planner/plan.py]
+            env:
+              - name: HOME
+                value: /tmp
+              - name: JEV_API_KEY
+                valueFrom:
+                  secretKeyRef:
+                    name: jev-openrouter
+                    key: apiKey
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities: {drop: [ALL]}
+            volumeMounts:
+              - {name: flow-workspace, mountPath: /workspace}
+              # 過去の全 run の棚（taskflow ADR-0003）。PR の URL を読む。
+              - {name: flow-workspace, mountPath: /results, subPath: results, readOnly: true}
+              - {name: tmp, mountPath: /tmp}
+              - {name: config, mountPath: /etc/review-planner, readOnly: true}
+              - {name: github-gateway-key, mountPath: /github-gateway-key, readOnly: true}
+            resources:
+              requests: {cpu: 100m, memory: 256Mi}
+              limits: {memory: 1Gi}

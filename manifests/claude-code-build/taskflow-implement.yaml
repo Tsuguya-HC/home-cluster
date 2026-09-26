@@ -957,14 +957,14 @@ spec:
     仕分け:
       handler: review-triage
       next:
-        起票: clean
+        完了: clean
         実装: fix
-        Escalated: escalate
-    起票:
-      handler: review-file-issues
-      next:
-        完了: filed
         Escalated: escalate
   terminals:
     完了: Success
+  # 起票の候補を issue にし、PR に結果を残すのは、終わり方に関係なく 1 回（差し戻しの上限や
+  # escalate で終わっても候補を捨てない）。
+  finally:
+    handler: review-file-issues
+    done: filed
   maxRunsPerPhase: 3

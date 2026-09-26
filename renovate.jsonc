@@ -295,6 +295,20 @@
       "updateNotScheduled": false
     },
     {
+      "description": [
+        "SUSE BCI rebuilds kubectl whenever its base moves. 1.37 builds seen from the",
+        "image config: 09-08, 09-11, 09-15, 09-17, 09-18 — intervals of 2.5 / 4.5 /",
+        "2.2 / 0.5 days, so more than half fall under the digest-cooldown's three days.",
+        "Each rebuild re-targets the digest PR and restarts the clock: the 1.35 digest",
+        "PR #843 took 6.2 days to merge, and the 1.37 one (#937) was re-targeted twice",
+        "on 2026-09-18 alone. Same weekly window as ghcr.io/renovatebot/renovate and",
+        "talos-extensions."
+      ],
+      "matchPackageNames": ["registry.suse.com/suse/kubectl"],
+      "schedule": ["before 6am on monday"],
+      "updateNotScheduled": false
+    },
+    {
       "description": "Do not automerge critical infrastructure",
       "matchPackageNames": ["cilium", "tetragon", "https://github.com/kubernetes-sigs/gateway-api.git"],
       "automerge": false

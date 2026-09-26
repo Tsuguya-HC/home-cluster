@@ -1,5 +1,13 @@
-# 起票（#1081）。仕分けが「この PR では直さない」「確かめられなかった」として残した候補を、
-# issue にする・既存の issue に足す・起票しない、のどれかに決めて GitHub に書く。
+# 起票（#1081）。implement flow の finally として、終わり方に関係なく 1 回走る。仕分けが
+# 「この PR では直さない」「確かめられなかった」として残した候補を、issue にする・既存の issue に
+# 足す・起票しない、のどれかに決めて GitHub に書き、PR に結果をコメントで残す。
+#
+# finally の置き場は filed の 1 つだけ。書かなければ仕組みが「片付かなかった」として知らせる
+# （Ready=False と Warning Event）。理由はこの Pod のログに出す。
+#
+# PR へのコメントは agent ではなくスクリプトが gh-rw で投稿する。agent が書くのは本文
+# （filed/report.md）まで。gh-rw の鍵も、事後確認（recheck）に使う gh-ro の鍵も、root が
+# 読んで消してから agent を 65533 で起動するので、agent からは読めない。
 #
 # GitHub への書き込みは MCP の /issues ルートだけ（issue の道具だけ、トークンは issues:write
 # だけの App）。agent が持つのは gateway のクライアント鍵で、GitHub の資格情報ではない。
@@ -12,7 +20,7 @@ kind: TaskHandler
 metadata:
   name: review-file-issues
 spec:
-  phase: 起票
+  phase: Finally
   runner:
     type: Job
   timeout: 25m
@@ -31,11 +39,10 @@ spec:
         serviceAccountName: agent-reviewer
         automountServiceAccountToken: false
         terminationGracePeriodSeconds: 60
-        # runAsUser は必須（taskflow のコントローラが Job 構築時に検査する）。
+        # runAsUser は必須（taskflow のコントローラが Job 構築時に検査する）。agent は gh-rw / gh-ro
+        # の鍵を読んで消すために root で起動し、claude は 65533 に降りて動かす。init はそれぞれ 65533。
         securityContext:
-          runAsUser: 65533
-          runAsGroup: 65533
-          runAsNonRoot: true
+          runAsUser: 0
           seccompProfile:
             type: RuntimeDefault
         volumes:
@@ -43,7 +50,9 @@ spec:
             emptyDir: {}
           - name: parts
             emptyDir: {}
-          # gh-ro の呼び出し元鍵。init の取り込みと、agent の後の数え直しだけが使う。
+          # gh-ro の呼び出し元鍵。parts / fetch / github-key の 3 init だけが読む。agent から
+          # 読めないようにする（PR にそのまま投稿される report.md に紛れ込ませないため）。
+          # github-key init が事後確認（recheck）用にファイルへ写し直す。
           - name: github-gateway-key
             secret:
               secretName: github-gateway-client-keys
@@ -51,6 +60,17 @@ spec:
               items:
                 - key: taskflow-review
                   path: key
+          # gh-rw の呼び出し元鍵（PR へのコメントの投稿だけに使う）。github-key init にだけ
+          # マウントし、ファイルに写す。agent 側の入口で root が読んで消す。
+          - name: github-gateway-key-rw
+            secret:
+              secretName: github-gateway-client-keys
+              defaultMode: 0444
+              items:
+                - key: taskflow-review-comment
+                  path: key
+          - name: github-token
+            emptyDir: {}
         initContainers:
           - name: parts
             image: registry.infra.tgy.io/tools/claude-code:latest@sha256:960f3d3e88c28add4d14787303df9a78936fe75128c8e88c0aad1b3078e0f546
@@ -67,6 +87,9 @@ spec:
                     key: sha
               - {name: GH_HOST, value: gh-ro.infra.tgy.io}
             securityContext:
+              runAsUser: 65533
+              runAsGroup: 65533
+              runAsNonRoot: true
               allowPrivilegeEscalation: false
               readOnlyRootFilesystem: true
               capabilities: {drop: [ALL]}
@@ -79,8 +102,26 @@ spec:
               # Kata では全コンテナに limits.cpu が無いと、agent の cpu limit が VM サイズに
               # 伝わらない。
               limits: {cpu: 500m, memory: 256Mi}
+          - name: github-key
+            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:960f3d3e88c28add4d14787303df9a78936fe75128c8e88c0aad1b3078e0f546
+            command: [sh, -c]
+            args: ["cp /github-gateway-key-rw/key /github-token/token && cp /github-gateway-key/key /github-token/ro"]
+            securityContext:
+              runAsUser: 65533
+              runAsGroup: 65533
+              runAsNonRoot: true
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities: {drop: [ALL]}
+            volumeMounts:
+              - {name: github-gateway-key-rw, mountPath: /github-gateway-key-rw, readOnly: true}
+              - {name: github-gateway-key, mountPath: /github-gateway-key, readOnly: true}
+              - {name: github-token, mountPath: /github-token}
+            resources:
+              requests: {cpu: 10m, memory: 16Mi}
+              limits: {cpu: 100m, memory: 64Mi}
           # 失敗しても exit 0 で /tmp/fetch-error に書くこと。init が落ちると Pod が上がらず、
-          # escalate に理由を書く者がいなくなる。
+          # 理由を残す者がいなくなる。
           - name: fetch
             image: registry.infra.tgy.io/tools/claude-code:latest@sha256:960f3d3e88c28add4d14787303df9a78936fe75128c8e88c0aad1b3078e0f546
             command: [sh, -c]
@@ -107,9 +148,14 @@ spec:
                   [ -f "$f" ] || continue
                   PR_URL=$(head -1 "$f")
                 done
+                # PR が作られる前に終わった（調査で止まった等）なら、することは無い。
+                if [ -z "$PR_URL" ]; then
+                  : > /tmp/no-pr || fail "/tmp/no-pr を書けなかった。起票は行っていない。"
+                  exit 0
+                fi
                 case "$PR_URL" in
                   "https://github.com/${REPO}/pull/"*) PR=${PR_URL##*/} ;;
-                  *) fail "対象の PR が棚（results/*/done/pr-url）に見つからない。起票は行っていない。" ;;
+                  *) fail "棚の PR の URL が対象のリポのものではない（${PR_URL}）。起票は行っていない。" ;;
                 esac
                 case "$PR" in
                   '' | *[!0-9]*) fail "棚の PR の URL が不正（${PR_URL}）。起票は行っていない。" ;;
@@ -122,15 +168,14 @@ spec:
                   n=${f#/results/}; n=${n%%/*}
                   cp "$f" "/tmp/triage/${n}.md" || fail "仕分けの報告をコピーできなかった（${f}）。起票は行っていない。"
                 done
-                [ -n "$(ls -A /tmp/triage)" ] || fail "仕分けの報告が棚に無い。起票は行っていない。"
 
                 KEY=$(cat /github-gateway-key/key) || fail "GitHub の鍵を読めなかった。起票は行っていない。"
                 [ -n "$KEY" ] || fail "GitHub の鍵が空だった。起票は行っていない。"
-                timeout 60 env GH_HOST=gh-ro.infra.tgy.io GH_ENTERPRISE_TOKEN="$KEY" gh api "repos/${REPO}/pulls/${PR}" > /tmp/pr-raw.json \
+                GH_HOST=gh-ro.infra.tgy.io GH_ENTERPRISE_TOKEN="$KEY" timeout 60 gh api "repos/${REPO}/pulls/${PR}" > /tmp/pr-raw.json \
                   || fail "PR #${PR} を取得できなかった（タイムアウトを含む）。起票は行っていない。"
                 jq '{number, title, html_url}' < /tmp/pr-raw.json > /tmp/pr.json 2>/dev/null \
                   || fail "PR #${PR} を読めなかった。起票は行っていない。"
-                timeout 60 env GH_HOST=gh-ro.infra.tgy.io GH_ENTERPRISE_TOKEN="$KEY" gh api "repos/${REPO}/issues/${ISSUE}" > /tmp/issue-raw.json \
+                GH_HOST=gh-ro.infra.tgy.io GH_ENTERPRISE_TOKEN="$KEY" timeout 60 gh api "repos/${REPO}/issues/${ISSUE}" > /tmp/issue-raw.json \
                   || fail "issue #${ISSUE} を取得できなかった（タイムアウトを含む）。起票は行っていない。"
                 jq '{number, title, body, html_url}' < /tmp/issue-raw.json > /tmp/issue.json 2>/dev/null \
                   || fail "issue #${ISSUE} を読めなかった。起票は行っていない。"
@@ -143,6 +188,9 @@ spec:
               - name: HOME
                 value: /tmp
             securityContext:
+              runAsUser: 65533
+              runAsGroup: 65533
+              runAsNonRoot: true
               allowPrivilegeEscalation: false
               readOnlyRootFilesystem: true
               capabilities: {drop: [ALL]}
@@ -165,17 +213,43 @@ spec:
                 # Job の期限に達するとコントローラは理由を読まずに settle するので、その手前で自分から降りる。
                 DEADLINE=$(( $(date +%s) + 17*60 ))
                 checked=""
-                ESCALATE=/workspace/escalate
                 FILED=/workspace/filed
+                # finally の置き場は filed だけ。降りるときは filed を空にし、理由はログに出す。
                 give_up() {
                   find "$FILED" -mindepth 1 -delete 2>/dev/null || true
-                  printf '%s\n' "$1" > "$ESCALATE/report.md"; sync; exit 0
+                  printf '起票は片付かなかった: %s\n' "$1" >&2; sync; exit 0
                 }
 
+                # gh-rw の鍵は root のシェル変数にだけ置く（export しない）。ファイルは消す。
+                GH_RW_KEY=$(cat /github-token/token 2>/dev/null || true)
+                rm -f /github-token/token
+                # gh-ro の鍵も同様。agent から読めないようにする（PR にそのまま投稿される
+                # report.md に紛れ込ませないため）。
+                GH_RO_KEY=$(cat /github-token/ro 2>/dev/null || true)
+                rm -f /github-token/ro
+                ENDING="終端: ${FLOW_ENDING:-不明}／終端のフェーズ: ${FLOW_ENDING_PHASE:-不明}／そこでの結論: ${FLOW_ENDING_OUTCOME:-なし}"
+                # 宣言ディレクトリは prepare が敷く。降りた先から書けるように所有者を渡す。
+                for d in /workspace/*/; do chown 65533:65533 "$d" 2>/dev/null || true; done
+
+                if [ -f /tmp/no-pr ]; then
+                  printf 'PR が作られる前にフローが終わった（%s）。起票するものは無い。\n' "$ENDING" > "$FILED/report.md"
+                  sync; exit 0
+                fi
                 if [ -f /tmp/fetch-error ]; then
                   give_up "$(cat /tmp/fetch-error)"
                 fi
+                [ -n "$GH_RW_KEY" ] || give_up "PR にコメントする鍵（gh-rw）が読めなかった。"
+                [ -n "$GH_RO_KEY" ] || give_up "事後確認に使う鍵（gh-ro）が読めなかった。"
                 REPO=$(cat /tmp/repo); PR=$(cat /tmp/pr-number); ISSUE=$(cat /tmp/issue-number)
+                printf '%s\n' "$ENDING" > /tmp/ending && chmod 0644 /tmp/ending \
+                  || give_up "/tmp/ending を書けなかった。"
+
+                as_agent() {
+                  setpriv --reuid 65533 --regid 65533 --clear-groups --inh-caps=-all --no-new-privs -- "$@"
+                }
+                # setpriv が黙って降格に失敗すると、agent が root で動き gh-rw の鍵に届く。
+                ACTUAL_UID=$(as_agent id -u 2>&1) || true
+                [ "$ACTUAL_UID" = 65533 ] || give_up "65533 への降格に失敗した（setpriv が返した uid: ${ACTUAL_UID}）。"
 
                 code=$(curl -s --max-time 5 -o /dev/null -w '%{http_code}' \
                   -H "Authorization: Bearer $ANTHROPIC_AUTH_TOKEN" \
@@ -188,13 +262,15 @@ spec:
                 ( umask 077
                   jq -n --arg key "$MCP_CLIENT_KEY" '{mcpServers: {github: {type: "http",
                     url: "http://github-mcp.llm-gateway.svc.cluster.local/issues",
-                    headers: {"x-github-client": $key}}}}' > /tmp/mcp.json )
+                    headers: {"x-github-client": $key}}}}' > /tmp/mcp.json ) \
+                  && chown 65533:65533 /tmp/mcp.json \
+                  || give_up "MCP の設定を書けなかった。"
 
                 # 数え直しの起点。GitHub の created は秒単位なので、少し前から数える。
                 START=$(date -u -d '-1 minute' +%Y-%m-%dT%H:%M:%SZ)
 
                 # sub-issue の付け外しと既存コメントの書き換えはこの起票の仕事に要らない。agent に Bash が無いので、この 2 つを塞げば実際に使える手段は無い。
-                timeout -k 10 10m claude -p "/review-file-issues ${REPO} の PR #${PR}（issue #${ISSUE}）" \
+                as_agent timeout -k 10 10m claude -p "/review-file-issues ${REPO} の PR #${PR}（issue #${ISSUE}）" \
                   --plugin-dir /parts \
                   --append-system-prompt-file /parts/CLAUDE.md \
                   --mcp-config /tmp/mcp.json --strict-mcp-config \
@@ -218,7 +294,7 @@ spec:
                 echo "claude exited with $rc"
                 rm -f /tmp/mcp.json
 
-                # 事後確認の途中で打ち切られても、理由が分からないまま黙って終わらせない。
+                # 事後確認と投稿の途中で打ち切られても、理由が分からないまま黙って終わらせない。
                 trap 'give_up "事後確認の途中で打ち切られた。何件どこに作られたかは確かめられていない。"' TERM INT
 
                 # --- 数え直し: この App が今回作った issue / 対象外への影響 -----------
@@ -230,16 +306,18 @@ spec:
                 # POSIX sh は前面のコマンドが終わるまで trap を実行しない。gh の呼び出しは
                 # 裏で動かし wait で待つことで、途中の TERM に即応できるようにする。
                 bg() { "$@" & bgpid=$!; wait "$bgpid"; }
+                # env の argv に鍵の値を載せない。外部コマンド（timeout）への前置代入はその
+                # コマンドの環境だけに入り、Tetragon の process_exec には出ない。
+                gh_ro() { GH_HOST=gh-ro.infra.tgy.io GH_ENTERPRISE_TOKEN="$GH_RO_KEY" timeout 30 gh "$@"; }
+                gh_rw() { GH_HOST=gh-rw.infra.tgy.io GH_ENTERPRISE_TOKEN="$GH_RW_KEY" timeout 30 gh "$@"; }
                 # 内部の期限まで 60 秒を切ったら、そこまでに確かめた範囲を書いて自分から降りる。
                 check_deadline() {
                   [ $(( DEADLINE - $(date +%s) )) -ge 60 ] \
                     || give_up "事後確認が時間内に終わらなかった（内部の期限）。確かめられた範囲: ${checked:-なし}。"
                 }
                 recheck() {
-                  KEY=$(cat /github-gateway-key/key)
-
                   check_deadline
-                  if ! bg timeout 30 env GH_HOST=gh-ro.infra.tgy.io GH_ENTERPRISE_TOKEN="$KEY" gh api -X GET search/issues \
+                  if ! bg gh_ro api -X GET search/issues \
                        -f q="org:Tsuguya-HC author:app/tgy-hc-tf-issuer is:issue created:>=${START}" \
                        -f per_page=100 > /tmp/created.json 2>/tmp/created.err; then
                     give_up "起票の後の数え直し（作られた issue の検索）に失敗した。何件どこに作られたかは確かめられていない。$(tail -3 /tmp/created.err)"
@@ -259,7 +337,7 @@ spec:
 
                   # この App が対象外のリポにコメントを付けていないか。
                   check_deadline
-                  if ! bg timeout 30 env GH_HOST=gh-ro.infra.tgy.io GH_ENTERPRISE_TOKEN="$KEY" gh api -X GET search/issues \
+                  if ! bg gh_ro api -X GET search/issues \
                        -f q="org:Tsuguya-HC commenter:app/tgy-hc-tf-issuer updated:>=${START} -repo:${REPO}" \
                        -f per_page=100 > /tmp/commented.json 2>/tmp/commented.err; then
                     give_up "起票の後の数え直し（対象外へのコメントの検索）に失敗した。何件どこに書かれたかは確かめられていない。$(tail -3 /tmp/commented.err)"
@@ -273,7 +351,7 @@ spec:
 
                   # この App が issue を閉じていないか（org 全体、直近分）。
                   check_deadline
-                  if ! bg timeout 30 env GH_HOST=gh-ro.infra.tgy.io GH_ENTERPRISE_TOKEN="$KEY" gh api -X GET search/issues \
+                  if ! bg gh_ro api -X GET search/issues \
                        -f q="org:Tsuguya-HC is:issue is:closed closed:>=${START}" \
                        -f per_page=20 > /tmp/closed.json 2>/tmp/closed.err; then
                     give_up "起票の後の数え直し（閉じられた issue の検索）に失敗した。何件閉じられたかは確かめられていない。$(tail -3 /tmp/closed.err)"
@@ -295,7 +373,7 @@ spec:
                       continue
                     fi
                     check_deadline
-                    if ! bg timeout 30 env GH_HOST=gh-ro.infra.tgy.io GH_ENTERPRISE_TOKEN="$KEY" gh api "repos/${crepo}/issues/${cnum}/events" > /tmp/events.json 2>/tmp/events.err; then
+                    if ! bg gh_ro api "repos/${crepo}/issues/${cnum}/events" > /tmp/events.json 2>/tmp/events.err; then
                       give_up "起票の後の数え直し（issue #${cnum} の events 取得）に失敗した。閉じたのがこの App かは確かめられていない。$(tail -3 /tmp/events.err)"
                     fi
                     closer_count=$(jq '[.[] | select(.event == "closed" and .actor.login == "tgy-hc-tf-issuer[bot]")] | length' /tmp/events.json) \
@@ -311,13 +389,15 @@ spec:
                 sleep 60
                 recheck
 
-                case "$rc" in
-                  124 | 137 | 143)
-                    if [ -z "$(ls -A "$FILED" 2>/dev/null)" ] && [ -z "$(ls -A "$ESCALATE" 2>/dev/null)" ]; then
-                      give_up "claude が 10m で打ち切られた。起票の報告は書かれていない（作られた issue: ${total} 件）。"
-                    fi
-                    ;;
-                esac
+                [ -s "$FILED/report.md" ] \
+                  || give_up "PR へのコメントの本文（filed/report.md）が書かれていない（claude の終了コード ${rc}、作られた issue: ${total} 件）。"
+
+                # --- PR へのコメント（スクリプトが gh-rw で投稿する） ----------------
+                check_deadline
+                if ! bg gh_rw api -X POST \
+                     "repos/${REPO}/issues/${PR}/comments" -F body=@"$FILED/report.md" > /dev/null 2>/tmp/comment.err; then
+                  give_up "PR #${PR} にコメントできなかった。起票の結果は書かれていたが PR には残っていない。$(tail -3 /tmp/comment.err)"
+                fi
                 sync
             env:
               - name: HOME
@@ -353,14 +433,21 @@ spec:
                     name: github-mcp-issues-client-keys
                     key: taskflow-file-issues
             securityContext:
+              # root で起動するのは gh-rw / gh-ro の鍵を読んで消すためと、宣言ディレクトリの所有者の
+              # 受け渡し・65533 への降格のため。持たせる capability はそれに要るものだけ:
+              # DAC_OVERRIDE は 65533 が持つ filed を空にする・書くため、KILL は 65533 で動く
+              # claude を trap から止めるため（どちらも無いと黙って失敗する）。
+              runAsUser: 0
+              runAsNonRoot: false
               allowPrivilegeEscalation: false
               capabilities:
                 drop: [ALL]
+                add: [CHOWN, DAC_OVERRIDE, KILL, SETUID, SETGID]
             volumeMounts:
               - {name: flow-workspace, mountPath: /workspace}
               - {name: tmp, mountPath: /tmp}
               - {name: parts, mountPath: /parts, readOnly: true}
-              - {name: github-gateway-key, mountPath: /github-gateway-key, readOnly: true}
+              - {name: github-token, mountPath: /github-token}
             resources:
               requests:
                 cpu: 500m

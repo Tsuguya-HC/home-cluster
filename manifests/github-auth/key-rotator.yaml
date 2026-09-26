@@ -34,6 +34,7 @@ data:
     taskflow-implement-parts ro claude-code-build/github-gateway-client-keys/taskflow-implement-parts
     taskflow-investigate ro claude-code-build/github-gateway-client-keys/taskflow-investigate
     taskflow-review ro claude-code-build/github-gateway-client-keys/taskflow-review
+    taskflow-review-comment rw claude-code-build/github-gateway-client-keys/taskflow-review-comment
 ---
 apiVersion: v1
 kind: ConfigMap

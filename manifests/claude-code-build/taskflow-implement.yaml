@@ -416,8 +416,10 @@ spec:
                 # 作らない。署名コミットのスクリプトはリモートのブランチの先頭を親にし、ローカルの
                 # HEAD との差分を載せるので、作業ツリーはブランチの先頭に合わせておく。
                 FIX=
+                NOT_PUSHED="PR は作っていない。"
                 if [ -d /inputs/仕分け ]; then
                   FIX=1
+                  NOT_PUSHED="PR のブランチには何も積んでいない。"
                   [ -s /inputs/仕分け/report.md ] \
                     || give_up "仕分けから差し戻されたが、inputs/仕分け/report.md が無い。修正は行っていない。"
                   cp /inputs/仕分け/report.md /tmp/triage.md && chmod 0644 /tmp/triage.md \
@@ -572,6 +574,14 @@ spec:
                   log="$1"; timeout_dur="$2"; shift 2
                   supervise as_agent sh -c "cd /scratch/src && exec timeout -k 10 '$timeout_dur' claude \"\$@\"" claude "$@" < /dev/null > "$log" 2>&1
                 }
+                # stream-json の末尾は思考の進捗行で埋まり、何をしていたかが読めない。
+                # 切り詰めは jq の中で行う（jq の文字列スライスはコードポイント単位。
+                # cut -c はこのイメージの LC_CTYPE=POSIX ではバイト単位になり、日本語の
+                # 境界にかかると不正な UTF-8 が escalate report に混ざる）。
+                last_tools() {
+                  jq -Rrc 'fromjson? | select(.type == "assistant") | .message.content[]? | select(.type == "tool_use") | .input | tojson | .[0:400]' "$1" 2>/dev/null \
+                    | tail -10
+                }
                 # gateway に繋がらない（Envoy が落ちている・CNP が閉じている）と、claude は
                 # upstream の 5xx とは違って error_status:null/"unknown" のまま延々リトライし続け、
                 # run_agent の timeout（15m/30m）に達するまで気付けない（実測。相手がブローカー
@@ -651,10 +661,10 @@ spec:
                 # 124/143 は run_agent 内の timeout 由来（打ち切り）で、claude 自身の失敗では
                 # ない。どちらの値がどのイメージから出るかは run_agent の定義側に書いてある。
                 if [ "$CLAUDE_RC" -eq 124 ] || [ "$CLAUDE_RC" -eq 143 ]; then
-                  { echo "テストの回の claude が 15m で打ち切られた（timeout の exit ${CLAUDE_RC}。claude 自身の失敗ではない）。llm-gateway の疎通を確認すること。実装には進んでいない。"
+                  { echo "テストの回の claude が 15m で終わらず打ち切られた（timeout の exit ${CLAUDE_RC}）。下の tool 呼び出しで何に時間を使ったかを見ること。呼び出しが途中で途絶えているなら llm-gateway との疎通を疑う。実装には進んでいない。"
                     echo
-                    echo "stream-json の末尾:"
-                    tail -20 /tmp/claude-tests.log
+                    echo "最後の tool 呼び出し:"
+                    last_tools /tmp/claude-tests.log
                   } > /tmp/giveup.txt
                   give_up_file /tmp/giveup.txt
                 elif [ "$CLAUDE_RC" -ne 0 ]; then
@@ -722,7 +732,7 @@ spec:
                 # 敷いた宣言ディレクトリなので、消してもこの handler 自身が困ることはない。
                 find /workspace/done -mindepth 1 -delete 2>/dev/null || true
                 check_gateway \
-                  || give_up "llm-gateway に接続できない。PR は作っていない。llm-gateway namespace の Envoy と、claude-code-build 側／llm-gateway 側の CNP を確認すること。"
+                  || give_up "llm-gateway に接続できない。${NOT_PUSHED}llm-gateway namespace の Envoy と、claude-code-build 側／llm-gateway 側の CNP を確認すること。"
                 CLAUDE_RC=0
                 run_agent /tmp/claude-implement.log 30m \
                   -p "$IMPL_PROMPT" \
@@ -735,14 +745,14 @@ spec:
                   --max-turns 120 || CLAUDE_RC=$?
                 # 124/143 は run_agent 内の timeout 由来（打ち切り）。上のテストの回と同じ理由。
                 if [ "$CLAUDE_RC" -eq 124 ] || [ "$CLAUDE_RC" -eq 143 ]; then
-                  { echo "実装の回の claude が 30m で打ち切られた（timeout の exit ${CLAUDE_RC}。claude 自身の失敗ではない）。llm-gateway の疎通を確認すること。PR は作っていない。"
+                  { echo "実装の回の claude が 30m で終わらず打ち切られた（timeout の exit ${CLAUDE_RC}）。下の tool 呼び出しで何に時間を使ったかを見ること。呼び出しが途中で途絶えているなら llm-gateway との疎通を疑う。${NOT_PUSHED}"
                     echo
-                    echo "stream-json の末尾:"
-                    tail -20 /tmp/claude-implement.log
+                    echo "最後の tool 呼び出し:"
+                    last_tools /tmp/claude-implement.log
                   } > /tmp/giveup.txt
                   give_up_file /tmp/giveup.txt
                 elif [ "$CLAUDE_RC" -ne 0 ]; then
-                  { echo "実装の回の claude が失敗した（exit ${CLAUDE_RC}）。PR は作っていない。"
+                  { echo "実装の回の claude が失敗した（exit ${CLAUDE_RC}）。${NOT_PUSHED}"
                     # 137 は run_agent 内の timeout が -k で KILL した場合と OOMKill の
                     # どちらでも出る値で、この情報だけでは決まらない。決めたと嘘をつかない。
                     if [ "$CLAUDE_RC" -eq 137 ]; then
@@ -757,7 +767,7 @@ spec:
 
                 # --- 5. 緑の確認 --------------------------------------------------
                 if ! run_tests /tmp/green.log; then
-                  { echo "実装後も $TEST_CMD が通らない。PR は作っていない。"
+                  { echo "実装後も $TEST_CMD が通らない。${NOT_PUSHED}"
                     echo
                     tail -40 /tmp/green.log
                     echo

@@ -951,9 +951,9 @@ spec:
     ui: {handler: review-ui, next: {仕分け: reviewed, Escalated: escalate}}
     documented: {handler: review-documented, next: {仕分け: reviewed, Escalated: escalate}}
     tests: {handler: review-tests, next: {仕分け: reviewed, Escalated: escalate}}
-    # maxRunsPerPhase が 1 のうちは、実装へ戻ろうとした時点で RunLimitReached → Escalated
-    # （採用した指摘は fix/report.md に残る）。仕分けは止まらず、この PR で直さないものは
-    # 起票の候補に残す。escalate は仕分けそのものが成り立たないときだけ。
+    # 差し戻しは実装が maxRunsPerPhase 回に達するまで。上限に当たると RunLimitReached →
+    # Escalated（採用した指摘は fix/report.md に残る）。仕分けは止まらず、この PR で直さない
+    # ものは起票の候補に残す。escalate は仕分けそのものが成り立たないときだけ。
     仕分け:
       handler: review-triage
       next:
@@ -967,4 +967,4 @@ spec:
         Escalated: escalate
   terminals:
     完了: Success
-  maxRunsPerPhase: 1
+  maxRunsPerPhase: 3

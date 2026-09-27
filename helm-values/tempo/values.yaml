@@ -11,6 +11,9 @@ tempo:
           endpoint: "0.0.0.0:4317"
         http:
           endpoint: "0.0.0.0:4318"
+          # 送る側（llm-gateway の extproc）の 属性値の上限 × 属性の個数 × batch が
+          # これに収まること。超えると batch ごと 400 で丸ごと捨てられる。
+          max_request_body_size: 20971520
   metricsGenerator:
     enabled: true
     remoteWriteUrl: http://kube-prometheus-stack-prometheus.monitoring.svc:9090/api/v1/write
@@ -25,6 +28,16 @@ tempo:
           - http.status_code
   overrides:
     defaults:
+      ingestion:
+        # 既定は 2KiB で、超えた属性値は黙って切り詰められる
+        # （tempo_distributor_attributes_truncated_total だけが増える）。llm-gateway の
+        # gen_ai.input.messages は会話全体を 1 属性に入れるので、本文を取ると既定では
+        # ほぼ全 span が切れる（#991）。
+        max_attribute_bytes: 2097152
+      global:
+        # 本文は複数の属性に分かれて乗るので、max_attribute_bytes の何倍かの余裕を
+        # 持たせること。下回ると切り詰め後の span 1 本で trace ごと捨てられる。
+        max_bytes_per_trace: 10485760
       metrics_generator:
         processors:
           - service-graphs
@@ -49,9 +62,11 @@ tempo:
   resources:
     requests:
       cpu: 25m
-      memory: 256Mi
-    limits:
       memory: 512Mi
+    limits:
+      # 本文入りの span を受ける（#991）。OTLP の body は最大 max_request_body_size で、
+      # decode 後はその数倍になる。
+      memory: 1Gi
   securityContext:
     readOnlyRootFilesystem: true
     allowPrivilegeEscalation: false

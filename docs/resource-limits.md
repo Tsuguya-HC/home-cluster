@@ -55,7 +55,7 @@
 
 | コンポーネント | requests (cpu/mem) | limits (mem) | 実測 |
 |---|---|---|---|
-| tempo | 25m / 256Mi | 512Mi | 未計測（新規導入） |
+| tempo | 25m / 512Mi | 1Gi | 未計測（新規導入） |
 
 ### Alloy (DS)
 

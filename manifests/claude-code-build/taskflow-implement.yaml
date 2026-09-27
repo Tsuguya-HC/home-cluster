@@ -155,3 +155,75 @@ spec:
     handler: review-file-issues
     done: filed
   maxRunsPerPhase: 3
+---
+# implement と同じ配線で、実装と修正の回だけ Kata を使わない（runc）。Task の spec.flow で選ぶ。
+# 実装と修正の Pod は LLM が書いた未レビューのコードと依存のビルドスクリプトを実行するので、
+# Kata 版はそれをノードのカーネルから切り離す。こちらはその隔離が無い代わりに、I/O と起動が
+# 速く、メモリが溢れたときに落ちるのが溢れたプロセスだけで済む。
+# 実装・修正の handler 以外は implement と同じにしておくこと（片方だけ変えるとずれる）。
+apiVersion: flow.tgy.io/v1alpha1
+kind: TaskFlow
+metadata:
+  name: implement-fast
+  namespace: claude-code-build
+spec:
+  profile: investigate
+  start: 調査
+  workspace: {}
+  bindings:
+    調査:
+      handler: investigator
+      next:
+        実装: located
+        Escalated: escalate
+    実装:
+      handler: implement-writer-runc
+      next:
+        観点出し: done
+        Escalated: escalate
+    観点出し:
+      handler: review-planner
+      next:
+        general: general
+        failpath: failpath
+        boundary: boundary
+        runtime: runtime
+        states: states
+        precedent: precedent
+        ui: ui
+        Escalated: escalate
+      join:
+        phase: 仕分け
+        always: [documented, tests]
+    general: {handler: review-general, next: {仕分け: reviewed, Escalated: escalate}}
+    failpath: {handler: review-failpath, next: {仕分け: reviewed, Escalated: escalate}}
+    boundary: {handler: review-boundary, next: {仕分け: reviewed, Escalated: escalate}}
+    runtime: {handler: review-runtime, next: {仕分け: reviewed, Escalated: escalate}}
+    states: {handler: review-states, next: {仕分け: reviewed, Escalated: escalate}}
+    precedent: {handler: review-precedent, next: {仕分け: reviewed, Escalated: escalate}}
+    ui: {handler: review-ui, next: {仕分け: reviewed, Escalated: escalate}}
+    documented: {handler: review-documented, next: {仕分け: reviewed, Escalated: escalate}}
+    tests: {handler: review-tests, next: {仕分け: reviewed, Escalated: escalate}}
+    仕分け:
+      handler: review-triage
+      next:
+        完了: clean
+        修正: fix
+        Escalated: escalate
+    修正:
+      handler: implement-fixer-runc
+      next:
+        検証: done
+        Escalated: escalate
+    検証:
+      handler: review-verify
+      next:
+        修正: unfixed
+        観点出し: rereview
+        完了: verified
+  terminals:
+    完了: Success
+  finally:
+    handler: review-file-issues
+    done: filed
+  maxRunsPerPhase: 3

@@ -288,12 +288,15 @@ spec:
                 # ここだけ素通しだと、失敗時に理由を書かずに即死し（set -eu 任せ）、
                 # maxInfraRetries を診断情報ゼロで消費する。他の外部呼び出しと同じく
                 # give_up で捕まえる。
-                mkfs.ext4 -q -F -E lazy_itable_init=0,lazy_journal_init=0,root_owner=65533:65533 /dev/scratch \
-                  || give_up "Block スクラッチの mkfs に失敗した。実装は行っていない。"
-                mkdir -p /scratch \
-                  || give_up "/scratch の作成に失敗した。実装は行っていない。"
-                mount -o noatime /dev/scratch /scratch \
-                  || give_up "Block スクラッチの mount に失敗した。実装は行っていない。"
+                # runc 版には Block デバイスが無く、/scratch は emptyDir が既に mount されている。
+                if [ -b /dev/scratch ]; then
+                  mkfs.ext4 -q -F -E lazy_itable_init=0,lazy_journal_init=0,root_owner=65533:65533 /dev/scratch \
+                    || give_up "Block スクラッチの mkfs に失敗した。実装は行っていない。"
+                  mkdir -p /scratch \
+                    || give_up "/scratch の作成に失敗した。実装は行っていない。"
+                  mount -o noatime /dev/scratch /scratch \
+                    || give_up "Block スクラッチの mount に失敗した。実装は行っていない。"
+                fi
                 mkdir -p /scratch/out \
                   || give_up "/scratch/out の作成に失敗した。実装は行っていない。"
                 chown 65533:65533 /scratch /scratch/out \
@@ -821,7 +824,7 @@ spec:
                   GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0="http.https://${GH_GATEWAY}/.extraheader" GIT_CONFIG_VALUE_0="$AUTH_HEADER" \
                     ghgw /usr/local/bin/github-signed-commit.sh \
                     -r "$REPO" -b "$BRANCH" -m "$FIX_SUBJECT" \
-                    || give_up "差し戻しの直しを署名コミットにできなかった。PR ${PR_URL} のブランチには何も積まれていない可能性が高い（GitHub 側を確認すること）。直しの差分はこの Pod の Block スクラッチにしかない。"
+                    || give_up "差し戻しの直しを署名コミットにできなかった。PR ${PR_URL} のブランチには何も積まれていない可能性が高い（GitHub 側を確認すること）。直しの差分はこの Pod のスクラッチにしかなく、Pod が消えると失われる。"
                   # 直しの経緯は PR のコメントに残す。本文を書き換えると最初の実装の記録が消える。
                   # コメントに失敗してもコミットは積まれているので、Task は止めず報告に書く。
                   printf '## 差し戻しの直し\n\n実装 handler（%s）が、レビューの仕分けが採用した指摘を直した。\n\n## 仕分け\n\n%s\n\n## テストの回\n\n%s\n\n## 直しの回\n\n%s\n' \
@@ -849,7 +852,7 @@ spec:
                 fi
                 ghgw gh api "repos/${REPO}/git/refs" \
                   -f ref="refs/heads/${BRANCH}" -f sha="$BASE_SHA" >/dev/null \
-                  || give_up "ブランチ ${BRANCH} を作れなかった（直前の存在チェックでは無かった）。GitHub 側に何か残っているかは確認できていない。実装はこの Pod の Block スクラッチ（ゲスト内 ext4、Pod の GC で失われる）の中にある。回収するには Pod が消える前に同じ PVC を別の kata Pod でマウントし直す必要があり、通常は困難。"
+                  || give_up "ブランチ ${BRANCH} を作れなかった（直前の存在チェックでは無かった）。GitHub 側に何か残っているかは確認できていない。実装差分はこの Pod のスクラッチにしかなく、Pod が消えると失われる。"
                 # github-signed-commit.sh 自身も末尾で git fetch/reset する。clone のときと
                 # 同じ extraheader を渡す（remote に鍵を埋めていないので、渡さないと
                 # ここで認証エラーになり、コミットは API 経由で成功しているのに「作れなかった」
@@ -857,7 +860,7 @@ spec:
                 GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0="http.https://${GH_GATEWAY}/.extraheader" GIT_CONFIG_VALUE_0="$AUTH_HEADER" \
                   ghgw /usr/local/bin/github-signed-commit.sh \
                   -r "$REPO" -b "$BRANCH" -m "Implement #${ISSUE}" \
-                  || give_up "署名コミットを作れなかった。ブランチ ${BRANCH} は GitHub に作成済み（base の HEAD のまま、まだコミットは載っていない）。実装差分自体はこの Pod の Block スクラッチにしかなく、Pod が GC されると失われる。"
+                  || give_up "署名コミットを作れなかった。ブランチ ${BRANCH} は GitHub に作成済み（base の HEAD のまま、まだコミットは載っていない）。実装差分自体はこの Pod のスクラッチにしかなく、Pod が消えると失われる。"
 
                 PR_BODY=$(printf 'closes #%s\n\n実装 handler（%s）が TDD で書いた。テストを先に書き、赤を観測してから実装している。\n\n## 調査\n\n%s\n\n## テストの回\n\n%s\n\n## 実装の回\n\n%s\n' \
                     "$ISSUE" "$MODEL_NOTE" "$(cat /tmp/investigation.md)" "$(cat /tmp/tests-report.md)" "$(cat /workspace/done/report.md 2>/dev/null || echo '(報告なし)')")

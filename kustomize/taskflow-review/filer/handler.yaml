@@ -168,6 +168,13 @@ spec:
                   n=${f#/results/}; n=${n%%/*}
                   cp "$f" "/tmp/triage/${n}.md" || fail "仕分けの報告をコピーできなかった（${f}）。起票は行っていない。"
                 done
+                # 全周回の検証の報告。verified / rereview / unfixed は検証の語彙。
+                mkdir -p /tmp/verify || fail "/tmp/verify を作れなかった。起票は行っていない。"
+                for f in $(printf '%s\n' /results/*/verified/report.md /results/*/rereview/report.md /results/*/unfixed/report.md | sort -t/ -k3,3n); do
+                  [ -f "$f" ] || continue
+                  n=${f#/results/}; n=${n%%/*}
+                  cp "$f" "/tmp/verify/${n}.md" || fail "検証の報告をコピーできなかった（${f}）。起票は行っていない。"
+                done
 
                 KEY=$(cat /github-gateway-key/key) || fail "GitHub の鍵を読めなかった。起票は行っていない。"
                 [ -n "$KEY" ] || fail "GitHub の鍵が空だった。起票は行っていない。"

@@ -1,13 +1,15 @@
-# レビューの仕分け（#1081）。観点ごとの報告を読み、指摘ごとに前提を確かめ、実行して再現できた
-# ものだけを実装フェーズへ差し戻す。レビュアーは読むだけなので、ここが唯一の実測の場になる。
-# だから観点の枝と違い、ビルドとテストを回せる実行環境（Block スクラッチ・依存の取得・PG）を持つ。
+# 実行して判定するフェーズ（#1081）。仕分けと検証が同じ形を共有し、違いはフェーズだけ。
+# - 仕分け: 観点ごとの報告を読み、指摘ごとに前提を確かめ、実行して再現できたものを修正へ回す
+# - 検証: 修正の後、最新の仕分けが採用した指摘が直ったかを、再現の手順を流し直して確かめる
+# レビュアーは読むだけなので、ここが唯一の実測の場になる。だから観点の枝と違い、ビルドと
+# テストを回せる実行環境（Block スクラッチ・依存の取得・PG）を持つ。
 #
 # **agent コンテナに GitHub の鍵を渡さないこと。** clone と PR・issue の取得は fetch init が済ませ、
 # agent はそれを Block スクラッチへ写して使う。作業ツリーの変更は PR に載らない（push しない）。
 apiVersion: flow.tgy.io/v1alpha1
 kind: TaskHandler
 metadata:
-  name: review-triage
+  name: review
 spec:
   phase: 仕分け
   runner:
@@ -83,7 +85,13 @@ spec:
             image: registry.infra.tgy.io/tools/claude-code:latest@sha256:960f3d3e88c28add4d14787303df9a78936fe75128c8e88c0aad1b3078e0f546
             command: [sh, -c]
             args:
-              - GH_ENTERPRISE_TOKEN=$(cat /github-gateway-key/key) exec parts -s review-triage -c verdict-protocol -c untrusted-input -c build-sandbox
+              - |
+                case "${FLOW_PHASE:-}" in
+                  仕分け) SKILL=review-triage ;;
+                  検証) SKILL=review-verify ;;
+                  *) echo "この handler が知らないフェーズ: ${FLOW_PHASE:-（空）}" >&2; exit 1 ;;
+                esac
+                GH_ENTERPRISE_TOKEN=$(cat /github-gateway-key/key) exec parts -s "$SKILL" -c verdict-protocol -c untrusted-input -c build-sandbox
             env:
               - name: HOME
                 value: /tmp
@@ -182,31 +190,45 @@ spec:
               - |
                 set -eu
                 ESCALATE=/workspace/escalate
+                # gateway のログ帰属ヘッダも phase で切り替える（仕分けと検証が同じ値だと
+                # アクセスログで区別できない）。
+                case "${FLOW_PHASE:-}" in
+                  仕分け) SKILL=review-triage; ANTHROPIC_CUSTOM_HEADERS="x-tf-handler: taskflow-review-triage" ;;
+                  検証) SKILL=review-verify; ANTHROPIC_CUSTOM_HEADERS="x-tf-handler: taskflow-review-verify" ;;
+                  *) echo "この handler が知らないフェーズ: ${FLOW_PHASE:-（空）}" >&2; exit 1 ;;
+                esac
                 # sync は Kata + NFS の workspace PVC に要る。書き戻しを残して exit すると
                 # Pod 内の全コンテナが 255 になる。
-                give_up() { printf '%s\n' "$1" > "$ESCALATE/report.md"; sync; exit 0; }
+                # 検証は escalate を持たない（判定の役で、人に上げる役ではない）。判定できない
+                # ときは run の失敗として終わる。
+                give_up() {
+                  if [ -d "$ESCALATE" ]; then
+                    printf '%s\n' "$1" > "$ESCALATE/report.md"; sync; exit 0
+                  fi
+                  printf '%s\n' "$1" >&2; sync; exit 1
+                }
 
                 if [ -f /tmp/fetch-error ]; then
                   give_up "$(cat /tmp/fetch-error)"
                 fi
                 if [ ! -d /tmp/src/.git ] || [ ! -s /tmp/pr.diff ] || [ ! -s /tmp/repo ] || [ ! -s /tmp/pr-number ]; then
-                  give_up "取り込み（fetch init）が完了していないか、PR の diff が空。仕分けは行っていない。"
+                  give_up "取り込み（fetch init）が完了していないか、PR の diff が空。判定は行っていない。"
                 fi
                 REPO=$(cat /tmp/repo)
                 PR=$(cat /tmp/pr-number)
 
                 # --- Block スクラッチに作業ツリーを写す -----------------------------
                 mkfs.ext4 -q -F -E lazy_itable_init=0,lazy_journal_init=0,root_owner=65533:65533 /dev/scratch \
-                  || give_up "Block スクラッチの mkfs に失敗した。仕分けは行っていない。"
+                  || give_up "Block スクラッチの mkfs に失敗した。判定は行っていない。"
                 mkdir -p /scratch && mount -o noatime /dev/scratch /scratch \
-                  || give_up "Block スクラッチの mount に失敗した。仕分けは行っていない。"
+                  || give_up "Block スクラッチの mount に失敗した。判定は行っていない。"
                 cp -a /tmp/src /scratch/src \
-                  || give_up "作業ツリーを Block スクラッチに写せなかった。仕分けは行っていない。"
+                  || give_up "作業ツリーを Block スクラッチに写せなかった。判定は行っていない。"
                 # CARGO_HOME・pnpm store も Block スクラッチに寄せる。イメージの既定の
                 # CARGO_HOME は root 所有で 65533 から書けない。
                 mkdir -p /scratch/cargo /scratch/xdg-data \
                   && chown -R 65533:65533 /scratch \
-                  || give_up "Block スクラッチの準備（所有者の変更）に失敗した。仕分けは行っていない。"
+                  || give_up "Block スクラッチの準備（所有者の変更）に失敗した。判定は行っていない。"
                 # 宣言ディレクトリは prepare が敷く。降りた先から書けるように所有者を渡す。
                 for d in /workspace/*/; do chown 65533:65533 "$d" 2>/dev/null || true; done
 
@@ -219,9 +241,12 @@ spec:
                 # setpriv が黙って降格に失敗すると、この後の再現が全部 root で走る。
                 ACTUAL_UID=$(as_agent id -u 2>&1) || true
                 [ "$ACTUAL_UID" = 65533 ] \
-                  || give_up "65533 への降格に失敗した（setpriv が返した uid: ${ACTUAL_UID}）。仕分けは行っていない。"
+                  || give_up "65533 への降格に失敗した（setpriv が返した uid: ${ACTUAL_UID}）。判定は行っていない。"
                 as_agent git -C /scratch/src checkout --quiet pr \
-                  || give_up "作業ツリーを PR の head に切り替えられなかった。仕分けは行っていない。"
+                  || give_up "作業ツリーを PR の head に切り替えられなかった。判定は行っていない。"
+
+                HEAD_SHA=$(as_agent git -C /scratch/src rev-parse pr) \
+                  || give_up "PR の head のコミットを特定できなかった。判定は行っていない。"
 
                 # e2e/run.sh の有無は PR の head で判定する（checkout の前は base のツリー）。
                 if [ -f /scratch/src/e2e/run.sh ]; then
@@ -234,12 +259,12 @@ spec:
                   -H "Authorization: Bearer $ANTHROPIC_AUTH_TOKEN" \
                   "${ANTHROPIC_BASE_URL}/" || true)
                 [ "$code" = 404 ] \
-                  || give_up "llm-gateway に接続できない（HTTP ${code:-なし}）。仕分けは行っていない。401 はクライアントキー、500 は llm-gateway の SecurityPolicy を確認すること。"
+                  || give_up "llm-gateway に接続できない（HTTP ${code:-なし}）。判定は行っていない。401 はクライアントキー、500 は llm-gateway の SecurityPolicy を確認すること。"
 
                 cd /scratch/src
                 # setpriv と env は exec するので、$! は timeout を指す。TERM は timeout 経由で
                 # claude に届く。50m は Job の timeout（60m）より短くして、打ち切り後に理由を書く時間を残す。
-                as_agent timeout -k 10 50m claude -p "/review-triage ${REPO} の PR #${PR}" \
+                as_agent timeout -k 10 50m claude -p "/${SKILL} ${REPO} の PR #${PR}" \
                   --plugin-dir /parts \
                   --append-system-prompt-file /parts/CLAUDE.md \
                   --verbose \
@@ -270,10 +295,33 @@ spec:
                       [ -n "$(ls -A "$d" 2>/dev/null)" ] && wrote=1
                     done
                     if [ -z "$wrote" ]; then
-                      give_up "claude が 50m で打ち切られた。仕分けの報告は書かれていない。"
+                      give_up "claude が 50m で打ち切られた。判定の報告は書かれていない。"
                     fi
                     ;;
                 esac
+
+                # 検証は、仕分けが見た head からの差分で直しの範囲を確かめる。仕分けの報告には
+                # モデルに書かせず、ここで足す。
+                if [ "$FLOW_PHASE" = 仕分け ] && [ -s /workspace/fix/report.md ]; then
+                  printf '\n仕分けが見た PR の head: `%s`\n' "$HEAD_SHA" >> /workspace/fix/report.md \
+                    || give_up "仕分けの報告に head を書き足せなかった。"
+                fi
+
+                # 検証が「直った」と書いたら、次を仕分けの採用の重さで決める。MEDIUM 以上を
+                # 直したなら、その直しをもう一度レビューに通す。LOW 以下だけなら完了。
+                # 決めるのはスクリプト（判定のたびに揺れないように）。重さは採用の見出しの
+                # [HIGH] などで読む。
+                if [ "$FLOW_PHASE" = 検証 ] && [ -s /workspace/verified/report.md ]; then
+                  LATEST=
+                  for f in $(ls /tmp/previous-triage/*.md 2>/dev/null | sort -t/ -k4,4n); do
+                    LATEST=$f
+                  done
+                  [ -n "$LATEST" ] || give_up "検証の元になる仕分けの報告が棚に無い。判定は行っていない。"
+                  if sed -n '/^## 採用/,/^## /p' "$LATEST" | grep -Eq '^### [0-9]+\. .*\[(CRITICAL|HIGH|MEDIUM)\]'; then
+                    mv /workspace/verified/report.md /workspace/rereview/report.md \
+                      || give_up "検証の報告をもう一度レビューへ回せなかった。"
+                  fi
+                fi
                 sync
             env:
               - name: ANTHROPIC_BASE_URL
@@ -295,6 +343,7 @@ spec:
               # 空にしないと OAuth 側が優先されて Anthropic 直行になる（CNP で落ちる）。
               - name: ANTHROPIC_API_KEY
                 value: ""
+              # 検証フェーズではスクリプトが taskflow-review-verify に上書きする。
               - name: ANTHROPIC_CUSTOM_HEADERS
                 value: "x-tf-handler: taskflow-review-triage"
               # サブエージェントは親のモデルを継がない。固定しないと gateway にルートが無い。

@@ -2,8 +2,9 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: claude-code-build
 
-# implement flow のレビュー（#1081）。観点ごとの枝は base の 1 つの形をフェーズ違いで並べる。
-# 仕分けは実行環境を持つので別の形。flow の配線は manifests/claude-code-build の TaskFlow implement。
+# implement flow の実装とレビュー（#1081）。観点ごとの枝は base の 1 つの形をフェーズ違いで並べる。
+# 実行して判定する仕分けと検証は judge の形、実装と修正は implement の形を、それぞれフェーズ違いで
+# 並べる。flow の配線は manifests/claude-code-build の TaskFlow implement。
 resources:
   - common.yaml
   - planner/handler.yaml
@@ -16,7 +17,10 @@ resources:
   - roles/states
   - roles/precedent
   - roles/ui
-  - triage/handler.yaml
+  - judge/triage
+  - judge/verify
+  - implement/writer
+  - implement/fixer
   - filer/handler.yaml
 
 # TaskHandler は CRD なので、kustomize は中の ConfigMap 参照を書き換えない。

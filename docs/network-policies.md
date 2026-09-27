@@ -151,7 +151,7 @@ All policies are CiliumNetworkPolicy (CNP) and CiliumClusterwideNetworkPolicy (C
 | **kanidm-repl-exchange** (kanidm-repl-exchange=true) | (deny world) | kube-apiserver, seaweedfs-filer (seaweedfs):8333 |
 | **image-digest-audit** (image-digest-audit=true) | (none) | harbor-nginx (harbor):8443 |
 | **github-mcp-smoke** (github-mcp-smoke=true) | (none) | kube-apiserver, github-mcp (llm-gateway):10080, discord.com:443, seaweedfs-filer (seaweedfs):8333 |
-| **aqua-checksum** (aqua-checksum=true) | (none) | kube-apiserver, github.com + api.github.com + *.githubusercontent.com + discord.com + tuf-repo-cdn.sigstore.dev + get.helm.sh :443, seaweedfs-filer (seaweedfs):8333 |
+| **aqua-checksum** (aqua-checksum=true) | (none) | kube-apiserver, github.com + api.github.com + *.githubusercontent.com + discord.com + tuf-repo-cdn.sigstore.dev + get.helm.sh + dl.k8s.io :443, seaweedfs-filer (seaweedfs):8333 |
 | **renovate** (renovate=true) | (none) | harbor-nginx (harbor):8443 |
 | **tofu-harbor** (tofu-harbor=true) | (none) | harbor-nginx (harbor):8443 |
 

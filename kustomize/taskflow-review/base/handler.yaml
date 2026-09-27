@@ -12,7 +12,9 @@ spec:
   phase: set-by-overlay
   runner:
     type: Job
-  timeout: 20m
+  # 打ち切りはこれだけ（claude の回ごとには切らない）。上流が遅い回で 1 回ごとの
+  # 打ち切りに当たり、フローごと止まった（#1081）。
+  timeout: 30m
   maxInfraRetries: 1
   workspace:
     volume: flow-workspace
@@ -164,8 +166,7 @@ spec:
 
                 cd /tmp/src
                 git checkout --quiet pr
-                # 15m は Job の timeout（20m）より短くして、打ち切り後に escalate へ理由を書く時間を残す。
-                timeout -k 10 15m claude -p "/${SKILL} ${REPO} の PR #${PR}" \
+                claude -p "/${SKILL} ${REPO} の PR #${PR}" \
                   --plugin-dir /parts \
                   --append-system-prompt-file /parts/CLAUDE.md \
                   --verbose \
@@ -187,17 +188,18 @@ spec:
                 wait $pid || rc=$?
                 echo "claude exited with $rc"
                 # 判定はディレクトリで出る。終了コードで escalate に書き足すと、既に答えが
-                # 書かれていた場合に答えが 2 つになる。timeout による打ち切り（124/137/143）で
-                # escalate 以外が全部空のときだけ、理由を残す。
+                # 書かれていた場合に答えが 2 つになる。Job の期限による打ち切りは trap で
+                # 終わり、ここは通らない（理由はコントローラが Task に残す）。ここに来るのは
+                # claude だけが kill されたときで、escalate 以外が全部空のときだけ理由を残す。
                 case "$rc" in
-                  124 | 137 | 143)
+                  137)
                     wrote=
                     for d in /workspace/*/; do
                       [ "$d" = "$ESCALATE/" ] && continue
                       [ -n "$(ls -A "$d" 2>/dev/null)" ] && wrote=1
                     done
                     if [ -z "$wrote" ]; then
-                      give_up "claude が 15m で打ち切られた。llm-gateway の疎通を確認すること。報告は書かれていない。"
+                      give_up "claude が kill された（exit ${rc}）。報告は書かれていない。"
                     fi
                     ;;
                 esac

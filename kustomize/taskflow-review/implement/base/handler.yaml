@@ -499,6 +499,36 @@ spec:
                   log="$1"; shift
                   supervise as_agent sh -c "cd /scratch/src && exec claude \"\$@\"" claude "$@" < /dev/null > "$log" 2>&1
                 }
+                # 終わる前の確認（Stop hook）。結論の置き場所（/tmp/stop-expect に並べたどれか）が空のまま、
+                # または手順を見直した宣言（PROCEDURE-CHECKED）無しに終わろうとしたら、1 回だけ戻す。
+                # 2 回目（stop_hook_active）は通す。止め続けると回が終わらない。
+                # root が書き、agent（65533）からは書き換えられない。
+                cat > /tmp/claude-stop-hook.sh <<'HOOK' \
+                  || give_up "終わる前の確認（Stop hook）を書き出せなかった。実装は行っていない。"
+                in=$(cat)
+                [ "$(printf '%s' "$in" | jq -r '.stop_hook_active // false')" = true ] && exit 0
+                wrote=
+                while IFS= read -r f; do [ -s "$f" ] && wrote=1; done < /tmp/stop-expect
+                tp=$(printf '%s' "$in" | jq -r '.transcript_path // empty')
+                last=
+                if [ -n "$tp" ] && [ -r "$tp" ]; then
+                  last=$(jq -rs '[.[] | select(.type == "assistant") | .message.content[]? | select(.type == "text") | .text] | last // ""' "$tp" 2>/dev/null)
+                fi
+                case "$last" in *PROCEDURE-CHECKED*) declared=1 ;; *) declared= ;; esac
+                [ -n "$wrote" ] && [ -n "$declared" ] && exit 0
+                reason="まだ終わらないこと。"
+                if [ -z "$wrote" ]; then
+                  reason="$reason 結論をまだ置いていない。skill の手順に戻り、置くべき場所（$(tr '\n' ' ' < /tmp/stop-expect)）のどれかに書いてから終わること。テストを回していなければ回すこと。"
+                fi
+                if [ -z "$declared" ]; then
+                  reason="$reason 終わる前に skill の手順を 1 つずつ見直し、やり残しが無ければ最後の発言に PROCEDURE-CHECKED と書いてから終わること。"
+                fi
+                jq -n --arg r "$reason" '{decision: "block", reason: $r}'
+                HOOK
+                printf '%s\n' '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"sh /tmp/claude-stop-hook.sh"}]}]}}' > /tmp/claude-stop-settings.json \
+                  || give_up "終わる前の確認（Stop hook）の設定を書き出せなかった。実装は行っていない。"
+                chmod 0644 /tmp/claude-stop-hook.sh /tmp/claude-stop-settings.json \
+                  || give_up "終わる前の確認（Stop hook）を用意できなかった。実装は行っていない。"
                 # gateway に繋がらない（Envoy が落ちている・CNP が閉じている）と、claude は
                 # upstream の 5xx とは違って error_status:null/"unknown" のまま延々リトライし続け、
                 # Job の timeout に達するまで気付けない（実測。相手がブローカー
@@ -564,7 +594,9 @@ spec:
                 # 到達すること自体がない（done も escalate も書かれず NoAnswer になる）。
                 # || で括って set -e の対象から外す。
                 CLAUDE_RC=0
+                printf '%s\n' /scratch/out/tests-report.md /scratch/out/no-test.md /scratch/out/untestable.md /workspace/escalate/report.md > /tmp/stop-expect
                 run_agent /tmp/claude-tests.log \
+                  --settings /tmp/claude-stop-settings.json \
                   -p "$TESTS_PROMPT" \
                   --plugin-dir /parts \
                   --append-system-prompt-file /parts/CLAUDE.md \
@@ -614,7 +646,57 @@ spec:
                 fi
 
                 # --- 3. 赤の観測（この handler の本体） ---------------------------
-                if [ -z "$SKIP_RED" ] && run_tests /tmp/red.log; then
+                # テストの欠落の指摘（[coverage] / [mutation]）に書くテストは、今のコードでは
+                # 通るのが正しい。その赤は「指摘された壊し方を入れると落ちる」ことで観測する:
+                # fix-tests が置いた変異のパッチ（/scratch/out/mutations/*.patch）を 1 つずつ
+                # 当ててテストが落ちることを見て、外して作業ツリーが元に戻ることを確かめる。
+                MUTATION_RED=
+                if [ -n "$FIX" ] && ls /scratch/out/mutations/*.patch >/dev/null 2>&1; then
+                  : > /tmp/mutants.log
+                  for m in /scratch/out/mutations/*.patch; do
+                    # 当てる前に触るパスを見る。テストのファイルを書き換える変異は、テストごと
+                    # 差し替えて赤を作れてしまい、捕まえたことにならない。Rust の同一ファイル内
+                    # テスト（#[cfg(test)]）はパスでは見分けられない — 残る限界。
+                    # rename・新規作成・削除・mode 変更が混じると、--numstat は変更後のパスしか
+                    # 出さず、rename でテストのファイルを実装側のパスへ逃がされても素通りする。
+                    # --summary はそれらを出力するので、1 行でもあれば打ち切る（中身の書き換え
+                    # だけが変異として許される形）。
+                    as_agent git -C /scratch/src apply --summary "$m" > /tmp/mutation-summary.txt 2>/dev/null \
+                      || give_up "変異 $(basename "$m") のパッチが読めない（壊れている）。実装には進んでいない。"
+                    [ -s /tmp/mutation-summary.txt ] \
+                      && give_up "変異 $(basename "$m") がファイルの追加・削除・rename・copy・mode 変更を含む。中身の書き換えだけの変異ではないので実装には進んでいない。"
+                    as_agent git -C /scratch/src apply --numstat "$m" > /tmp/mutation-numstat.txt 2>/dev/null \
+                      || give_up "変異 $(basename "$m") のパッチが読めない（壊れている）。実装には進んでいない。"
+                    [ -s /tmp/mutation-numstat.txt ] \
+                      || give_up "変異 $(basename "$m") が触るパスを取れなかった。実装には進んでいない。"
+                    # numstat の行は `<追加>\t<削除>\t<パス>`。行全体に掛けると、直下の tests/ は
+                    # 前がタブで ^ にも / にも当たらないので、パスの列だけにして照合する。
+                    if cut -f3- /tmp/mutation-numstat.txt | grep -Eq '(^|/)(tests|test|e2e|__tests__)/|_test\.|\.test\.|\.spec\.|(^|/)test_[^/]*\.py'; then
+                      give_up "変異 $(basename "$m") がテストのファイルを書き換える。捕まえたことにならないので実装には進んでいない。"
+                    fi
+                    before=$(as_agent git -C /scratch/src diff | sha256sum)
+                    as_agent git -C /scratch/src apply "$m" \
+                      || give_up "変異 $(basename "$m") を当てられなかった。実装には進んでいない。"
+                    if run_tests /tmp/mutant.log; then
+                      as_agent git -C /scratch/src apply -R "$m" || true
+                      { echo "変異 $(basename "$m") を入れてもテストが通る。テストが指摘された壊し方を捕まえていないので実装に進んでいない。"
+                        echo
+                        cat "$m"
+                      } > /tmp/giveup.txt
+                      give_up_file /tmp/giveup.txt
+                    fi
+                    { echo "## $(basename "$m")"; tail -20 /tmp/mutant.log; echo; } >> /tmp/mutants.log
+                    as_agent git -C /scratch/src apply -R "$m" \
+                      || give_up "変異 $(basename "$m") を外せなかった。作業ツリーが壊れているので実装には進んでいない。"
+                    [ "$(as_agent git -C /scratch/src diff | sha256sum)" = "$before" ] \
+                      || give_up "変異 $(basename "$m") を外した後、作業ツリーが元に戻らなかった。実装には進んでいない。"
+                  done
+                  MUTATION_RED=1
+                fi
+                # 変異で赤を見たなら、他のテストが最初から通っても先へ進める（バグの指摘のテストに
+                # できないものは untestable に回り、書かれるのがテストの欠落のテストだけのことがある）。
+                # バグそのものが直ったかは、この handler では確認しない。
+                if [ -z "$SKIP_RED" ] && [ -z "$MUTATION_RED" ] && run_tests /tmp/red.log; then
                   git -C /scratch/src diff > /tmp/tests.diff || true
                   { echo "書かれたテストが最初から通ってしまう。要求を検証していないので実装に進んでいない。"
                     echo
@@ -627,6 +709,9 @@ spec:
                   give_up_file /tmp/giveup.txt
                 fi
                 cp /scratch/out/tests-report.md /tmp/tests-report.md 2>/dev/null || echo '(報告なし)' > /tmp/tests-report.md
+                if [ -s /tmp/mutants.log ]; then
+                  { echo; echo "## 変異を入れたときのテストの結果"; echo; cat /tmp/mutants.log; } >> /tmp/tests-report.md
+                fi
                 chmod 0644 /tmp/tests-report.md
                 if [ -s /scratch/out/untestable.md ]; then
                   cp /scratch/out/untestable.md /tmp/untestable.md && chmod 0644 /tmp/untestable.md
@@ -639,41 +724,72 @@ spec:
                 find /workspace/done -mindepth 1 -delete 2>/dev/null || true
                 check_gateway \
                   || give_up "llm-gateway に接続できない。${NOT_PUSHED}llm-gateway namespace の Envoy と、claude-code-build 側／llm-gateway 側の CNP を確認すること。"
-                CLAUDE_RC=0
-                # Agent は修正フェーズだけに要る（直した後に検証役のサブエージェントを呼ぶ）。
-                # 実装（/implement）は使わず、信頼できない入力（issue 本文）を読む回でもある。
-                run_agent /tmp/claude-implement.log \
-                  -p "$IMPL_PROMPT" \
-                  --plugin-dir /parts \
-                  --append-system-prompt-file /parts/CLAUDE.md \
-                  --verbose --output-format stream-json \
-                  --dangerously-skip-permissions \
-                  --allowedTools "Bash,Read,Write,Edit,Glob,Grep${FIX:+,Agent}" \
-                  --model "$LLM_ALIAS" \
-                  --max-turns 120 || CLAUDE_RC=$?
-                if [ "$CLAUDE_RC" -ne 0 ]; then
-                  { echo "実装の回の claude が失敗した（exit ${CLAUDE_RC}）。${NOT_PUSHED}"
-                    if [ "$CLAUDE_RC" -eq 137 ]; then
-                      echo "（137 は KILL。kubectl describe pod で OOMKilled かを確認すること）"
-                    fi
-                    echo
-                    echo "stream-json の末尾:"
-                    tail -20 /tmp/claude-implement.log
-                  } > /tmp/giveup.txt
-                  give_up_file /tmp/giveup.txt
-                fi
+                # 緑の確認で落ちたら、落ちた出力を渡して直す回だけをやり直させる（テストを書く回と
+                # 赤の確認はやり直さない）。安いモデルは 1 回で通らないことが普通にある。
+                # claude 自体の失敗（exit が 0 以外）はやり直しても直らないので、そのまま降りる。
+                IMPL_ATTEMPTS=3
+                attempt=1
+                prompt="$IMPL_PROMPT"
+                while :; do
+                  CLAUDE_RC=0
+                  # Agent は修正フェーズだけに要る（直した後に検証役のサブエージェントを呼ぶ）。
+                  # 実装（/implement）は使わず、信頼できない入力（issue 本文）を読む回でもある。
+                  printf '%s\n' /workspace/done/report.md /workspace/escalate/report.md > /tmp/stop-expect
+                  run_agent "/tmp/claude-implement-${attempt}.log" \
+                    --settings /tmp/claude-stop-settings.json \
+                    -p "$prompt" \
+                    --plugin-dir /parts \
+                    --append-system-prompt-file /parts/CLAUDE.md \
+                    --verbose --output-format stream-json \
+                    --dangerously-skip-permissions \
+                    --allowedTools "Bash,Read,Write,Edit,Glob,Grep${FIX:+,Agent}" \
+                    --model "$LLM_ALIAS" \
+                    --max-turns 120 || CLAUDE_RC=$?
+                  # 実モデルの特定（後段）はこのファイルを読む。
+                  cp "/tmp/claude-implement-${attempt}.log" /tmp/claude-implement.log || true
+                  if [ "$CLAUDE_RC" -ne 0 ]; then
+                    { echo "実装の回の claude が失敗した（exit ${CLAUDE_RC}、${attempt} 回目）。${NOT_PUSHED}"
+                      if [ "$CLAUDE_RC" -eq 137 ]; then
+                        echo "（137 は KILL。kubectl describe pod で OOMKilled かを確認すること）"
+                      fi
+                      echo
+                      echo "stream-json の末尾:"
+                      tail -20 /tmp/claude-implement.log
+                    } > /tmp/giveup.txt
+                    give_up_file /tmp/giveup.txt
+                  fi
 
-                # --- 5. 緑の確認 --------------------------------------------------
-                if ! run_tests /tmp/green.log; then
-                  { echo "実装後も $TEST_CMD が通らない。${NOT_PUSHED}"
-                    echo
-                    tail -40 /tmp/green.log
-                    echo
-                    echo "テストの回で書かれたもの:"
-                    cat /tmp/tests-report.md
-                  } > /tmp/giveup.txt
-                  give_up_file /tmp/giveup.txt
-                fi
+                  # --- 5. 緑の確認 ------------------------------------------------
+                  if run_tests /tmp/green.log; then
+                    break
+                  fi
+                  # skill が「テストのほうが誤り」として escalate に理由を書いたなら、やり直さない。
+                  if [ -s /workspace/escalate/report.md ]; then
+                    { cat /workspace/escalate/report.md
+                      echo
+                      echo "## $TEST_CMD の結果（${attempt} 回目の後）"
+                      echo
+                      tail -40 /tmp/green.log
+                    } > /tmp/giveup.txt
+                    give_up_file /tmp/giveup.txt
+                  fi
+                  if [ "$attempt" -ge "$IMPL_ATTEMPTS" ]; then
+                    { echo "実装後も $TEST_CMD が通らない（直す回を ${attempt} 回やった）。${NOT_PUSHED}"
+                      echo
+                      tail -40 /tmp/green.log
+                      echo
+                      echo "テストの回で書かれたもの:"
+                      cat /tmp/tests-report.md
+                    } > /tmp/giveup.txt
+                    give_up_file /tmp/giveup.txt
+                  fi
+                  tail -80 /tmp/green.log > /tmp/green-failure.md && chmod 0644 /tmp/green-failure.md \
+                    || give_up "テストの失敗を次の回に渡せなかった。${NOT_PUSHED}"
+                  # 落ちた回が書いた done は、次の回の報告と混ざるので消す。
+                  find /workspace/done -mindepth 1 -delete 2>/dev/null || true
+                  prompt="${IMPL_PROMPT}。${attempt} 回目の後、テストが通らなかった。失敗の出力は /tmp/green-failure.md にある。テストは書き換えず、実装を直すこと。作業ツリーには前の回の変更が残っている"
+                  attempt=$((attempt + 1))
+                done
 
                 # --- 6. PR（handler が作る。エージェントには触らせない） ------------
                 cd /scratch/src

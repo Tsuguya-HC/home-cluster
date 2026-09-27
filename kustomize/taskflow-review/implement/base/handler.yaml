@@ -97,7 +97,7 @@ spec:
           - name: parts
             image: registry.infra.tgy.io/tools/claude-code:latest@sha256:960f3d3e88c28add4d14787303df9a78936fe75128c8e88c0aad1b3078e0f546
             command: [parts]
-            args: [-s, implement-tests, -s, implement, -s, fix-tests, -s, fix, -c, verdict-protocol, -c, untrusted-input, -c, build-sandbox]
+            args: [-s, implement-tests, -s, implement, -s, fix-tests, -s, fix, -a, fix-verifier, -c, verdict-protocol, -c, untrusted-input, -c, build-sandbox]
             env:
               - name: HOME
                 value: /tmp

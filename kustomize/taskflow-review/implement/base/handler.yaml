@@ -1,0 +1,816 @@
+apiVersion: flow.tgy.io/v1alpha1
+kind: TaskHandler
+metadata:
+  name: implement
+spec:
+  phase: 実装
+  runner:
+    type: Job
+  # 打ち切りはこれだけ（claude の回ごとには切らない）。競合を落ちるテストにする回は
+  # 15 分を超えた（2026-09-26 実測）。
+  timeout: 120m
+  maxInfraRetries: 1
+  # 判定（done / escalate）の置き場。Block スクラッチには置けない — FS がゲスト内にあるので
+  # publish サイドカーから読めない（docs/kata-storage.md）。重い作業は Block、渡すものは workspace。
+  workspace:
+    volume: flow-workspace
+    mountPath: /workspace
+  jobTemplate:
+    template:
+      metadata:
+        labels:
+          taskflow-implement: "true"
+      spec:
+        restartPolicy: Never
+        runtimeClassName: kata
+        serviceAccountName: agent-implementer
+        automountServiceAccountToken: false
+        # TERM 後の sync（NFS 越し）に猶予を残す。
+        terminationGracePeriodSeconds: 60
+        # runAsUser は必須（taskflow のコントローラが Job 構築時に checkUID で見る。無いと
+        # ErrWorkspace）。agent は root で起動する設計（下の containers[0].securityContext で
+        # runAsUser: 0 に上書き）なので、Pod レベルもそれに合わせる。
+        securityContext:
+          runAsUser: 0
+          seccompProfile:
+            type: RuntimeDefault
+        # LLM バッチ Pod が名乗る workload-class=cpu-saturating から逃げる（同居回避の衛生策。
+        # manifests/image-build/workflowtemplate.yaml と同じ形）。cargo のフルビルドは
+        # limits.cpu 4・60 分で、wn-01/wn-02（4 コア）に同居すると身動きが取れなくなる
+        # （wn-03 は 16 コア）。preferred なので同居がなければ一番速いノードを使える。
+        affinity:
+          podAntiAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+              - weight: 100
+                podAffinityTerm:
+                  labelSelector:
+                    matchLabels:
+                      workload-class: cpu-saturating
+                  namespaceSelector: {}
+                  topologyKey: kubernetes.io/hostname
+              # 複数 Task が同時に走ると、この handler 同士（limits.cpu 4 の Kata VM）が
+              # wn-01/wn-02（4 コア）に 2 本乗ってノードのコアを使い切る。同じラベルの
+              # Pod からも逃げる。required にはしない — Worker 3 台構成で埋まっていると
+              # Pending 固定になるリスクがあるため。
+              - weight: 100
+                podAffinityTerm:
+                  labelSelector:
+                    matchLabels:
+                      taskflow-implement: "true"
+                  namespaceSelector: {}
+                  topologyKey: kubernetes.io/hostname
+        volumes:
+          - name: tmp
+            emptyDir: {}
+          - name: pgdata
+            emptyDir: {}
+          - name: parts
+            emptyDir: {}
+          # gateway の呼び出し元鍵をファイルで渡す先。agent 側の入口で読んで消す。
+          - name: github-token
+            emptyDir: {}
+          # Block スクラッチ。virtiofs を通らない唯一の経路で、FS はゲスト内にある。
+          # Pod と同じ寿命（消えるときに PVC ごと消える）。QNAP が転けてもホスト kernel の
+          # XFS を巻き込まない（docs/kata-storage.md）。
+          - name: scratch
+            ephemeral:
+              volumeClaimTemplate:
+                spec:
+                  accessModes: [ReadWriteOnce]
+                  storageClassName: qnap-iscsi
+                  volumeMode: Block
+                  resources:
+                    requests:
+                      storage: 20Gi
+          # 呼び出し元鍵（key-rotator が配る）。**GitHub の資格情報ではない** — gateway が
+          # 実 installation token に付け替える。見るのは下の github-key init だけ。
+          - name: github-gateway-key
+            secret:
+              secretName: github-gateway-client-keys
+              defaultMode: 0444
+              items:
+                - key: taskflow-implement
+                  path: key
+        initContainers:
+          # private な parts リポを gateway の ro ホスト経由で引く（#1038）。鍵は ro の
+          # 呼び出し元鍵で、この init の env にだけある（agent には渡らない）。
+          - name: parts
+            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:960f3d3e88c28add4d14787303df9a78936fe75128c8e88c0aad1b3078e0f546
+            command: [parts]
+            args: [-s, implement-tests, -s, implement, -s, fix-tests, -s, fix, -c, verdict-protocol, -c, untrusted-input, -c, build-sandbox]
+            env:
+              - name: HOME
+                value: /tmp
+              - name: PARTS_REF
+                valueFrom:
+                  configMapKeyRef:
+                    name: parts-ref
+                    key: sha
+              - {name: GH_HOST, value: gh-ro.infra.tgy.io}
+              - name: GH_ENTERPRISE_TOKEN
+                valueFrom:
+                  secretKeyRef: {name: github-gateway-client-keys, key: taskflow-implement-parts}
+            securityContext:
+              runAsUser: 65532
+              runAsNonRoot: true
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities: {drop: [ALL]}
+            volumeMounts:
+              - {name: parts, mountPath: /parts}
+              - {name: tmp, mountPath: /tmp}
+            resources:
+              requests: {cpu: 50m, memory: 64Mi}
+              # Kata では全コンテナに limits.cpu が無いと Pod レベルの cgroup quota が
+              # 確定せず、agent の cpu: "4" が VM サイジングに伝わらない（native sidecar は
+              # 通常 init と違い max ではなく合算）。taskflow-pr-review.yaml と同じ形で全部に書く。
+              # **ただしここで書けるのは我々が書くコンテナだけ**で、taskflow が注入する
+              # `flow-publish`（native sidecar、job.go:782）は memory limit しか持たない
+              # （job.go:845）。実際に cargo のビルドは回っているので、この前提は厳密には
+              # 成立していない — それでも足りているというだけ。
+              limits: {cpu: 500m, memory: 256Mi}
+          # gateway の呼び出し元鍵をファイルに写す。env で渡すと setpriv で降りた後の
+          # claude にも継承されるので、ファイルにして agent 側の入口で読んで消す
+          # （旧 github-auth init が installation token でやっていたのと同じ形）。
+          - name: github-key
+            image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:9e1dd7b0bf77791b3b4769b46fe93a74da5c350fe0d25d670791e5c84f69e712
+            command: [sh, -c]
+            args: ["cp /github-gateway-key/key /github-token/token"]
+            securityContext:
+              runAsUser: 65532
+              runAsNonRoot: true
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities: {drop: [ALL]}
+            volumeMounts:
+              - {name: github-gateway-key, mountPath: /github-gateway-key, readOnly: true}
+              - {name: github-token, mountPath: /github-token}
+            resources:
+              requests: {cpu: 10m, memory: 16Mi}
+              limits: {cpu: 100m, memory: 64Mi}
+          # 対象リポの e2e（e2e/run.sh）が使う使い捨ての PostgreSQL（#1072）。native sidecar
+          # なので agent が終われば一緒に止まり、startupProbe が通るまで agent は始まらない。
+          # 127.0.0.1 だけで待ち受け、認証は trust（Pod の外からは届かず、中の agent には
+          # 使わせるのが目的）。データは Pod と一緒に消える。
+          # 5432 から動かさないこと: 対象リポの component は postgres://*:5432 にしか繋げない。
+          - name: postgres
+            image: postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
+            restartPolicy: Always
+            command: [docker-entrypoint.sh]
+            args: [postgres, -c, listen_addresses=127.0.0.1, -c, fsync=off]
+            env:
+              - {name: POSTGRES_HOST_AUTH_METHOD, value: trust}
+              - {name: PGDATA, value: /pgdata/db}
+            startupProbe:
+              exec:
+                command: [pg_isready, -h, 127.0.0.1, -U, postgres]
+              periodSeconds: 2
+              failureThreshold: 60
+            securityContext:
+              runAsUser: 70
+              runAsGroup: 70
+              runAsNonRoot: true
+              allowPrivilegeEscalation: false
+              capabilities: {drop: [ALL]}
+            volumeMounts:
+              - {name: pgdata, mountPath: /pgdata}
+            resources:
+              requests: {cpu: 100m, memory: 128Mi}
+              limits: {cpu: "1", memory: 512Mi}
+        # LLM の API キーはこの Pod のどのコンテナにも無い（#942）。
+        #
+        # エージェントは信頼できない入力（issue 本文）を読んで Bash を実行する。キーが
+        # その環境変数にあると、読み出して作業ツリーや report に書けてしまい、それが
+        # draft PR として PUBLIC リポジトリに出る（CNP は PR を塞げない。正規の経路なので）。
+        # 2026-09-18 まではこれを openrouter-broker サイドカーで隔てていた（同じ Pod でも
+        # 別コンテナなら environ は読めない）が、実キーが llm-gateway に移ったので不要になった。
+        # agent が知っているのは gateway の URL と alias だけ。
+        containers:
+          - name: agent
+            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:960f3d3e88c28add4d14787303df9a78936fe75128c8e88c0aad1b3078e0f546
+            workingDir: /workspace
+            securityContext:
+              # VM の中の特権。ホストには及ばない（containerd が
+              # privileged_without_host_devices = true）。mkfs と mount に要る。
+              # capability を絞っても PSA から見れば同じく baseline 超えで、置ける namespace は
+              # 変わらない（docs/kata-storage.md）。作業本体は下で 65533 に降りる。
+              privileged: true
+              runAsUser: 0
+            volumeDevices:
+              - name: scratch
+                devicePath: /dev/scratch
+            volumeMounts:
+              - {name: flow-workspace, mountPath: /workspace}
+              # 過去の全 run の棚（taskflow ADR-0003 / ADR-0013 決定6）。調査の報告と、修正では
+              # 最新の仕分けを読む。inputs ビューに並ぶのは直前の答えだけで、検証から戻された
+              # 修正には仕分けが並ばない。だから棚から読む。
+              - {name: flow-workspace, mountPath: /results, subPath: results, readOnly: true}
+              # この run に至った答え（taskflow ADR-0013 決定6）。検証から戻された修正なら
+              # inputs/検証/ にまだ直っていない点が並ぶ。
+              - {name: flow-workspace, mountPath: /inputs, subPath: inputs, readOnly: true}
+              - {name: tmp, mountPath: /tmp}
+              - {name: parts, mountPath: /parts, readOnly: true}
+              - {name: github-token, mountPath: /github-token}
+            command: [bash, -c]
+            args:
+              - |
+                set -eu
+                ESCALATE=/workspace/escalate
+                # done と escalate の両方が非空だと判定不能（NoAnswer）になる。implement skill が
+                # 自分で done/report.md を書いた後にこの handler が escalate に倒れることがあるので、
+                # escalate する側が先に done を空にして「答えは 1 つ」に保つ。ただし中身は捨てず、
+                # escalate の報告に畳み込む（緑失敗時に実装報告が消えて手がかりが無くなるのを防ぐ）。
+                # rm -f report.md だけだと、report.md 以外の置き土産が残ってディレクトリが空に
+                # ならず結局 NoAnswer に落ちるので、中身ごと空にする。
+                give_up() {
+                  DONE=$(cat /workspace/done/report.md 2>/dev/null || true)
+                  find /workspace/done -mindepth 1 -delete 2>/dev/null || true
+                  { printf '%s\n' "$1"
+                    if [ -n "$DONE" ]; then
+                      printf '\n## 実装 handler がここまでに書いていたこと\n\n%s\n' "$DONE"
+                    fi
+                  } > "$ESCALATE/report.md"
+                  sync; exit 0
+                }
+                # 複数行を書くときは stdin から。YAML のリテラルブロックの中では、行頭に戻る
+                # 継続行がブロックそのものを終わらせてしまうため、埋め込みではなくパイプで渡す。
+                # **パイプラインの右側はサブシェルで走る。** 関数をパイプの右に置くと、
+                # 中の `exit 0` はサブシェルを抜けるだけで、呼び出し元のスクリプトは
+                # そのまま次の行へ進む。2026-09-15 の初回実投入で、緑の確認が失敗して
+                # escalate を書いたのに PR 作成まで走り、「PR は作っていない」と書かれた PR が
+                # 出た（Task は done/ だけが残って 完了 になった）。
+                # 呼び出し側はファイルに書いてから give_up_file を呼ぶ形にして、
+                # 関数を現在のシェルで実行する。
+                give_up_file() {
+                  DONE=$(cat /workspace/done/report.md 2>/dev/null || true)
+                  find /workspace/done -mindepth 1 -delete 2>/dev/null || true
+                  { cat "$1"
+                    if [ -n "$DONE" ]; then
+                      printf '\n## 実装 handler がここまでに書いていたこと\n\n%s\n' "$DONE"
+                    fi
+                  } > "$ESCALATE/report.md"
+                  sync; exit 0
+                }
+
+                # --- 入力の検証（この値は URL にもプロンプトにも入る） -------------
+                # FLOW_INPUT が空なら既定リポ。空でないのに .repo が取れない（JSON が壊れて
+                # いる等）場合は、空指定と区別せず home-rss へ黙って流さない。
+                if [ -z "${FLOW_INPUT:-}" ]; then
+                  REPO=Tsuguya-HC/home-rss
+                else
+                  REPO=$(printf '%s' "$FLOW_INPUT" | jq -r '.repo // empty' 2>/dev/null || true)
+                  [ -n "$REPO" ] || give_up "spec.input が JSON として読めないか .repo を持たない。実装は行っていない。"
+                fi
+                case "$REPO" in
+                  Tsuguya-HC/*[!-A-Za-z0-9._]* | Tsuguya-HC/ | Tsuguya-HC/*/*)
+                    give_up "spec.input.repo の形が不正。実装は行っていない。" ;;
+                  Tsuguya-HC/?*) ;;
+                  *) give_up "spec.input.repo は Tsuguya-HC 配下だけを指定できる。実装は行っていない。" ;;
+                esac
+                ISSUE=$(printf '%s' "${FLOW_INPUT:-}" | jq -r '.issue // empty' 2>/dev/null || true)
+                case "$ISSUE" in
+                  '' | *[!0-9]*) give_up "spec.input.issue が数字ではない。実装は行っていない。" ;;
+                esac
+
+                # --- 鍵はファイルから読んで即座に消す -------------------------------
+                # gateway の呼び出し元鍵（GitHub の資格情報ではない。gateway が実 token に
+                # 付け替える）。export しないので claude の環境には入らない。ファイルも消すので、
+                # プロンプトインジェクションでエージェントが読み出す経路を残さない。
+                GH_KEY=$(cat /github-token/token)
+                rm -f /github-token/token
+                # GitHub は全部 gateway の rw ホスト経由（#1038）。gh は GH_HOST を見て
+                # REST を /api/v3、GraphQL を /api/graphql に投げ、GH_ENTERPRISE_TOKEN を
+                # `Authorization: token` で送る。どちらもコマンド単位で渡し、export しない。
+                GH_GATEWAY=gh-rw.infra.tgy.io
+                ghgw() { GH_HOST="$GH_GATEWAY" GH_ENTERPRISE_TOKEN="$GH_KEY" "$@"; }
+
+                # --- Block スクラッチ（virtiofs を通らない唯一の経路） --------------
+                # ここだけ素通しだと、失敗時に理由を書かずに即死し（set -eu 任せ）、
+                # maxInfraRetries を診断情報ゼロで消費する。他の外部呼び出しと同じく
+                # give_up で捕まえる。
+                mkfs.ext4 -q -F -E lazy_itable_init=0,lazy_journal_init=0,root_owner=65533:65533 /dev/scratch \
+                  || give_up "Block スクラッチの mkfs に失敗した。実装は行っていない。"
+                mkdir -p /scratch \
+                  || give_up "/scratch の作成に失敗した。実装は行っていない。"
+                mount -o noatime /dev/scratch /scratch \
+                  || give_up "Block スクラッチの mount に失敗した。実装は行っていない。"
+                mkdir -p /scratch/out \
+                  || give_up "/scratch/out の作成に失敗した。実装は行っていない。"
+                chown 65533:65533 /scratch /scratch/out \
+                  || give_up "/scratch の所有者変更に失敗した。実装は行っていない。"
+                # CARGO_HOME・pnpm store も Block スクラッチに寄せる。イメージの既定
+                # CARGO_HOME（/usr/local/cargo、root:root 0755）は 65533 から書けず、
+                # cargo test が必ず Permission denied で落ちる（変更前の baseline から失敗する）。
+                mkdir -p /scratch/cargo /scratch/xdg-data \
+                  || give_up "/scratch/cargo・/scratch/xdg-data の作成に失敗した。実装は行っていない。"
+                chown 65533:65533 /scratch/cargo /scratch/xdg-data \
+                  || give_up "/scratch/cargo・/scratch/xdg-data の所有者変更に失敗した。実装は行っていない。"
+                # 宣言ディレクトリは prepare が敷く。この Pod は root で起動して作業だけ
+                # 65533 に降りるので、降りた先から書けるように所有者を渡しておく
+                # （/workspace 直下は 0555 のままで、新しいディレクトリは作れない）。
+                for d in /workspace/*/; do chown 65533:65533 "$d" 2>/dev/null || true; done
+
+                # --- clone。鍵は URL にも .git/config にも書かない ------------------
+                # extraheader は clone/fetch のその1回のプロセスにだけ渡す（GIT_CONFIG_COUNT
+                # は export せず、コマンドの先頭に置いた単発の代入で済ませる）。images/claude-code
+                # の parts コマンドと同じ形。`token ` の形にするのは、Envoy の apiKeyAuth が
+                # 剥がすのが `Bearer ` だけで、こちらは文字列そのものが照合対象になるため。
+                AUTH_HEADER="Authorization: token ${GH_KEY}"
+                GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0="http.https://${GH_GATEWAY}/.extraheader" GIT_CONFIG_VALUE_0="$AUTH_HEADER" \
+                  git clone --quiet "https://${GH_GATEWAY}/${REPO}.git" /scratch/src \
+                  || give_up "${REPO} を clone できなかった。実装は行っていない。"
+                BASE_SHA=$(git -C /scratch/src rev-parse HEAD)
+                # dubious ownership の safe.directory はここで通す（chown 直後）。この後は
+                # root がこのリポで git status / diff / add / commit を全部叩くので、PR 作成
+                # 直前まで待つと「テストを書いたか」の判定そのものが git の fatal で握り潰される
+                # （fatal は stdout に出ないので "$(git status --porcelain)" が空文字になり、
+                # claude が何もしなかったのと区別が付かなくなる）。
+                chown -R 65533:65533 /scratch/src
+                git config --global --add safe.directory /scratch/src
+                # エージェント（65533）は /scratch/src に書き放題なので、.git/hooks/pre-commit
+                # 経由で root（このあと GH_KEY 付きで署名コミットのスクリプトを叩く）を
+                # 乗っ取れる。コストゼロで塞ぐ。
+                git -C /scratch/src config core.hooksPath /dev/null
+
+                BRANCH="agent/issue-${ISSUE}-${FLOW_TASK_UID%%-*}"
+                # 修正フェーズ: 最新の仕分けが採用した指摘を、同じ PR のブランチに積む。新しい PR は
+                # 作らない。署名コミットのスクリプトはリモートのブランチの先頭を親にし、ローカルの
+                # HEAD との差分を載せるので、作業ツリーはブランチの先頭に合わせておく。
+                FIX=
+                NOT_PUSHED="PR は作っていない。"
+                # 修正フェーズでは gateway のログ帰属ヘッダも切り替える（実装と同じ値だと
+                # アクセスログで区別できない）。
+                case "${FLOW_PHASE:-}" in
+                  実装) ;;
+                  修正) FIX=1; ANTHROPIC_CUSTOM_HEADERS="x-tf-handler: taskflow-implement-fix" ;;
+                  *) give_up "この handler が知らないフェーズ: ${FLOW_PHASE:-（空）}。何もしていない。" ;;
+                esac
+                if [ -n "$FIX" ]; then
+                  NOT_PUSHED="PR のブランチには何も積んでいない。"
+                  # 直す範囲は最新の仕分けの採用。棚の番号は数値順に読む（辞書順では 10 が
+                  # 2 より前に来る）。fix/ は仕分けの語彙。
+                  TRIAGE=
+                  for f in $(ls -d /results/*/fix/report.md 2>/dev/null | sort -t/ -k3,3n); do
+                    TRIAGE=$f
+                  done
+                  [ -n "$TRIAGE" ] \
+                    || give_up "修正に回されたが、仕分けの報告（results/*/fix/report.md）が棚に無い。修正は行っていない。"
+                  cp "$TRIAGE" /tmp/triage.md && chmod 0644 /tmp/triage.md \
+                    || give_up "仕分けの報告を読めなかった。修正は行っていない。"
+                  # 検証から戻されたときは、まだ直っていない点が入口に来る。
+                  if [ -d /inputs/検証 ]; then
+                    cp /inputs/検証/report.md /tmp/verify.md && chmod 0644 /tmp/verify.md \
+                      || give_up "検証から戻されたが、その報告を読めなかった。修正は行っていない。"
+                  fi
+                  # この回の直しを署名コミットの件名で識別する ID。同じ仕分けに対して検証から
+                  # 何度も戻るので、仕分けではなく、この回に至った入口の報告で決める。
+                  TRIAGE_ID=$(cat /inputs/*/report.md 2>/dev/null | sha256sum | cut -c1-12)
+                  # 棚の番号は数値順に読む（辞書順では 10 が 2 より前に来る）。最後が最新の PR。
+                  PR_URL=
+                  for f in $(ls -d /results/*/done/pr-url 2>/dev/null | sort -t/ -k3,3n); do
+                    PR_URL=$(head -1 "$f")
+                  done
+                  case "$PR_URL" in
+                    "https://github.com/${REPO}/pull/"*) PR=${PR_URL##*/} ;;
+                    *) give_up "差し戻し先の PR が棚（results/*/done/pr-url）に見つからない。修正は行っていない。" ;;
+                  esac
+                  case "$PR" in
+                    '' | *[!0-9]*) give_up "棚の PR の URL が不正（${PR_URL}）。修正は行っていない。" ;;
+                  esac
+                  GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0="http.https://${GH_GATEWAY}/.extraheader" GIT_CONFIG_VALUE_0="$AUTH_HEADER" \
+                    git -C /scratch/src fetch --quiet origin "refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}" \
+                    || give_up "PR のブランチ ${BRANCH} を取得できなかった。修正は行っていない。"
+                  git -C /scratch/src checkout --quiet -B "$BRANCH" "origin/${BRANCH}" \
+                    || give_up "PR のブランチ ${BRANCH} に切り替えられなかった。修正は行っていない。"
+                  # 直しの後、署名コミットの直前でここに戻れているかを確かめる（fix skill が
+                  # 検証役のサブエージェントを呼ぶ間に HEAD が動かされていないか）。
+                  FIX_BASE_SHA=$(git -C /scratch/src rev-parse HEAD)
+                  # infra retry で同じ回の直しが二重に積まれるのを防ぐ。件名は固定文字列で
+                  # 比較する（grep の正規表現にすると、件名に紛れ込んだ特殊文字が誤って
+                  # パターン扱いされる）。
+                  FIX_SUBJECT="Address review of #${ISSUE} (triage ${TRIAGE_ID})"
+                  if [ "$(git -C /scratch/src log -1 --format=%s)" = "$FIX_SUBJECT" ]; then
+                    give_up "この回の直しは前回の試行（infra retry）で既に積まれている（コミット $(git -C /scratch/src rev-parse HEAD)）。PR へのコメントと done の書き込みまで進んだかはここからは分からない。人が PR ${PR_URL} を確認すること。"
+                  fi
+                  chown -R 65533:65533 /scratch/src
+                fi
+
+                ghgw gh api "repos/${REPO}/issues/${ISSUE}" > /tmp/issue-raw.json \
+                  || give_up "issue #${ISSUE} を取得できなかった。実装は行っていない。"
+                jq '{title, body}' < /tmp/issue-raw.json > /tmp/issue.json 2>/dev/null \
+                  || give_up "issue #${ISSUE} の本文を読めなかった。実装は行っていない。"
+                chmod 0644 /tmp/issue.json
+
+                # 調査の報告。located/ は調査 handler の語彙で、この flow では調査が start なので
+                # 必ず棚にある。無いのは flow の組み替えを誤ったときで、黙って issue の文面だけで
+                # 進むと #939 の穴（症状の場所を推定で決める）に戻るので降りる。
+                # 調査 は Task あたり 1 回しか走らない前提で候補は 0 件か 1 件。調査 を複数回
+                # 走らせる flow にするなら、この選び方（辞書順の tail -1）を runID の数値順に直すこと。
+                INVESTIGATION=$(ls /results/*/located/report.md 2>/dev/null | tail -1 || true)
+                [ -n "$INVESTIGATION" ] \
+                  || give_up "調査の報告（results/*/located/report.md）が棚に無い。実装は行っていない。flow の start と 調査 の binding を確認すること。"
+                cp "$INVESTIGATION" /tmp/investigation.md \
+                  || give_up "調査の報告を読めなかった。実装は行っていない。"
+                chmod 0644 /tmp/investigation.md
+
+                # --- テストの回し方はリポの形から決める（入力からは受け取らない） ----
+                if [ -f /scratch/src/Cargo.toml ]; then
+                  # .cargo/config.toml が build.target を wasm32-wasip1 等に固定していると、
+                  # 素の cargo test はテストバイナリをホストで実行できず
+                  # Exec format error（os error 8）で落ちる。home-rss がまさにそれで、
+                  # CI 側も --target を明示している。rustc が名乗るホストトリプルを使う。
+                  HOST_TRIPLE=$(rustc -vV | awk '/^host:/{print $2}')
+                  TEST_CMD="cargo test --workspace --target ${HOST_TRIPLE}"
+                elif [ -f /scratch/src/package.json ]; then
+                  TEST_CMD="pnpm test"
+                  NEEDS_PNPM_INSTALL=1
+                else
+                  give_up "テストの回し方が分からないリポジトリ（Cargo.toml も package.json も無い）。実装は行っていない。"
+                fi
+                # e2e を持つリポでは、変更前・赤・緑の確認に e2e も含める。DB はサイドカー。
+                E2E_DATABASE_URL=
+                if [ -f /scratch/src/e2e/run.sh ]; then
+                  E2E_DATABASE_URL="postgres://postgres@127.0.0.1:5432/postgres?sslmode=disable"
+                  TEST_CMD="${TEST_CMD} && bash e2e/run.sh"
+                fi
+
+                as_agent() {
+                  setpriv --reuid 65533 --regid 65533 --clear-groups --inh-caps=-all --no-new-privs -- \
+                    env HOME=/tmp \
+                        ANTHROPIC_BASE_URL="$ANTHROPIC_BASE_URL" \
+                        ANTHROPIC_AUTH_TOKEN="$ANTHROPIC_AUTH_TOKEN" \
+                        ANTHROPIC_API_KEY= \
+                        ANTHROPIC_CUSTOM_HEADERS="$ANTHROPIC_CUSTOM_HEADERS" \
+                        CLAUDE_CODE_SUBAGENT_MODEL="$LLM_ALIAS" \
+                        CARGO_HOME=/scratch/cargo \
+                        XDG_DATA_HOME=/scratch/xdg-data \
+                        E2E_DATABASE_URL="$E2E_DATABASE_URL" \
+                        "$@"
+                }
+                # setpriv が（イメージの入れ替わり等で）黙って降格に失敗すると、この後の
+                # claude・テストは全部 root で動くか即失敗するかのどちらかになり、症状が
+                # 「変更前のテストが通らない」に化けて原因が見えなくなる。使う前に実際に
+                # 65533 へ降りているか確かめる。
+                ACTUAL_UID=$(as_agent id -u 2>&1) || true
+                if [ "$ACTUAL_UID" != "65533" ]; then
+                  give_up "65533 への降格に失敗した（setpriv が返した uid: ${ACTUAL_UID}）。エージェントは起動していない。"
+                fi
+                # activeDeadlineSeconds の TERM は PID1 に飛ぶ。前面で子プロセスを待っていると
+                # POSIX sh は前面コマンドの終了を待ってから trap を実行するため、猶予期間内に
+                # trap が発火しない。background + wait にして、TERM を受けたら子を落としてから
+                # flush する（taskflow-pr-review.yaml と同じ形）。claude 2 回・テスト 3 回は
+                # 全部これを通す。
+                #
+                # pr-review と違い、ここで背景化する先は as_agent という**関数呼び出し**。
+                # 関数は fork せず今のプロセスの中で走るので、"$@" & が作るのはその関数を
+                # 動かす1枚のプロセスで、setpriv/env/claude(または cargo)本体はさらにその
+                # 子として生成される。つまり $! は本体ではなく中間層を指す — kill $pid は
+                # 中間層だけを殺し、本体を孤児化させて生かしたまま走らせ続ける（実測）。
+                # ジョブ制御を有効にして背景ジョブを専用プロセスグループに乗せ、グループ
+                # 単位（負の PID）で kill することで本体まで届かせる。
+                supervise() {
+                  had_m=1
+                  case $- in *m*) ;; *) set -m; had_m=0 ;; esac
+                  "$@" &
+                  pid=$!
+                  # set -eu の下では、trap 本体の中でも errexit は生きている。対象が既に
+                  # 死んでいて kill が非ゼロを返すと、そこで trap 自体が打ち切られ、
+                  # 一番大事な timeout 到達時に sync も exit 143 も飛ばされる（実測）。
+                  # kill 系はすべて || true で errexit の対象から外す。
+                  trap 'kill -TERM -$pid 2>/dev/null || true
+                        i=0
+                        while kill -0 $pid 2>/dev/null && [ $i -lt 10 ]; do sleep 1; i=$((i+1)); done
+                        kill -KILL -$pid 2>/dev/null || true
+                        sync
+                        exit 143' TERM INT
+                  rc=0
+                  wait $pid || rc=$?
+                  trap - TERM INT
+                  # supervise の外にジョブ制御を漏らさない（スクリプト全体の挙動を変えない）。
+                  [ "$had_m" -eq 0 ] && set +m
+                  return $rc
+                }
+                run_tests() {
+                  supervise as_agent sh -c "cd /scratch/src && $TEST_CMD" > "$1" 2>&1
+                }
+                # claude は作業ツリー（/scratch/src）ではなく workingDir の /workspace で
+                # 起動してしまうので、run_tests と同じく sh -c 越しに cd する。
+                run_agent() {
+                  log="$1"; shift
+                  supervise as_agent sh -c "cd /scratch/src && exec claude \"\$@\"" claude "$@" < /dev/null > "$log" 2>&1
+                }
+                # gateway に繋がらない（Envoy が落ちている・CNP が閉じている）と、claude は
+                # upstream の 5xx とは違って error_status:null/"unknown" のまま延々リトライし続け、
+                # Job の timeout に達するまで気付けない（実測。相手がブローカー
+                # だった頃と同じ症状）。claude を呼ぶ前に生死だけ先に見て、繋がらないなら呼ばずに
+                # 確定した報告を残す。
+                # 鍵まで見る。gateway には SecurityPolicy が掛かっていて、返る値で状態が割れる:
+                #   404 … 認証を通り、モデルヘッダが無いので route-not-found の直返し = 正常
+                #   401 … 鍵が無い / 違う / gateway 側の Secret に載っていない
+                #   500 … SecurityPolicy の翻訳エラー（Secret の参照ミス・鍵の値の重複・消失）
+                #   それ以外 / curl の失敗 … Envoy が落ちている、CNP が閉じている
+                # どれも apiKeyAuth が sendLocalReply でルーティング前に返すので
+                # **上流に行かない＝トークンを消費しない**。
+                check_gateway() {
+                  code=$(curl -s --max-time 5 -o /dev/null -w '%{http_code}' \
+                    -H "Authorization: Bearer $ANTHROPIC_AUTH_TOKEN" \
+                    "${ANTHROPIC_BASE_URL}/" || true)
+                  case "$code" in
+                    404) return 0 ;;
+                    401) echo "gateway が 401（クライアントキーが通らない）" >&2; return 1 ;;
+                    500) echo "gateway が 500（SecurityPolicy の翻訳エラーが疑われる）" >&2; return 1 ;;
+                    *)   echo "gateway が想定外の応答（HTTP ${code:-なし}）" >&2; return 1 ;;
+                  esac
+                }
+
+                # --- 0. 依存の取得 --------------------------------------------------
+                # cargo は $TEST_CMD 自体が必要な crate を取得するのでここでは何もしない。
+                # pnpm は fresh clone に node_modules が無いと `pnpm test` がテストランナーを
+                # 見つけられず baseline から必ず落ちるので、先に install しておく。
+                # NEEDS_PNPM_INSTALL で判定する（package.json 分岐でのみ立つ）— TEST_CMD の
+                # 文字列一致だと e2e を足した後の "pnpm test && bash e2e/run.sh" が外れる。
+                if [ -n "${NEEDS_PNPM_INSTALL:-}" ]; then
+                  if ! supervise as_agent sh -c "cd /scratch/src && pnpm install --frozen-lockfile" > /tmp/pnpm-install.log 2>&1; then
+                    { echo "pnpm install --frozen-lockfile に失敗した。実装は行っていない。"
+                      echo
+                      tail -30 /tmp/pnpm-install.log
+                    } > /tmp/giveup.txt
+                  give_up_file /tmp/giveup.txt
+                  fi
+                fi
+
+                # --- 1. baseline --------------------------------------------------
+                if ! run_tests /tmp/baseline.log; then
+                  { echo "変更前の $TEST_CMD が通らない。前提が壊れているので実装に進んでいない。"
+                    echo
+                    tail -30 /tmp/baseline.log
+                  } > /tmp/giveup.txt
+                  give_up_file /tmp/giveup.txt
+                fi
+
+                if [ -n "$FIX" ]; then
+                  TESTS_PROMPT="/fix-tests ${REPO} の PR #${PR}（issue #${ISSUE}）"
+                  IMPL_PROMPT="/fix ${REPO} の PR #${PR}（issue #${ISSUE}）"
+                else
+                  TESTS_PROMPT="/implement-tests ${REPO} の issue #${ISSUE}"
+                  IMPL_PROMPT="/implement ${REPO} の issue #${ISSUE}"
+                fi
+
+                # --- 2. テストだけ書かせる ----------------------------------------
+                check_gateway \
+                  || give_up "llm-gateway に接続できない。実装は行っていない。llm-gateway namespace の Envoy と、claude-code-build 側／llm-gateway 側の CNP を確認すること。"
+                # set -eu の下では、if/&&/|| に囲まれていない単純コマンドが非ゼロで
+                # 終わった瞬間にスクリプトごと落ちる。次の行で $? を読む形は、その1行に
+                # 到達すること自体がない（done も escalate も書かれず NoAnswer になる）。
+                # || で括って set -e の対象から外す。
+                CLAUDE_RC=0
+                run_agent /tmp/claude-tests.log \
+                  -p "$TESTS_PROMPT" \
+                  --plugin-dir /parts \
+                  --append-system-prompt-file /parts/CLAUDE.md \
+                  --verbose --output-format stream-json \
+                  --dangerously-skip-permissions \
+                  --allowedTools "Bash,Read,Write,Edit,Glob,Grep" \
+                  --model "$LLM_ALIAS" \
+                  --max-turns 60 || CLAUDE_RC=$?
+                # 終了コードを握り潰すと、モデル slug 無効・認証失敗・クレジット切れが
+                # 全部「テストが 1 行も書かれなかった」に化ける。実態を先に報告する。
+                if [ "$CLAUDE_RC" -ne 0 ]; then
+                  { echo "テストの回の claude が失敗した（exit ${CLAUDE_RC}）。実装には進んでいない。"
+                    if [ "$CLAUDE_RC" -eq 137 ]; then
+                      echo "（137 は KILL。kubectl describe pod で OOMKilled かを確認すること）"
+                    fi
+                    echo
+                    echo "stream-json の末尾:"
+                    tail -20 /tmp/claude-tests.log
+                  } > /tmp/giveup.txt
+                  give_up_file /tmp/giveup.txt
+                fi
+
+                # skill が「テストは書かない」と判断して escalate/report.md に理由を書いて
+                # 降りていることがある（この場合 git status は空のまま）。この後の
+                # give_up が同じファイルを上書きすると skill の書いた理由が消えるので、
+                # ここで先に拾って終わる。done/ は書かれていないのでそのまま空。
+                if [ -s /workspace/escalate/report.md ]; then
+                  sync; exit 0
+                fi
+
+                if [ -f /scratch/out/no-test.md ]; then
+                  { echo "テストで赤を作れない要求だと判断された。実装には進んでいない。"
+                    echo
+                    cat /scratch/out/no-test.md
+                  } > /tmp/giveup.txt
+                  give_up_file /tmp/giveup.txt
+                fi
+                # 修正モードでは、どの指摘もテストにできなかったとき（untestable.md だけ）は
+                # テストが無いまま直しへ進む。赤は観測できないので飛ばす。
+                SKIP_RED=
+                if [ -z "$(git -C /scratch/src status --porcelain)" ]; then
+                  if [ -n "$FIX" ] && [ -s /scratch/out/untestable.md ]; then
+                    SKIP_RED=1
+                  else
+                    give_up "テストが 1 行も書かれなかった。実装には進んでいない。"
+                  fi
+                fi
+
+                # --- 3. 赤の観測（この handler の本体） ---------------------------
+                if [ -z "$SKIP_RED" ] && run_tests /tmp/red.log; then
+                  git -C /scratch/src diff > /tmp/tests.diff || true
+                  { echo "書かれたテストが最初から通ってしまう。要求を検証していないので実装に進んでいない。"
+                    echo
+                    echo "$TEST_CMD の結果:"
+                    tail -20 /tmp/red.log
+                    echo
+                    echo "書かれた差分:"
+                    head -100 /tmp/tests.diff
+                  } > /tmp/giveup.txt
+                  give_up_file /tmp/giveup.txt
+                fi
+                cp /scratch/out/tests-report.md /tmp/tests-report.md 2>/dev/null || echo '(報告なし)' > /tmp/tests-report.md
+                chmod 0644 /tmp/tests-report.md
+                if [ -s /scratch/out/untestable.md ]; then
+                  cp /scratch/out/untestable.md /tmp/untestable.md && chmod 0644 /tmp/untestable.md
+                fi
+
+                # --- 4. 実装させる ------------------------------------------------
+                # 1 回目（/implement-tests）のモデルが /workspace/done に report.md を残して
+                # いると、2 回目の PR 本文の「## 実装の回」にテストの回の文章が載る。prepare が
+                # 敷いた宣言ディレクトリなので、消してもこの handler 自身が困ることはない。
+                find /workspace/done -mindepth 1 -delete 2>/dev/null || true
+                check_gateway \
+                  || give_up "llm-gateway に接続できない。${NOT_PUSHED}llm-gateway namespace の Envoy と、claude-code-build 側／llm-gateway 側の CNP を確認すること。"
+                CLAUDE_RC=0
+                # Agent は修正フェーズだけに要る（直した後に検証役のサブエージェントを呼ぶ）。
+                # 実装（/implement）は使わず、信頼できない入力（issue 本文）を読む回でもある。
+                run_agent /tmp/claude-implement.log \
+                  -p "$IMPL_PROMPT" \
+                  --plugin-dir /parts \
+                  --append-system-prompt-file /parts/CLAUDE.md \
+                  --verbose --output-format stream-json \
+                  --dangerously-skip-permissions \
+                  --allowedTools "Bash,Read,Write,Edit,Glob,Grep${FIX:+,Agent}" \
+                  --model "$LLM_ALIAS" \
+                  --max-turns 120 || CLAUDE_RC=$?
+                if [ "$CLAUDE_RC" -ne 0 ]; then
+                  { echo "実装の回の claude が失敗した（exit ${CLAUDE_RC}）。${NOT_PUSHED}"
+                    if [ "$CLAUDE_RC" -eq 137 ]; then
+                      echo "（137 は KILL。kubectl describe pod で OOMKilled かを確認すること）"
+                    fi
+                    echo
+                    echo "stream-json の末尾:"
+                    tail -20 /tmp/claude-implement.log
+                  } > /tmp/giveup.txt
+                  give_up_file /tmp/giveup.txt
+                fi
+
+                # --- 5. 緑の確認 --------------------------------------------------
+                if ! run_tests /tmp/green.log; then
+                  { echo "実装後も $TEST_CMD が通らない。${NOT_PUSHED}"
+                    echo
+                    tail -40 /tmp/green.log
+                    echo
+                    echo "テストの回で書かれたもの:"
+                    cat /tmp/tests-report.md
+                  } > /tmp/giveup.txt
+                  give_up_file /tmp/giveup.txt
+                fi
+
+                # --- 6. PR（handler が作る。エージェントには触らせない） ------------
+                cd /scratch/src
+                git config user.name "tgy-cluster-bot[bot]"
+                git config user.email "tgy-cluster-bot[bot]@users.noreply.github.com"
+                git add -A
+
+                # 実モデルの特定と escalate の拾い上げは、PR 作成と修正モードの両方で使う。
+                # implement skill が「テストは間違っている」と判断して escalate/ に理由を
+                # 書いて降りた後でも、緑判定が通れば先へ進んでしまう。捨てずに本文へ
+                # 畳み込む（下で escalate ディレクトリを空にする前に読む）。
+                ESCALATE_NOTE=$(cat /workspace/escalate/report.md 2>/dev/null || true)
+                # gateway 経由になったので、この Pod が知っているのは alias だけ（実モデルは
+                # gateway 側で決まる）。「どのモデルが書いたか」は PR を読む人が要る情報なので、
+                # stream-json の応答が名乗った実モデルを拾う。拾えなければ拾えないと書く —
+                # alias をモデル名のふりをさせない。
+                ACTUAL_MODEL=$(grep -o '"model":"[^"]*"' /tmp/claude-implement.log 2>/dev/null \
+                  | cut -d'"' -f4 | grep -v "^$LLM_ALIAS$" | head -1)
+                if [ -n "$ACTUAL_MODEL" ]; then
+                  MODEL_NOTE="${ACTUAL_MODEL}（llm-gateway の alias ${LLM_ALIAS} 経由）"
+                else
+                  MODEL_NOTE="alias ${LLM_ALIAS}（llm-gateway 経由。応答したモデルは特定できなかった）"
+                fi
+
+                if [ -n "$FIX" ]; then
+                  [ "$(git -C /scratch/src symbolic-ref --short -q HEAD)" = "$BRANCH" ] \
+                    && [ "$(git -C /scratch/src rev-parse HEAD)" = "$FIX_BASE_SHA" ] \
+                    || give_up "作業ツリーの HEAD が PR のブランチの先頭からずれている。直しは積んでいない。"
+                  GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0="http.https://${GH_GATEWAY}/.extraheader" GIT_CONFIG_VALUE_0="$AUTH_HEADER" \
+                    ghgw /usr/local/bin/github-signed-commit.sh \
+                    -r "$REPO" -b "$BRANCH" -m "$FIX_SUBJECT" \
+                    || give_up "差し戻しの直しを署名コミットにできなかった。PR ${PR_URL} のブランチには何も積まれていない可能性が高い（GitHub 側を確認すること）。直しの差分はこの Pod の Block スクラッチにしかない。"
+                  # 直しの経緯は PR のコメントに残す。本文を書き換えると最初の実装の記録が消える。
+                  # コメントに失敗してもコミットは積まれているので、Task は止めず報告に書く。
+                  printf '## 差し戻しの直し\n\n実装 handler（%s）が、レビューの仕分けが採用した指摘を直した。\n\n## 仕分け\n\n%s\n\n## テストの回\n\n%s\n\n## 直しの回\n\n%s\n' \
+                    "$MODEL_NOTE" "$(cat /tmp/triage.md)" "$(cat /tmp/tests-report.md)" "$(cat /workspace/done/report.md 2>/dev/null || echo '(報告なし)')" > /tmp/fix-comment.md
+                  if [ -n "$ESCALATE_NOTE" ]; then
+                    printf '\n## エージェントが escalate に書いていたこと（テストは緑だったため直しは積んだ）\n\n%s\n' "$ESCALATE_NOTE" >> /tmp/fix-comment.md
+                  fi
+                  COMMENT_NOTE=
+                  jq -Rs '{body: .}' < /tmp/fix-comment.md \
+                    | ghgw gh api "repos/${REPO}/issues/${PR}/comments" --input - >/dev/null 2>&1 \
+                    || COMMENT_NOTE="（PR へのコメントに失敗した。直しはブランチに積んである）"
+                  find /workspace/escalate -mindepth 1 -delete 2>/dev/null || true
+                  printf '%s%s\n' "$PR_URL" "$COMMENT_NOTE" >> /workspace/done/report.md
+                  printf '%s\n' "$PR_URL" > /workspace/done/pr-url
+                  sync
+                  exit 0
+                fi
+
+                # BRANCH は FLOW_TASK_UID から決定論的に決まるので、同じ Task の infra retry
+                # では前回と同じ名前になる。前回がここまで来ていたかをまず確かめる —
+                # 確かめずに ref 作成へ進むと、前回がコミットや PR まで到達していた場合に
+                # ただの 422 になり、実際に進んでいた分の状況が escalate から消える。
+                if ghgw gh api "repos/${REPO}/git/refs/heads/${BRANCH}" >/dev/null 2>&1; then
+                  give_up "ブランチ ${BRANCH} は前回の試行（infra retry）で既に作成済み。コミットや PR 作成まで進んでいたかはここからは分からない。人が repos/${REPO}/git/refs/heads/${BRANCH} と既存 PR を確認すること。"
+                fi
+                ghgw gh api "repos/${REPO}/git/refs" \
+                  -f ref="refs/heads/${BRANCH}" -f sha="$BASE_SHA" >/dev/null \
+                  || give_up "ブランチ ${BRANCH} を作れなかった（直前の存在チェックでは無かった）。GitHub 側に何か残っているかは確認できていない。実装はこの Pod の Block スクラッチ（ゲスト内 ext4、Pod の GC で失われる）の中にある。回収するには Pod が消える前に同じ PVC を別の kata Pod でマウントし直す必要があり、通常は困難。"
+                # github-signed-commit.sh 自身も末尾で git fetch/reset する。clone のときと
+                # 同じ extraheader を渡す（remote に鍵を埋めていないので、渡さないと
+                # ここで認証エラーになり、コミットは API 経由で成功しているのに「作れなかった」
+                # と誤診する）。API 呼び出しは全部 gh api なので GH_HOST で gateway へ向く。
+                GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0="http.https://${GH_GATEWAY}/.extraheader" GIT_CONFIG_VALUE_0="$AUTH_HEADER" \
+                  ghgw /usr/local/bin/github-signed-commit.sh \
+                  -r "$REPO" -b "$BRANCH" -m "Implement #${ISSUE}" \
+                  || give_up "署名コミットを作れなかった。ブランチ ${BRANCH} は GitHub に作成済み（base の HEAD のまま、まだコミットは載っていない）。実装差分自体はこの Pod の Block スクラッチにしかなく、Pod が GC されると失われる。"
+
+                PR_BODY=$(printf 'closes #%s\n\n実装 handler（%s）が TDD で書いた。テストを先に書き、赤を観測してから実装している。\n\n## 調査\n\n%s\n\n## テストの回\n\n%s\n\n## 実装の回\n\n%s\n' \
+                    "$ISSUE" "$MODEL_NOTE" "$(cat /tmp/investigation.md)" "$(cat /tmp/tests-report.md)" "$(cat /workspace/done/report.md 2>/dev/null || echo '(報告なし)')")
+                if [ -n "$ESCALATE_NOTE" ]; then
+                  PR_BODY=$(printf '%s\n\n## エージェントが escalate に書いていたこと（テストは緑だったため PR は作成）\n\n%s\n' "$PR_BODY" "$ESCALATE_NOTE")
+                fi
+                PR_URL=$(ghgw gh pr create --repo "$REPO" --head "$BRANCH" --base main --draft \
+                  --title "Implement #${ISSUE}" \
+                  --body "$PR_BODY") \
+                  || give_up "PR を作れなかった。実装はブランチ ${BRANCH} として GitHub 側に push 済みで残っている。"
+
+                # done と escalate の両方が非空だと判定不能になる。ここまで来た時点で成功が
+                # 確定するので、implement skill が途中で escalate に倒れていた場合に備えて空に
+                # する（中身は上で PR 本文に畳み込み済み）。rm -f report.md だけだと report.md
+                # 以外の置き土産が残ってディレクトリが空にならないので、中身ごと空にする。
+                find /workspace/escalate -mindepth 1 -delete 2>/dev/null || true
+                printf '%s\n' "$PR_URL" >> /workspace/done/report.md
+                # 後段（レビューの各フェーズと、差し戻された次の実装）が棚から PR を引く口。
+                # report.md の最終行は人向けで、形を約束しない。
+                printf '%s\n' "$PR_URL" > /workspace/done/pr-url
+                sync
+            env:
+              # 推論は llm-gateway 経由（#942）。**この Pod は LLM の資格情報を持たない** —
+              # 実キーは gateway の BackendSecurityPolicy 側にしかなく、gateway が
+              # Authorization を付け直す。openrouter-broker サイドカーはこれで不要になった。
+              - name: ANTHROPIC_BASE_URL
+                value: http://llm-gateway.llm-gateway.svc.cluster.local/anthropic
+              # api.anthropic.com 直行を止める 3 本。根拠は manifests/claude-code/taskflow-common.yaml。
+              # parts-ref と違い ConfigMap を複製しない — 値が "1" 固定で Renovate のバンプが
+              # 無いため、複製 + sha 同期と同じコストを払う理由がない。
+              - name: DISABLE_TELEMETRY
+                value: "1"
+              - name: DISABLE_ERROR_REPORTING
+                value: "1"
+              - name: CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC
+                value: "1"
+              # gateway のクライアントキー。**LLM の資格情報ではない** — OpenRouter の
+              # API キーは gateway 側にしかなく、gateway が Authorization を付け直す。
+              # この鍵が示すのは「どの階層を呼んでよいか」だけで、llm-gateway に届く Pod の
+              # 外では使えない（CNP の内側）。handler 単位で revoke できる。
+              # taskflow-implement は **従量課金（implement）階層だけ**許可されている
+              # （manifests/llm-gateway/openrouter.yaml の x-llm-client 条件）。
+              # untrusted input を実行する handler を Max から切り離すのが #942 の動機。
+              - name: ANTHROPIC_AUTH_TOKEN
+                valueFrom:
+                  secretKeyRef:
+                    name: llm-gateway-client-keys
+                    key: taskflow-implement
+              # 空にしないと OAuth 側が優先されて Anthropic 直行になる（そちらは CNP で落ちる）。
+              - name: ANTHROPIC_API_KEY
+                value: ""
+              # どの handler からの呼び出しかを gateway に名乗る。アクセスログの tf.handler に出る。
+              # 修正フェーズではスクリプトが taskflow-implement-fix に上書きする。
+              - name: ANTHROPIC_CUSTOM_HEADERS
+                value: "x-tf-handler: taskflow-implement"
+              # gateway の alias。実モデル（今は OpenRouter の一つ）は gateway 側で決まるので、
+              # 上流を替えてもこの Pod は変わらない。
+              - name: LLM_ALIAS
+                value: implement
+              - name: GOPROXY
+                value: "off"
+              - name: GOTOOLCHAIN
+                value: local
+            resources:
+              requests:
+                cpu: "1"
+                memory: 2Gi
+              limits:
+                # Kata では limits がそのまま VM のサイズ。cpu を書かないと 1 vCPU になり、
+                # cargo のビルドだけで timeout する（image-build で実測済み）。
+                cpu: "4"
+                memory: 8Gi

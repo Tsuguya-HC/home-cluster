@@ -63,7 +63,8 @@ jq '{title, body}' < /tmp/issue-raw.json > /tmp/issue.json 2>/dev/null \
   || fail "issue #${ISSUE} の本文を読めなかった。レビューは行っていない。"
 rm -f /tmp/pr-raw.json /tmp/issue-raw.json
 
-# 前の周回の仕分けが差し戻した内容（仕分けだけが読む）。fix/ は仕分けの語彙。
+# 前の周回の仕分けが差し戻した内容（仕分けが前回との重複判定に、検証が採用の重さの判定に読む）。
+# fix/ は仕分けの語彙。
 mkdir -p /tmp/previous-triage \
   || fail "/tmp/previous-triage を作れなかった。レビューは行っていない。"
 for f in $(printf '%s\n' /results/*/fix/report.md | sort -t/ -k3,3n); do

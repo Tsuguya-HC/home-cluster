@@ -7,8 +7,8 @@
 #
 # image-build namespace なのは PSA が privileged だから。claude-code は baseline で SYS_ADMIN が
 # 通らない（docs/pod-security.md）。handler に入れるときは PSA privileged な専用 namespace が
-# 別途要る — 実物は `claude-code-build`（`manifests/claude-code-build/`）で、`implementer`
-# handler がこの型そのものを使っている。
+# 別途要る — 実物は `claude-code-build`（`kustomize/taskflow-review/implement/`）で、
+# `implement-writer` / `implement-fixer` handler がこの型そのものを使っている。
 apiVersion: v1
 kind: Pod
 metadata:

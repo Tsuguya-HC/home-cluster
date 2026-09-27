@@ -5,7 +5,7 @@
 - **requests.cpu**: 実測値ベース（スケジューラがノード配置に使用）
 - **requests.memory**: 実測値 + 小幅なヘッドルーム
 - **limits.memory**: 実測値の約 2 倍（バースト対応、OOMKill 防止）
-- **limits.cpu**: 設定しない（CPU はコンプレッシブルリソース。limit を設定すると CFS throttling が発生し、レイテンシが悪化する）。**例外**: Kata コンテナは limits.cpu がそのまま VM の vCPU 数になるため、書かないと 1 vCPU に固定される（image-build の buildkit-build、claude-code-build implementer の agent が該当）
+- **limits.cpu**: 設定しない（CPU はコンプレッシブルリソース。limit を設定すると CFS throttling が発生し、レイテンシが悪化する）。**例外**: Kata コンテナは limits.cpu がそのまま VM の vCPU 数になるため、書かないと 1 vCPU に固定される（image-build の buildkit-build、claude-code-build implement-writer/implement-fixer の agent が該当）
 
 計測日: 2026-02-22（`kubectl top pods` による実測値）
 
@@ -164,10 +164,10 @@ taskflow の TaskHandler（`kind: Job`）。WorkflowTemplate とは別物なの�
 
 | TaskHandler | コンテナ | requests (cpu/mem) | limits (mem) |
 |---|---|---|---|
-| implementer | parts (init) | 50m / 64Mi | 256Mi |
-| implementer | github-auth (init) | 10m / 32Mi | 64Mi |
-| implementer | helpers (init) | 10m / 16Mi | 64Mi |
-| implementer | agent (main) | 1 / 2Gi | 8Gi |
+| implement-writer / implement-fixer | parts (init) | 50m / 64Mi | 256Mi |
+| implement-writer / implement-fixer | github-key (init) | 10m / 16Mi | 64Mi |
+| implement-writer / implement-fixer | postgres (init) | 100m / 128Mi | 512Mi |
+| implement-writer / implement-fixer | agent (main) | 1 / 2Gi | 8Gi |
 
 ### QNAP CSI (trident)
 

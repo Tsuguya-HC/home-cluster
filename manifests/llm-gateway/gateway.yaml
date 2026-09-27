@@ -11,6 +11,8 @@ kind: Gateway
 metadata:
   name: llm-gateway
   namespace: llm-gateway
+  annotations:
+    aigateway.envoyproxy.io/gateway-config: llm-gateway
 spec:
   gatewayClassName: llm-gateway
   listeners:
@@ -22,6 +24,52 @@ spec:
       group: gateway.envoyproxy.io
       kind: EnvoyProxy
       name: llm-gateway
+---
+# extproc の env と resources（#991）。上の Gateway の annotation で紐付く。
+# **chart の extProc.extraEnvVars に移さないこと** —— あちらは全 Gateway の extproc に効き、
+# github-mcp からも本文入りのトレースが出るようになる。
+apiVersion: aigateway.envoyproxy.io/v1beta1
+kind: GatewayConfig
+metadata:
+  name: llm-gateway
+  namespace: llm-gateway
+spec:
+  extProc:
+    kubernetes:
+      env:
+        # 送り先を変えるときは llm-gateway-envoy の egress と Tempo の CNP の ingress も
+        # 変えること。片側だけだとエラーは出ず、span がただ届かない。
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: http://tempo.monitoring.svc:4318
+        - name: OTEL_EXPORTER_OTLP_PROTOCOL
+          value: http/protobuf
+        # 外すと metrics も同じ endpoint へ送られる。Tempo は metrics を受けない。
+        - name: OTEL_METRICS_EXPORTER
+          value: none
+        - name: OTEL_SERVICE_NAME
+          value: llm-gateway
+        - name: AI_GATEWAY_TRACING_SEMCONV
+          value: gen_ai
+        - name: OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT
+          value: "true"
+        # 文字数で切る（バイト数ではない）ので、UTF-8 の最大 4 バイト/文字を見込んで
+        # Tempo の max_attribute_bytes の 1/4 にしておく。無いと属性値の大きさに上限が無く、
+        # 切り詰めは受信側（Tempo）でしか起きない。
+        - name: OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT
+          value: "524288"
+        # 本文は複数の属性に分かれて乗るので、送信 1 回の大きさは上の属性値の上限 × 属性の
+        # 個数 × batch で決まる。上げるときは、queue × span の大きさが下の memory limit を、
+        # batch × span の大きさが Tempo の OTLP HTTP の受信上限を超えないか見ること。
+        - name: OTEL_BSP_MAX_QUEUE_SIZE
+          value: "8"
+        - name: OTEL_BSP_MAX_EXPORT_BATCH_SIZE
+          value: "2"
+      resources:
+        requests:
+          cpu: 50m
+          memory: 128Mi
+        limits:
+          memory: 512Mi
 ---
 # クラスタ内からしか使わない。外向きは従来どおり Cilium Gateway（192.168.10.190）。
 apiVersion: gateway.envoyproxy.io/v1alpha1

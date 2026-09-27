@@ -61,6 +61,18 @@ spec:
         - ports:
             - port: "18000"
               protocol: TCP
+    # extproc が GenAI のトレースを送る（#991）。対向は monitoring の tempo CNP の ingress。
+    # **片側だけだとエラーは出ず、span がただ届かない。**
+    # 本文（プロンプト・モデルの発言・tool の引数）が乗るので、送り先を足すときは
+    # その先の閲覧権限まで見ること。
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: tempo
+            io.kubernetes.pod.namespace: monitoring
+      toPorts:
+        - ports:
+            - port: "4318"
+              protocol: TCP
     # 上流 LLM。ここが「外に出られる唯一の口」。
     - toFQDNs:
         - matchName: "openrouter.ai"

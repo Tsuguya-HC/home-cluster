@@ -17,6 +17,19 @@ spec:
         - ports:
             - port: "3200"
               protocol: TCP
+    # OTLP HTTP。llm-gateway の Envoy Pod（extproc が同居）から GenAI のトレース（#991）。
+    # 対向は llm-gateway-envoy の egress。**片側だけだとエラーは出ず、span がただ届かない。**
+    # gateway-name まで見るのは、同じ namespace の別の Gateway（github-mcp）の Envoy を
+    # 通さないため。
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: llm-gateway
+            app.kubernetes.io/managed-by: envoy-gateway
+            gateway.networking.k8s.io/gateway-name: llm-gateway
+      toPorts:
+        - ports:
+            - port: "4318"
+              protocol: TCP
   egress:
     - toEndpoints:
         - matchLabels:

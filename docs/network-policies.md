@@ -34,6 +34,7 @@ All policies are CiliumNetworkPolicy (CNP) and CiliumClusterwideNetworkPolicy (C
 | Workflow pods (claude-code-build) | Envoy data plane (llm-gateway) | 10080 | LLM API (via alias). **Next stage; handler-side egress not implemented** |
 | Workflow pods (claude-code) | Envoy data plane (llm-gateway) | 10080 | LLM API (via alias); all claude-code handlers |
 | Envoy data plane (llm-gateway) | Envoy Gateway (envoy-gateway-system) | 18000 | xDS |
+| Envoy data plane (llm-gateway, gateway `llm-gateway` only) | Tempo (monitoring) | 4318 | GenAI traces with message content (OTLP HTTP) |
 | Envoy Gateway (envoy-gateway-system) | Agent Router (envoy-ai-gateway-system) | 1063 | extension server gRPC (xDS translation) |
 | Prometheus (monitoring) | Agent Router (envoy-ai-gateway-system) | 8080 | Metrics scrape |
 | PXE sync pods (argo) | SeaweedFS filer (seaweedfs) | 8333 | Artifact/log storage |
@@ -167,7 +168,7 @@ All policies are CiliumNetworkPolicy (CNP) and CiliumClusterwideNetworkPolicy (C
 | **loki-gateway** | grafana, alloy, loki-canary, claude-code (claude-code) → 8080 | loki:3100 |
 | **loki-canary** | host → 3500 | loki-gateway:8080, loki:3100 |
 | **alloy** | host → 12345 | kube-apiserver, loki-gateway:8080 |
-| **tempo** | grafana, prometheus → 3200 | seaweedfs-filer (seaweedfs):8333, prometheus:9090 (metrics remote_write) |
+| **tempo** | grafana, prometheus → 3200; llm-gateway envoy (llm-gateway, gateway `llm-gateway` only) → 4318 (OTLP HTTP) | seaweedfs-filer (seaweedfs):8333, prometheus:9090 (metrics remote_write) |
 | **smartctl-exporter** | prometheus → 9633 | (none; reads local /dev only) |
 | **prometheus-admission** (Job) | (deny world) | kube-apiserver |
 
@@ -377,7 +378,7 @@ All policies are CiliumNetworkPolicy (CNP) and CiliumClusterwideNetworkPolicy (C
 
 | Component | Ingress | Egress |
 |---|---|---|
-| **llm-gateway-envoy** | claude-code-build / claude-code → 10080; argo (SA `pluto-fixer` only) → 10080; host/remote-node → 19003 (probes) | envoy-gateway (envoy-gateway-system):18000, openrouter.ai + api.anthropic.com:443 |
+| **llm-gateway-envoy** | claude-code-build / claude-code → 10080; argo (SA `pluto-fixer` only) → 10080; host/remote-node → 19003 (probes) | envoy-gateway (envoy-gateway-system):18000, tempo (monitoring):4318 (OTLP HTTP, GenAI traces), openrouter.ai + api.anthropic.com:443 |
 | **github-mcp-envoy** | claude-code / claude-code-build → 10080, 10443; argo (SA `github-mcp-smoke`, `pluto-fixer` only) → 10080, 10443; host/remote-node → 19003 (probes) | envoy-gateway (envoy-gateway-system):18000, api.githubcopilot.com + api.github.com + github.com:443 |
 
 ## envoy-gateway-system (2 policies)

@@ -29,7 +29,7 @@ ArgoCD のみ TLS Passthrough（専用 argocd-gateway、ArgoCD 自身が TLS 終
 | Loki | loki-gateway.monitoring.svc:80 | ログ集約 |
 | Tempo (HTTP API) | tempo.monitoring.svc:3200 | 分散トレーシング（クエリ） |
 | Tempo (OTLP gRPC) | tempo.monitoring.svc:4317 | トレース取り込み |
-| Tempo (OTLP HTTP) | tempo.monitoring.svc:4318 | トレース取り込み |
+| Tempo (OTLP HTTP) | tempo.monitoring.svc:4318 | トレース取り込み。llm-gateway の extproc が GenAI のトレース（プロンプト・モデルの発言・tool の引数を含む）を送る。保持 168h |
 | Prometheus | kube-prometheus-stack-prometheus.monitoring.svc:9090 | メトリクス |
 | SeaweedFS (S3) | seaweedfs-filer.seaweedfs.svc:8333 | S3 互換オブジェクトストレージ |
 | Valkey | valkey-master.nextcloud.svc:6379 | Nextcloud キャッシュ (Redis 互換) |

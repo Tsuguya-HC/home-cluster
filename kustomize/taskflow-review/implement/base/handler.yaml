@@ -649,12 +649,14 @@ spec:
                 fi
 
                 # --- 3. 赤の観測（この handler の本体） ---------------------------
-                # テストの欠落の指摘（[coverage] / [mutation]）に書くテストは、今のコードでは
-                # 通るのが正しい。その赤は「指摘された壊し方を入れると落ちる」ことで観測する:
-                # fix-tests が置いた変異のパッチ（/scratch/out/mutations/*.patch）を 1 つずつ
-                # 当ててテストが落ちることを見て、外して作業ツリーが元に戻ることを確かめる。
+                # テストの欠落の指摘（[coverage] / [mutation]）に書くテストと、既存の振る舞いに
+                # テストを足すだけの issue に書くテストは、今のコードでは通るのが正しい。
+                # その赤は「壊し方を入れると落ちる」ことで観測する: テストの回が置いた変異の
+                # パッチ（/scratch/out/mutations/*.patch）を 1 つずつ当ててテストが落ちることを
+                # 見て、外して作業ツリーが元に戻ることを確かめる。どちらの扱いかはテストの回が
+                # 判断し、ここはパッチの有無だけを見る。
                 MUTATION_RED=
-                if [ -n "$FIX" ] && ls /scratch/out/mutations/*.patch >/dev/null 2>&1; then
+                if ls /scratch/out/mutations/*.patch >/dev/null 2>&1; then
                   : > /tmp/mutants.log
                   for m in /scratch/out/mutations/*.patch; do
                     # 当てる前に触るパスを見る。テストのファイルを書き換える変異は、テストごと

@@ -9,6 +9,8 @@
 #   1. baseline  変更前に全部通ることを確認     … 通らなければ前提が壊れている → escalate
 #   2. claude #1 テストだけ書かせる（/implement-tests）
 #   3. red       新しいテストが落ちることを確認 … 落ちなければ何も検証していない → escalate
+#                （今のコードで通るのが正しいテストは、claude #1 が置いた変異のパッチを
+#                当てて落ちることで赤とみなす）
 #   4. claude #2 実装させる（/implement）
 #   5. green     全部通ることを確認             … 通らなければ → escalate
 #   6. PR        ref を作り、署名コミットして draft PR

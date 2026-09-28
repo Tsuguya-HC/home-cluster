@@ -417,24 +417,48 @@ spec:
                 chmod 0644 /tmp/investigation.md
 
                 # --- テストの回し方はリポの形から決める（入力からは受け取らない） ----
-                if [ -f /scratch/src/Cargo.toml ]; then
+                # リポが scripts/test.sh で回し方を宣言していれば、それだけを回す（Rust と
+                # サブディレクトリの UI のように、形からは全体が分からないリポのため）。
+                # 中身は clone したデフォルトブランチの版を root の変数に持ち、環境変数で
+                # 渡して実行する。作業ツリーや /tmp のファイルを実行すると、エージェントが
+                # 書き換えて赤・緑の確認を素通りできる。
+                # TEST_CMD は give_up や PR 本文に出す表示用、TEST_RUN が run_tests の実行用。
+                # scripts/test.sh の場合、実行文字列そのまま（bash -c "$REPO_TEST_BODY" ...）を
+                # 表示すると中身の変数展開前の字面が出て読めない。
+                REPO_TEST_BODY=
+                E2E_DATABASE_URL=
+                HAS_E2E=
+                [ -f /scratch/src/e2e/run.sh ] && HAS_E2E=1
+                if git -C /scratch/src cat-file -e "${BASE_SHA}:scripts/test.sh" 2>/dev/null; then
+                  REPO_TEST_BODY=$(git -C /scratch/src show "${BASE_SHA}:scripts/test.sh") \
+                    || give_up "scripts/test.sh を読めなかった。実装は行っていない。"
+                  [ -n "$REPO_TEST_BODY" ] || give_up "scripts/test.sh が空。実装は行っていない。"
+                  TEST_CMD="scripts/test.sh"
+                  TEST_RUN='bash -c "$REPO_TEST_BODY" scripts/test.sh'
+                elif [ -f /scratch/src/Cargo.toml ]; then
                   # .cargo/config.toml が build.target を wasm32-wasip1 等に固定していると、
                   # 素の cargo test はテストバイナリをホストで実行できず
                   # Exec format error（os error 8）で落ちる。home-rss がまさにそれで、
                   # CI 側も --target を明示している。rustc が名乗るホストトリプルを使う。
                   HOST_TRIPLE=$(rustc -vV | awk '/^host:/{print $2}')
                   TEST_CMD="cargo test --workspace --target ${HOST_TRIPLE}"
+                  TEST_RUN="$TEST_CMD"
                 elif [ -f /scratch/src/package.json ]; then
                   TEST_CMD="pnpm test"
+                  TEST_RUN="$TEST_CMD"
                   NEEDS_PNPM_INSTALL=1
                 else
-                  give_up "テストの回し方が分からないリポジトリ（Cargo.toml も package.json も無い）。実装は行っていない。"
+                  give_up "テストの回し方が分からないリポジトリ（Cargo.toml も package.json も scripts/test.sh も無い）。実装は行っていない。"
                 fi
                 # e2e を持つリポでは、変更前・赤・緑の確認に e2e も含める。DB はサイドカー。
-                E2E_DATABASE_URL=
-                if [ -f /scratch/src/e2e/run.sh ]; then
+                # scripts/test.sh がある場合は、e2e を足すかどうかはスクリプト自身が決めるので
+                # ここでは足さない（E2E_DATABASE_URL だけは渡す）。
+                if [ -n "$HAS_E2E" ]; then
                   E2E_DATABASE_URL="postgres://postgres@127.0.0.1:5432/postgres?sslmode=disable"
-                  TEST_CMD="${TEST_CMD} && bash e2e/run.sh"
+                  if [ -z "$REPO_TEST_BODY" ]; then
+                    TEST_CMD="${TEST_CMD} && bash e2e/run.sh"
+                    TEST_RUN="${TEST_RUN} && bash e2e/run.sh"
+                  fi
                 fi
 
                 as_agent() {
@@ -493,8 +517,10 @@ spec:
                   [ "$had_m" -eq 0 ] && set +m
                   return $rc
                 }
+                # REPO_TEST_BODY はここでだけ渡す。as_agent 全体に入れると claude 本体
+                # （信頼できない入力を読む）の環境にも見えてしまう。
                 run_tests() {
-                  supervise as_agent sh -c "cd /scratch/src && $TEST_CMD" > "$1" 2>&1
+                  supervise as_agent env REPO_TEST_BODY="$REPO_TEST_BODY" sh -c "cd /scratch/src && $TEST_RUN" > "$1" 2>&1
                 }
                 # claude は作業ツリー（/scratch/src）ではなく workingDir の /workspace で
                 # 起動してしまうので、run_tests と同じく sh -c 越しに cd する。

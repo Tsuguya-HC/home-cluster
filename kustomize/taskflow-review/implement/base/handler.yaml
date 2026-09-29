@@ -241,6 +241,21 @@ spec:
                 # 出た（Task は done/ だけが残って 完了 になった）。
                 # 呼び出し側はファイルに書いてから give_up_file を呼ぶ形にして、
                 # 関数を現在のシェルで実行する。
+                # claude の失敗の要約。stream-json の生の行は思考の暗号化データを含み、報告（issue や
+                # PR に載る）では読めない。最後の result イベントの種類・ターン数・時間を出し、
+                # result が無い（KILL・接続断など）ときは思考以外の末尾の行を短く切って出す。
+                # 認証エラーは result が出るが subtype は "success" のままで、失敗は is_error と
+                # api_error_status にしか出ない（subtype だけで成否判定すると見逃す）。
+                claude_failure_summary() {
+                  res=$(jq -cR 'fromjson? | select(.type == "result")' "$1" 2>/dev/null | tail -1)
+                  if [ -n "$res" ]; then
+                    printf '%s' "$res" | jq -r '"結果: \(.subtype // "不明")\(if .is_error then "（is_error" + (if .api_error_status then "、HTTP \(.api_error_status)" else "" end) + "）" else "" end)／ターン数: \(.num_turns // "不明")／時間: \((.duration_ms // 0) / 60000 | floor) 分",
+                      (if ((.is_error // false) or (.subtype // "") != "success") and (.result | type) == "string" then .result[0:500] else empty end)'
+                  else
+                    echo "result イベントが無い。末尾:"
+                    grep -v -e '"thinking_tokens"' -e '"redacted_thinking"' "$1" 2>/dev/null | tail -5 | jq -Rr '.[0:300]'
+                  fi
+                }
                 give_up_file() {
                   DONE=$(cat /workspace/done/report.md 2>/dev/null || true)
                   find /workspace/done -mindepth 1 -delete 2>/dev/null || true
@@ -645,8 +660,7 @@ spec:
                       echo "（137 は KILL。kubectl describe pod で OOMKilled かを確認すること）"
                     fi
                     echo
-                    echo "stream-json の末尾:"
-                    tail -20 /tmp/claude-tests.log
+                    claude_failure_summary /tmp/claude-tests.log
                   } > /tmp/giveup.txt
                   give_up_file /tmp/giveup.txt
                 fi
@@ -787,8 +801,7 @@ spec:
                         echo "（137 は KILL。kubectl describe pod で OOMKilled かを確認すること）"
                       fi
                       echo
-                      echo "stream-json の末尾:"
-                      tail -20 /tmp/claude-implement.log
+                      claude_failure_summary /tmp/claude-implement.log
                     } > /tmp/giveup.txt
                     give_up_file /tmp/giveup.txt
                   fi

@@ -23,6 +23,8 @@ resources:
   - implement/fixer
   - implement/writer-runc
   - implement/fixer-runc
+  - implement/writer-claude
+  - implement/fixer-claude
   - filer/handler.yaml
 
 # TaskHandler は CRD なので、kustomize は中の ConfigMap 参照を書き換えない。

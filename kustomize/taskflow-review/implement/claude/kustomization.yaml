@@ -1,0 +1,27 @@
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+# 実装と修正を Max の Claude で回す版（implement-claude）。鍵・alias・名乗りは 3 つ揃えて替える —
+# 鍵と alias の片方だけだと gateway のルートに当たらず 404、名乗りを残すとアクセスログの
+# tf.handler が llm.client と食い違う。
+patches:
+  - target:
+      kind: TaskHandler
+    patch: |-
+      - op: test
+        path: /spec/jobTemplate/template/spec/containers/0/env/4/name
+        value: ANTHROPIC_AUTH_TOKEN
+      - op: replace
+        path: /spec/jobTemplate/template/spec/containers/0/env/4/valueFrom/secretKeyRef/key
+        value: taskflow-implement-claude
+      - op: test
+        path: /spec/jobTemplate/template/spec/containers/0/env/6/name
+        value: ANTHROPIC_CUSTOM_HEADERS
+      - op: replace
+        path: /spec/jobTemplate/template/spec/containers/0/env/6/value
+        value: "x-tf-handler: taskflow-implement-claude"
+      - op: test
+        path: /spec/jobTemplate/template/spec/containers/0/env/7/name
+        value: LLM_ALIAS
+      - op: replace
+        path: /spec/jobTemplate/template/spec/containers/0/env/7/value
+        value: implement-claude

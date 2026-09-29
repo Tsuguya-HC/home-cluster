@@ -1,7 +1,8 @@
-# Max（Anthropic 直）向けの alias。issue #942 の表のうち `review` / `investigate` の 2 本と、手元用のモデル名ルート。
+# Max（Anthropic 直）向けの alias。issue #942 の表のうち `review` / `investigate` の 2 本、implement flow の
+# Claude 版が使う `implement-claude`、手元用のモデル名ルート。
 #
 # handler ごとに alias を切るのは、`x-ai-eg-model` がそのまま帰属の単位になるため。
-# 今はどちらも同じモデル（sonnet）・同じバックエンドに解決されるが、分けておくと
+# review と investigate は今同じモデル（sonnet）・同じバックエンドに解決されるが、分けておくと
 # 「どの handler が Max の枠を食っているか」がログで分かれる。
 apiVersion: aigateway.envoyproxy.io/v1beta1
 kind: AIGatewayRoute
@@ -71,6 +72,27 @@ spec:
           priority: 0
       # 応答を受け切るまでの上限。thinking を含む 1 応答が数分かかるので短いと途中で切れ、
       # クライアントは retry を繰り返して何も進まない。
+      timeouts:
+        request: 600s
+    # implement flow の Claude 版（TaskFlow implement-claude）の実装と修正。Muse 版と比べるための枠。
+    # **untrusted input を実行する Pod が Max に届く口**（#942 はこれを切り離した）なので、
+    # 許可は taskflow-implement-claude だけに絞り、review / investigate には入れない。
+    # Muse 版の taskflow-implement をここに足さないこと。
+    # review / investigate（claude-sonnet-5）と違い claude-sonnet-5-5 を指定しているのは、implement flow で Muse と比べるために選んだモデルだから。
+    - matches:
+        - headers:
+            - type: Exact
+              name: x-ai-eg-model
+              value: implement-claude
+            - type: RegularExpression
+              name: x-llm-client
+              value: "^(taskflow-implement-claude|llm-gateway-smoke)$"
+      modelsOwnedBy: Envoy AI Gateway
+      backendRefs:
+        - name: claude-max
+          modelNameOverride: claude-sonnet-5-5
+          weight: 1
+          priority: 0
       timeouts:
         request: 600s
     # モデル名そのままのルート（手元の claude 用）。handler 用の alias と違い、名前が

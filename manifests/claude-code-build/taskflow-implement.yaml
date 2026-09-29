@@ -1,5 +1,6 @@
-# issue を受けて実装し、draft PR を出す flow。実装は OpenRouter の安いモデル、レビューは
-# 別 flow の Claude、という分担の実装側（docs/kata-storage.md / manifests/claude-code/）。
+# issue を受けて実装し、draft PR を出す flow。実装（implement / implement-fast）は OpenRouter の安いモデル、
+# レビューは別 flow の Claude、という分担の実装側（docs/kata-storage.md / manifests/claude-code/）。
+# implement-claude だけは実装も Max の Claude で動く。
 #
 # 入口は 調査（taskflow-investigate.yaml、#939）。症状がコードのどこで起きているかを先に
 # 確かめ、実装 handler はその報告を results の棚から読む。
@@ -164,7 +165,7 @@ spec:
 # 実装と修正の Pod は LLM が書いた未レビューのコードと依存のビルドスクリプトを実行するので、
 # Kata 版はそれをノードのカーネルから切り離す。こちらはその隔離が無い代わりに、I/O と起動が
 # 速く、メモリが溢れたときに落ちるのが溢れたプロセスだけで済む。
-# 実装・修正の handler 以外は implement と同じにしておくこと（片方だけ変えるとずれる）。
+# 実装・修正の handler 以外は implement / implement-claude と同じにしておくこと（片方だけ変えるとずれる）。
 apiVersion: flow.tgy.io/v1alpha1
 kind: TaskFlow
 metadata:
@@ -216,6 +217,79 @@ spec:
         Escalated: escalate
     修正:
       handler: implement-fixer-runc
+      next:
+        検証: done
+        Escalated: escalate
+    検証:
+      handler: review-verify
+      next:
+        修正: unfixed
+        観点出し: rereview
+        完了: verified
+  terminals:
+    完了: Success
+  finally:
+    handler: review-file-issues
+    done: filed
+  maxRunsPerPhase: 3
+---
+# implement-fast と同じ配線で、実装と修正の回だけ Max の Claude（gateway の alias implement-claude）で回す。
+# 同じ issue を implement と流してモデルを比べるための版。実装と修正の Pod は未レビューのコードを
+# 実行するので、Max の枠に届く鍵をその Pod に持たせることになる（#942 が implement を Max から
+# 切り離した理由そのもの）。その鍵が入れるのは implement-claude のルートだけ。
+# implement-fast と同じく runc で動く（Kata の隔離なし）。Muse 版と条件を揃えて比べるため。
+# 実装・修正の handler 以外は implement / implement-fast と同じにしておくこと（片方だけ変えるとずれる）。
+apiVersion: flow.tgy.io/v1alpha1
+kind: TaskFlow
+metadata:
+  name: implement-claude
+  namespace: claude-code-build
+spec:
+  profile: investigate
+  start: 調査
+  workspace: {}
+  bindings:
+    調査:
+      handler: investigator
+      next:
+        実装: located
+        Escalated: escalate
+    実装:
+      handler: implement-writer-claude
+      next:
+        観点出し: done
+        Escalated: escalate
+    観点出し:
+      handler: review-planner
+      next:
+        general: general
+        failpath: failpath
+        boundary: boundary
+        runtime: runtime
+        states: states
+        precedent: precedent
+        ui: ui
+        Escalated: escalate
+      join:
+        phase: 仕分け
+        always: [documented, tests]
+    general: {handler: review-general, next: {仕分け: reviewed, Escalated: escalate}}
+    failpath: {handler: review-failpath, next: {仕分け: reviewed, Escalated: escalate}}
+    boundary: {handler: review-boundary, next: {仕分け: reviewed, Escalated: escalate}}
+    runtime: {handler: review-runtime, next: {仕分け: reviewed, Escalated: escalate}}
+    states: {handler: review-states, next: {仕分け: reviewed, Escalated: escalate}}
+    precedent: {handler: review-precedent, next: {仕分け: reviewed, Escalated: escalate}}
+    ui: {handler: review-ui, next: {仕分け: reviewed, Escalated: escalate}}
+    documented: {handler: review-documented, next: {仕分け: reviewed, Escalated: escalate}}
+    tests: {handler: review-tests, next: {仕分け: reviewed, Escalated: escalate}}
+    仕分け:
+      handler: review-triage
+      next:
+        完了: clean
+        修正: fix
+        Escalated: escalate
+    修正:
+      handler: implement-fixer-claude
       next:
         検証: done
         Escalated: escalate

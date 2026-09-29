@@ -34,6 +34,16 @@ spec:
           runAsUser: 0
           seccompProfile:
             type: RuntimeDefault
+          # 対象リポの e2e が 1024 未満のポートで待ち受けるテスト用サーバーを、降格後の
+          # uid でも立てられるようにする（ネットワーク名前空間はこの Pod だけのもの）。
+          sysctls:
+            - name: net.ipv4.ip_unprivileged_port_start
+              value: "0"
+        # 対象リポの e2e が使うテスト用の名前を Pod 内のループバックに向ける。`.test` は
+        # 予約済みで外には解決されない。
+        hostAliases:
+          - ip: 127.0.0.1
+            hostnames: [feeds.e2e.test]
         # LLM バッチ Pod が名乗る workload-class=cpu-saturating から逃げる（同居回避の衛生策。
         # manifests/image-build/workflowtemplate.yaml と同じ形）。cargo のフルビルドは
         # limits.cpu 4・60 分で、wn-01/wn-02（4 コア）に同居すると身動きが取れなくなる

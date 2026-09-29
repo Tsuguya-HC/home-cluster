@@ -641,7 +641,7 @@ spec:
                 # 到達すること自体がない（done も escalate も書かれず NoAnswer になる）。
                 # || で括って set -e の対象から外す。
                 CLAUDE_RC=0
-                printf '%s\n' /scratch/out/tests-report.md /scratch/out/no-test.md /scratch/out/untestable.md /workspace/escalate/report.md > /tmp/stop-expect
+                printf '%s\n' /scratch/out/tests-report.md /scratch/out/untestable.md /workspace/escalate/report.md > /tmp/stop-expect
                 run_agent /tmp/claude-tests.log \
                   --settings /tmp/claude-stop-settings.json \
                   -p "$TESTS_PROMPT" \
@@ -673,80 +673,101 @@ spec:
                   sync; exit 0
                 fi
 
-                if [ -f /scratch/out/no-test.md ]; then
-                  { echo "テストで赤を作れない要求だと判断された。実装には進んでいない。"
-                    echo
-                    cat /scratch/out/no-test.md
-                  } > /tmp/giveup.txt
-                  give_up_file /tmp/giveup.txt
-                fi
-                # 修正モードでは、どの指摘もテストにできなかったとき（untestable.md だけ）は
-                # テストが無いまま直しへ進む。赤は観測できないので飛ばす。
-                SKIP_RED=
-                if [ -z "$(git -C /scratch/src status --porcelain)" ]; then
-                  if [ -n "$FIX" ] && [ -s /scratch/out/untestable.md ]; then
-                    SKIP_RED=1
-                  else
-                    give_up "テストが 1 行も書かれなかった。実装には進んでいない。"
-                  fi
-                fi
-
                 # --- 3. 赤の観測（この handler の本体） ---------------------------
-                # テストの欠落の指摘（[coverage] / [mutation]）に書くテストと、既存の振る舞いに
-                # テストを足すだけの issue に書くテストは、今のコードでは通るのが正しい。
-                # その赤は「壊し方を入れると落ちる」ことで観測する: テストの回が置いた変異の
-                # パッチ（/scratch/out/mutations/*.patch）を 1 つずつ当ててテストが落ちることを
-                # 見て、外して作業ツリーが元に戻ることを確かめる。どちらの扱いかはテストの回が
-                # 判断し、ここはパッチの有無だけを見る。
-                MUTATION_RED=
-                if ls /scratch/out/mutations/*.patch >/dev/null 2>&1; then
+                # 赤の示し方はテストの回が要求・指摘ごとに選ぶ: 落ちるテスト、変異のパッチ
+                # （今のコードで通るのが正しいテストを、壊し方を入れると落ちることで示す）、
+                # 赤は示せないという判断（untestable.md）。機械で確かめられるのは前の 2 つだけ。
+                # untestable.md があれば赤を観測せず進む。
+                UNTESTABLE=
+                if [ -s /scratch/out/untestable.md ]; then UNTESTABLE=1; fi
+                # 当てる前に触るパスを見る。テストのファイルを書き換える変異は、テストごと
+                # 差し替えて赤を作れてしまい、捕まえたことにならない。Rust の同一ファイル内
+                # テスト（#[cfg(test)]）はパスでは見分けられない — 残る限界。
+                # rename・新規作成・削除・mode 変更が混じると、--numstat は変更後のパスしか
+                # 出さず、rename でテストのファイルを実装側のパスへ逃がされても素通りする。
+                # --summary はそれらを出力するので、1 行でもあれば打ち切る（中身の書き換え
+                # だけが変異として許される形）。
+                check_mutation_shape() {
+                  as_agent git -C /scratch/src apply --summary "$1" > /tmp/mutation-summary.txt 2>/dev/null \
+                    || give_up "変異 $(basename "$1") のパッチが読めない（壊れている）。$2"
+                  [ -s /tmp/mutation-summary.txt ] \
+                    && give_up "変異 $(basename "$1") がファイルの追加・削除・rename・copy・mode 変更を含む。中身の書き換えだけの変異ではない。$2"
+                  as_agent git -C /scratch/src apply --numstat "$1" > /tmp/mutation-numstat.txt 2>/dev/null \
+                    || give_up "変異 $(basename "$1") のパッチが読めない（壊れている）。$2"
+                  [ -s /tmp/mutation-numstat.txt ] \
+                    || give_up "変異 $(basename "$1") が触るパスを取れなかった。$2"
+                  # numstat の行は `<追加>\t<削除>\t<パス>`。行全体に掛けると、直下の tests/ は
+                  # 前がタブで ^ にも / にも当たらないので、パスの列だけにして照合する。
+                  if cut -f3- /tmp/mutation-numstat.txt | grep -Eq '(^|/)(tests|test|e2e|__tests__)/|_test\.|\.test\.|\.spec\.|(^|/)test_[^/]*\.py'; then
+                    give_up "変異 $(basename "$1") がテストのファイルを書き換える。捕まえたことにならない。$2"
+                  fi
+                }
+                # テストが全部通る作業ツリーで呼ぶこと。落ちるテストが残っていると、変異を
+                # 当てなくても落ちるので何も確かめない。
+                check_mutations() {
                   : > /tmp/mutants.log
+                  : > /tmp/mutants-caught.txt
+                  : > /tmp/mutants-skipped.txt
                   for m in /scratch/out/mutations/*.patch; do
-                    # 当てる前に触るパスを見る。テストのファイルを書き換える変異は、テストごと
-                    # 差し替えて赤を作れてしまい、捕まえたことにならない。Rust の同一ファイル内
-                    # テスト（#[cfg(test)]）はパスでは見分けられない — 残る限界。
-                    # rename・新規作成・削除・mode 変更が混じると、--numstat は変更後のパスしか
-                    # 出さず、rename でテストのファイルを実装側のパスへ逃がされても素通りする。
-                    # --summary はそれらを出力するので、1 行でもあれば打ち切る（中身の書き換え
-                    # だけが変異として許される形）。
-                    as_agent git -C /scratch/src apply --summary "$m" > /tmp/mutation-summary.txt 2>/dev/null \
-                      || give_up "変異 $(basename "$m") のパッチが読めない（壊れている）。実装には進んでいない。"
-                    [ -s /tmp/mutation-summary.txt ] \
-                      && give_up "変異 $(basename "$m") がファイルの追加・削除・rename・copy・mode 変更を含む。中身の書き換えだけの変異ではないので実装には進んでいない。"
-                    as_agent git -C /scratch/src apply --numstat "$m" > /tmp/mutation-numstat.txt 2>/dev/null \
-                      || give_up "変異 $(basename "$m") のパッチが読めない（壊れている）。実装には進んでいない。"
-                    [ -s /tmp/mutation-numstat.txt ] \
-                      || give_up "変異 $(basename "$m") が触るパスを取れなかった。実装には進んでいない。"
-                    # numstat の行は `<追加>\t<削除>\t<パス>`。行全体に掛けると、直下の tests/ は
-                    # 前がタブで ^ にも / にも当たらないので、パスの列だけにして照合する。
-                    if cut -f3- /tmp/mutation-numstat.txt | grep -Eq '(^|/)(tests|test|e2e|__tests__)/|_test\.|\.test\.|\.spec\.|(^|/)test_[^/]*\.py'; then
-                      give_up "変異 $(basename "$m") がテストのファイルを書き換える。捕まえたことにならないので実装には進んでいない。"
-                    fi
+                    check_mutation_shape "$m" "$1"
                     before=$(as_agent git -C /scratch/src diff | sha256sum)
-                    as_agent git -C /scratch/src apply "$m" \
-                      || give_up "変異 $(basename "$m") を当てられなかった。実装には進んでいない。"
+                    # 実装が同じ箇所を変えると当たらない。git apply は当たらなければ何も変えないので、
+                    # 緑まで通した成果を捨てずに記録して先へ進む。実装前は打ち切る。
+                    if ! as_agent git -C /scratch/src apply "$m"; then
+                      [ -n "$DEFER_MUTATIONS" ] \
+                        || give_up "変異 $(basename "$m") を当てられなかった。$1"
+                      basename "$m" >> /tmp/mutants-skipped.txt
+                      { echo "## $(basename "$m")"; echo "(当てられなかった)"; echo; } >> /tmp/mutants.log
+                      continue
+                    fi
                     if run_tests /tmp/mutant.log; then
                       as_agent git -C /scratch/src apply -R "$m" || true
-                      { echo "変異 $(basename "$m") を入れてもテストが通る。テストが指摘された壊し方を捕まえていないので実装に進んでいない。"
+                      { echo "変異 $(basename "$m") を入れてもテストが通る。テストが壊し方を捕まえていない。$1"
                         echo
                         cat "$m"
                       } > /tmp/giveup.txt
                       give_up_file /tmp/giveup.txt
                     fi
+                    basename "$m" >> /tmp/mutants-caught.txt
                     { echo "## $(basename "$m")"; tail -20 /tmp/mutant.log; echo; } >> /tmp/mutants.log
                     as_agent git -C /scratch/src apply -R "$m" \
-                      || give_up "変異 $(basename "$m") を外せなかった。作業ツリーが壊れているので実装には進んでいない。"
+                      || give_up "変異 $(basename "$m") を外せなかった。作業ツリーが壊れている。$1"
                     [ "$(as_agent git -C /scratch/src diff | sha256sum)" = "$before" ] \
-                      || give_up "変異 $(basename "$m") を外した後、作業ツリーが元に戻らなかった。実装には進んでいない。"
+                      || give_up "変異 $(basename "$m") を外した後、作業ツリーが元に戻らなかった。$1"
                   done
-                  MUTATION_RED=1
+                }
+                write_mutation_note() {
+                  if [ -s /tmp/mutants-caught.txt ]; then
+                    echo "変異で落ちた: $(paste -sd, /tmp/mutants-caught.txt)"
+                  fi
+                  if [ -s /tmp/mutants-skipped.txt ]; then
+                    echo "変異 $(paste -sd, /tmp/mutants-skipped.txt) は実装の後の作業ツリーに当てられなかった（実装が同じ箇所を変えた可能性）。この変異では赤を確かめていない。"
+                  fi
+                }
+                RED=
+                TEST_RED=
+                DEFER_MUTATIONS=
+                if [ -z "$(git -C /scratch/src status --porcelain)" ]; then
+                  [ -n "$UNTESTABLE" ] \
+                    || give_up "テストが 1 行も書かれず、赤を示せない理由（untestable.md）も無い。実装には進んでいない。"
+                elif ! run_tests /tmp/red.log; then
+                  RED=1
+                  TEST_RED=1
                 fi
-                # 変異で赤を見たなら、他のテストが最初から通っても先へ進める（バグの指摘のテストに
-                # できないものは untestable に回り、書かれるのがテストの欠落のテストだけのことがある）。
-                # バグそのものが直ったかは、この handler では確認しない。
-                if [ -z "$SKIP_RED" ] && [ -z "$MUTATION_RED" ] && run_tests /tmp/red.log; then
+                if ls /scratch/out/mutations/*.patch >/dev/null 2>&1; then
+                  if [ -n "$RED" ]; then
+                    for m in /scratch/out/mutations/*.patch; do
+                      check_mutation_shape "$m" "実装には進んでいない。"
+                    done
+                    DEFER_MUTATIONS=1
+                  else
+                    check_mutations "実装には進んでいない。"
+                    RED=1
+                  fi
+                fi
+                if [ -z "$RED" ] && [ -z "$UNTESTABLE" ]; then
                   git -C /scratch/src diff > /tmp/tests.diff || true
-                  { echo "書かれたテストが最初から通ってしまう。要求を検証していないので実装に進んでいない。"
+                  { echo "書かれたテストが最初から通り、変異のパッチも赤を示せない理由（untestable.md）も無い。要求を検証していないので実装に進んでいない。"
                     echo
                     echo "$TEST_CMD の結果:"
                     tail -20 /tmp/red.log
@@ -761,7 +782,28 @@ spec:
                   { echo; echo "## 変異を入れたときのテストの結果"; echo; cat /tmp/mutants.log; } >> /tmp/tests-report.md
                 fi
                 chmod 0644 /tmp/tests-report.md
-                if [ -s /scratch/out/untestable.md ]; then
+                {
+                  echo "## 赤の観測"
+                  echo
+                  if [ -n "$TEST_RED" ]; then
+                    echo "落ちるテスト: 書かれたテストが落ちることを観測した。"
+                  fi
+                  if [ -n "$DEFER_MUTATIONS" ]; then
+                    echo "変異のパッチは落ちるテストと混ざっていたので、緑の後に当てる。結果は下に追記する。"
+                  else
+                    write_mutation_note
+                  fi
+                  if [ -z "$RED" ]; then
+                    echo "赤は観測していない。untestable.md に挙げた要求・指摘のほかに、落ちるテストも変異のパッチも無かった。"
+                  fi
+                  if [ -n "$UNTESTABLE" ]; then
+                    echo
+                    echo "## 赤を示せない（テストの回の判断）"
+                    echo
+                    cat /scratch/out/untestable.md
+                  fi
+                } > /tmp/red-note.md
+                if [ -n "$UNTESTABLE" ]; then
                   cp /scratch/out/untestable.md /tmp/untestable.md && chmod 0644 /tmp/untestable.md
                 fi
 
@@ -837,6 +879,11 @@ spec:
                   prompt="${IMPL_PROMPT}。${attempt} 回目の後、テストが通らなかった。失敗の出力は /tmp/green-failure.md にある。テストは書き換えず、実装を直すこと。作業ツリーには前の回の変更が残っている"
                   attempt=$((attempt + 1))
                 done
+                if [ -n "$DEFER_MUTATIONS" ]; then
+                  check_mutations "$NOT_PUSHED"
+                  { echo; echo "## 変異を入れたときのテストの結果（緑の後）"; echo; cat /tmp/mutants.log; } >> /tmp/tests-report.md
+                  { echo; write_mutation_note; } >> /tmp/red-note.md
+                fi
 
                 # --- 6. PR（handler が作る。エージェントには触らせない） ------------
                 cd /scratch/src
@@ -865,25 +912,28 @@ spec:
                   [ "$(git -C /scratch/src symbolic-ref --short -q HEAD)" = "$BRANCH" ] \
                     && [ "$(git -C /scratch/src rev-parse HEAD)" = "$FIX_BASE_SHA" ] \
                     || give_up "作業ツリーの HEAD が PR のブランチの先頭からずれている。直しは積んでいない。"
-                  if git -C /scratch/src diff --cached --quiet; then
-                    { echo "テストの回も直しの回も作業ツリーに差分を残さなかった。署名コミットは呼んでいない。${NOT_PUSHED}"
-                      if [ -n "$ESCALATE_NOTE" ]; then
-                        echo
-                        echo "## 直しの回が escalate に書いていたこと"
-                        echo
-                        printf '%s\n' "$ESCALATE_NOTE"
-                      fi
-                    } > /tmp/giveup.txt
-                    give_up_file /tmp/giveup.txt
-                  fi
+                fi
+                if git -C /scratch/src diff --cached --quiet; then
+                  { echo "テストの回もその後の回も作業ツリーに差分を残さなかった。署名コミットは呼んでいない。${NOT_PUSHED}"
+                    if [ -n "$ESCALATE_NOTE" ]; then
+                      echo
+                      echo "## エージェントが escalate に書いていたこと"
+                      echo
+                      printf '%s\n' "$ESCALATE_NOTE"
+                    fi
+                  } > /tmp/giveup.txt
+                  give_up_file /tmp/giveup.txt
+                fi
+
+                if [ -n "$FIX" ]; then
                   GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0="http.https://${GH_GATEWAY}/.extraheader" GIT_CONFIG_VALUE_0="$AUTH_HEADER" \
                     ghgw /usr/local/bin/github-signed-commit.sh \
                     -r "$REPO" -b "$BRANCH" -m "$FIX_SUBJECT" \
                     || give_up "差し戻しの直しを署名コミットにできなかった。PR ${PR_URL} のブランチには何も積まれていない可能性が高い（GitHub 側を確認すること）。直しの差分はこの Pod のスクラッチにしかなく、Pod が消えると失われる。"
                   # 直しの経緯は PR のコメントに残す。本文を書き換えると最初の実装の記録が消える。
                   # コメントに失敗してもコミットは積まれているので、Task は止めず報告に書く。
-                  printf '## 差し戻しの直し\n\n実装 handler（%s）が、レビューの仕分けが採用した指摘を直した。\n\n## 仕分け\n\n%s\n\n## テストの回\n\n%s\n\n## 直しの回\n\n%s\n' \
-                    "$MODEL_NOTE" "$(cat /tmp/triage.md)" "$(cat /tmp/tests-report.md)" "$(cat /workspace/done/report.md 2>/dev/null || echo '(報告なし)')" > /tmp/fix-comment.md
+                  printf '## 差し戻しの直し\n\n実装 handler（%s）が、レビューの仕分けが採用した指摘を直した。\n\n## 仕分け\n\n%s\n\n## テストの回\n\n%s\n\n%s\n\n## 直しの回\n\n%s\n' \
+                    "$MODEL_NOTE" "$(cat /tmp/triage.md)" "$(cat /tmp/tests-report.md)" "$(cat /tmp/red-note.md)" "$(cat /workspace/done/report.md 2>/dev/null || echo '(報告なし)')" > /tmp/fix-comment.md
                   if [ -n "$ESCALATE_NOTE" ]; then
                     printf '\n## エージェントが escalate に書いていたこと（テストは緑だったため直しは積んだ）\n\n%s\n' "$ESCALATE_NOTE" >> /tmp/fix-comment.md
                   fi
@@ -892,6 +942,8 @@ spec:
                     | ghgw gh api "repos/${REPO}/issues/${PR}/comments" --input - >/dev/null 2>&1 \
                     || COMMENT_NOTE="（PR へのコメントに失敗した。直しはブランチに積んである）"
                   find /workspace/escalate -mindepth 1 -delete 2>/dev/null || true
+                  # done/report.md に赤の観測を足す。
+                  { echo; cat /tmp/red-note.md; echo; } >> /workspace/done/report.md
                   printf '%s%s\n' "$PR_URL" "$COMMENT_NOTE" >> /workspace/done/report.md
                   printf '%s\n' "$PR_URL" > /workspace/done/pr-url
                   sync
@@ -917,8 +969,8 @@ spec:
                   -r "$REPO" -b "$BRANCH" -m "Implement #${ISSUE}" \
                   || give_up "署名コミットを作れなかった。ブランチ ${BRANCH} は GitHub に作成済み（base の HEAD のまま、まだコミットは載っていない）。実装差分自体はこの Pod のスクラッチにしかなく、Pod が消えると失われる。"
 
-                PR_BODY=$(printf 'closes #%s\n\n実装 handler（%s）が TDD で書いた。テストを先に書き、赤を観測してから実装している。\n\n## 調査\n\n%s\n\n## テストの回\n\n%s\n\n## 実装の回\n\n%s\n' \
-                    "$ISSUE" "$MODEL_NOTE" "$(cat /tmp/investigation.md)" "$(cat /tmp/tests-report.md)" "$(cat /workspace/done/report.md 2>/dev/null || echo '(報告なし)')")
+                PR_BODY=$(printf 'closes #%s\n\n実装 handler（%s）が TDD で書いた。テストの回が要求ごとに赤の示し方を選び、示せる赤は観測してから実装している。\n\n## 調査\n\n%s\n\n## テストの回\n\n%s\n\n%s\n\n## 実装の回\n\n%s\n' \
+                    "$ISSUE" "$MODEL_NOTE" "$(cat /tmp/investigation.md)" "$(cat /tmp/tests-report.md)" "$(cat /tmp/red-note.md)" "$(cat /workspace/done/report.md 2>/dev/null || echo '(報告なし)')")
                 if [ -n "$ESCALATE_NOTE" ]; then
                   PR_BODY=$(printf '%s\n\n## エージェントが escalate に書いていたこと（テストは緑だったため PR は作成）\n\n%s\n' "$PR_BODY" "$ESCALATE_NOTE")
                 fi

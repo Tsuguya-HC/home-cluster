@@ -139,11 +139,23 @@ jobs:
             echo "::error::only ${#images[@]} images extracted, expected at least ${MIN_IMAGES} — the extraction pipeline is broken, not the cluster"
             exit 1
           fi
+          # A registry answering with a throttle or a 5xx is not a missing image.
+          # Retry every failure a few times; a truly missing image still fails,
+          # only later. The last error is printed so the reason is on record.
           for img in "${images[@]}"; do
-            if crane manifest "$img" >/dev/null 2>&1; then
+            ok=
+            for delay in 0 10 30; do
+              sleep "$delay"
+              if crane manifest "$img" >/dev/null 2>/tmp/crane.err; then
+                ok=1
+                break
+              fi
+            done
+            if [[ -n "$ok" ]]; then
               echo "  OK   $img"
             else
               echo "  FAIL $img"
+              sed 's/^/       /' /tmp/crane.err
               failed_images+=("$img")
             fi
           done

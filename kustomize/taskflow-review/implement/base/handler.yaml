@@ -362,7 +362,7 @@ spec:
                 # アクセスログで区別できない）。
                 case "${FLOW_PHASE:-}" in
                   実装) ;;
-                  修正) FIX=1; ANTHROPIC_CUSTOM_HEADERS="x-tf-handler: taskflow-implement-fix" ;;
+                  修正) FIX=1; ANTHROPIC_CUSTOM_HEADERS="${ANTHROPIC_CUSTOM_HEADERS}-fix" ;;
                   *) give_up "この handler が知らないフェーズ: ${FLOW_PHASE:-（空）}。何もしていない。" ;;
                 esac
                 if [ -n "$FIX" ]; then
@@ -1011,6 +1011,8 @@ spec:
               # taskflow-implement は **従量課金（implement）階層だけ**許可されている
               # （manifests/llm-gateway/openrouter.yaml の x-llm-client 条件）。
               # untrusted input を実行する handler を Max から切り離すのが #942 の動機。
+              # これはこの base の既定値の話。claude component が鍵を差し替えた版だけは
+              # Max の implement-claude の経路に入る（意図した例外）。
               - name: ANTHROPIC_AUTH_TOKEN
                 valueFrom:
                   secretKeyRef:
@@ -1020,7 +1022,7 @@ spec:
               - name: ANTHROPIC_API_KEY
                 value: ""
               # どの handler からの呼び出しかを gateway に名乗る。アクセスログの tf.handler に出る。
-              # 修正フェーズではスクリプトが taskflow-implement-fix に上書きする。
+              # 修正フェーズではスクリプトが値の末尾に -fix を足す（1 行の `Name: Value` のままにすること）。
               - name: ANTHROPIC_CUSTOM_HEADERS
                 value: "x-tf-handler: taskflow-implement"
               # gateway の alias。実モデル（今は OpenRouter の一つ）は gateway 側で決まるので、

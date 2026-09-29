@@ -75,7 +75,7 @@ spec:
             emptyDir: {}
         initContainers:
           - name: parts
-            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:960f3d3e88c28add4d14787303df9a78936fe75128c8e88c0aad1b3078e0f546
+            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:47543823e8aaa9469833aafdcd66dfec205035c4d0719719d380769c77989f99
             command: [sh, -c]
             args:
               - GH_ENTERPRISE_TOKEN=$(cat /github-gateway-key/key) exec parts -s review-file-issues -c untrusted-input
@@ -105,7 +105,7 @@ spec:
               # 伝わらない。
               limits: {cpu: 500m, memory: 256Mi}
           - name: github-key
-            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:960f3d3e88c28add4d14787303df9a78936fe75128c8e88c0aad1b3078e0f546
+            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:47543823e8aaa9469833aafdcd66dfec205035c4d0719719d380769c77989f99
             command: [sh, -c]
             args: ["cp /github-gateway-key-rw/key /github-token/token && cp /github-gateway-key/key /github-token/ro"]
             securityContext:
@@ -125,7 +125,7 @@ spec:
           # 失敗しても exit 0 で /tmp/fetch-error に書くこと。init が落ちると Pod が上がらず、
           # 理由を残す者がいなくなる。
           - name: fetch
-            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:960f3d3e88c28add4d14787303df9a78936fe75128c8e88c0aad1b3078e0f546
+            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:47543823e8aaa9469833aafdcd66dfec205035c4d0719719d380769c77989f99
             command: [sh, -c]
             args:
               - |
@@ -230,7 +230,7 @@ spec:
               limits: {cpu: "1", memory: 512Mi}
         containers:
           - name: agent
-            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:960f3d3e88c28add4d14787303df9a78936fe75128c8e88c0aad1b3078e0f546
+            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:47543823e8aaa9469833aafdcd66dfec205035c4d0719719d380769c77989f99
             workingDir: /workspace
             command: [sh, -c]
             args:

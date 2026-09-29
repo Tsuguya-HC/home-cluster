@@ -323,9 +323,9 @@ All policies are CiliumNetworkPolicy (CNP) and CiliumClusterwideNetworkPolicy (C
 | Component | Ingress | Egress |
 |---|---|---|
 | **rss-pg** | self → 5432/8000; rss-server/rss-ui/rss-fetcher/rss-cleaner/rss-migration → 5432; cloudnative-pg (cnpg-system), host → 8000 (probes) | kube-apiserver, self:5432/8000 |
-| **rss-server** | oauth2-proxy-rss (oauth2-proxy) → 80 | rss-pg:5432, world:443 (immediate fetch when a feed is added) |
+| **rss-server** | oauth2-proxy-rss (oauth2-proxy) → 80 | rss-pg:5432, 0.0.0.0/0:443 except private/reserved ranges (immediate fetch when a feed is added) |
 | **rss-ui** | oauth2-proxy-rss (oauth2-proxy) → 80 | rss-pg:5432 |
-| **rss-fetcher** | rss-cron → 80 | rss-pg:5432, world:443 |
+| **rss-fetcher** | rss-cron → 80 | rss-pg:5432, 0.0.0.0/0:443 except private/reserved ranges |
 | **rss-cleaner** | rss-cron → 80 | rss-pg:5432 |
 | **rss-cron** | (deny world) | rss-fetcher:80, rss-cleaner:80, kube-apiserver:6443, seaweedfs-filer (seaweedfs):8333 |
 | **rss-workflow-exit** (workflows.argoproj.io/on-exit=true) | (deny world) | kube-apiserver:6443, seaweedfs-filer (seaweedfs):8333, discord.com:443 |

@@ -304,10 +304,12 @@ spec:
                 # CARGO_HOME・pnpm store も Block スクラッチに寄せる。イメージの既定
                 # CARGO_HOME（/usr/local/cargo、root:root 0755）は 65533 から書けず、
                 # cargo test が必ず Permission denied で落ちる（変更前の baseline から失敗する）。
-                mkdir -p /scratch/cargo /scratch/xdg-data \
-                  || give_up "/scratch/cargo・/scratch/xdg-data の作成に失敗した。実装は行っていない。"
-                chown 65533:65533 /scratch/cargo /scratch/xdg-data \
-                  || give_up "/scratch/cargo・/scratch/xdg-data の所有者変更に失敗した。実装は行っていない。"
+                # PNPM_HOME も同じ。pnpm はリポの packageManager が指す版をここへ取りに行くので、
+                # イメージの既定（root 所有）のままだと pnpm install が EACCES で落ちる。
+                mkdir -p /scratch/cargo /scratch/xdg-data /scratch/pnpm \
+                  || give_up "/scratch/cargo・/scratch/xdg-data・/scratch/pnpm の作成に失敗した。実装は行っていない。"
+                chown 65533:65533 /scratch/cargo /scratch/xdg-data /scratch/pnpm \
+                  || give_up "/scratch/cargo・/scratch/xdg-data・/scratch/pnpm の所有者変更に失敗した。実装は行っていない。"
                 # 宣言ディレクトリは prepare が敷く。この Pod は root で起動して作業だけ
                 # 65533 に降りるので、降りた先から書けるように所有者を渡しておく
                 # （/workspace 直下は 0555 のままで、新しいディレクトリは作れない）。
@@ -471,6 +473,7 @@ spec:
                         CLAUDE_CODE_SUBAGENT_MODEL="$LLM_ALIAS" \
                         CARGO_HOME=/scratch/cargo \
                         XDG_DATA_HOME=/scratch/xdg-data \
+                        PNPM_HOME=/scratch/pnpm \
                         E2E_DATABASE_URL="$E2E_DATABASE_URL" \
                         "$@"
                 }
@@ -849,6 +852,17 @@ spec:
                   [ "$(git -C /scratch/src symbolic-ref --short -q HEAD)" = "$BRANCH" ] \
                     && [ "$(git -C /scratch/src rev-parse HEAD)" = "$FIX_BASE_SHA" ] \
                     || give_up "作業ツリーの HEAD が PR のブランチの先頭からずれている。直しは積んでいない。"
+                  if git -C /scratch/src diff --cached --quiet; then
+                    { echo "テストの回も直しの回も作業ツリーに差分を残さなかった。署名コミットは呼んでいない。${NOT_PUSHED}"
+                      if [ -n "$ESCALATE_NOTE" ]; then
+                        echo
+                        echo "## 直しの回が escalate に書いていたこと"
+                        echo
+                        printf '%s\n' "$ESCALATE_NOTE"
+                      fi
+                    } > /tmp/giveup.txt
+                    give_up_file /tmp/giveup.txt
+                  fi
                   GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0="http.https://${GH_GATEWAY}/.extraheader" GIT_CONFIG_VALUE_0="$AUTH_HEADER" \
                     ghgw /usr/local/bin/github-signed-commit.sh \
                     -r "$REPO" -b "$BRANCH" -m "$FIX_SUBJECT" \

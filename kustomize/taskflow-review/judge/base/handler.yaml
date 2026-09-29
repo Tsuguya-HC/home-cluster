@@ -119,7 +119,28 @@ spec:
               limits: {cpu: 500m, memory: 256Mi}
           - name: fetch
             image: registry.infra.tgy.io/tools/claude-code:latest@sha256:960f3d3e88c28add4d14787303df9a78936fe75128c8e88c0aad1b3078e0f546
-            command: [sh, /etc/review-scripts/fetch-pr.sh]
+            command: [sh, -c]
+            args:
+              - |
+                set -eu
+                sh /etc/review-scripts/fetch-pr.sh
+                if [ "${FLOW_PHASE:-}" != 検証 ] || [ -f /tmp/fetch-error ]; then
+                  exit 0
+                fi
+                # 失敗しても exit 0 で /tmp/fetch-error に書くこと。init が落ちると Pod が上がらず、
+                # 理由を書く者がいなくなる。
+                fail() { printf '%s\n' "$1" > /tmp/fetch-error; exit 0; }
+                # 棚の番号は数値順に読む（辞書順では 10 が 2 より前に来る）。verified / rereview /
+                # unfixed は検証の語彙。
+                mkdir -p /tmp/previous-verify \
+                  || fail "/tmp/previous-verify を作れなかった。判定は行っていない。"
+                for f in $(printf '%s\n' /results/*/verified/report.md /results/*/rereview/report.md /results/*/unfixed/report.md | sort -t/ -k3,3n); do
+                  [ -f "$f" ] || continue
+                  n=${f#/results/}; n=${n%%/*}
+                  cp "$f" "/tmp/previous-verify/${n}.md" \
+                    || fail "前回の検証の報告をコピーできなかった（${f}）。判定は行っていない。"
+                done
+                rmdir /tmp/previous-verify 2>/dev/null || true
             env:
               - name: HOME
                 value: /tmp
@@ -134,7 +155,7 @@ spec:
               - {name: tmp, mountPath: /tmp}
               - {name: scripts, mountPath: /etc/review-scripts, readOnly: true}
               - {name: github-gateway-key, mountPath: /github-gateway-key, readOnly: true}
-              # 過去の全 run の棚（taskflow ADR-0003）。PR の URL と前の仕分けを読む。
+              # 過去の全 run の棚（taskflow ADR-0003）。PR の URL と前の仕分け・検証を読む。
               - {name: flow-workspace, mountPath: /results, subPath: results, readOnly: true}
             resources:
               requests: {cpu: 100m, memory: 128Mi}

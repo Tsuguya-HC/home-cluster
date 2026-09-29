@@ -1,6 +1,8 @@
 # 起票（#1081）。implement flow の finally として、終わり方に関係なく 1 回走る。仕分けが
 # 「この PR では直さない」「確かめられなかった」として残した候補を、issue にする・既存の issue に
-# 足す・起票しない、のどれかに決めて GitHub に書き、PR に結果をコメントで残す。
+# 足す・起票しない、のどれかに決めて GitHub に書き、PR に結果をコメントで残す。PR が作られる前に
+# 終わったときは起票せず、終わり方と止まった理由を元の issue にスクリプトが MCP の /issues で
+# コメントする。
 #
 # finally の置き場は filed の 1 つだけ。書かなければ仕組みが「片付かなかった」として知らせる
 # （Ready=False と Warning Event）。理由はこの Pod のログに出す。
@@ -148,8 +150,25 @@ spec:
                   [ -f "$f" ] || continue
                   PR_URL=$(head -1 "$f")
                 done
-                # PR が作られる前に終わった（調査で止まった等）なら、することは無い。
+                # PR が作られる前に終わった（調査で止まった等）なら起票はしない。止まった理由を元の
+                # issue に残すため、番号が最大の escalate の報告だけを先頭で切って渡す。
                 if [ -z "$PR_URL" ]; then
+                  STOP=
+                  for f in $(printf '%s\n' /results/*/escalate/report.md | sort -t/ -k3,3n); do
+                    [ -f "$f" ] || continue
+                    STOP=$f
+                  done
+                  if [ -n "$STOP" ]; then
+                    head -n 60 "$STOP" > /tmp/stop-reason.md \
+                      || fail "止まった理由（${STOP}）を読めなかった。issue へのコメントは行っていない。"
+                    if [ "$(wc -l < "$STOP")" -gt 60 ]; then
+                      n=${STOP#/results/}; n=${n%%/*}
+                      printf '\n（先頭 60 行。全文は results/%s/escalate/report.md）\n' "$n" >> /tmp/stop-reason.md \
+                        || fail "止まった理由を書けなかった。issue へのコメントは行っていない。"
+                    fi
+                  fi
+                  printf '%s\n' "$REPO" > /tmp/repo || fail "/tmp/repo を書けなかった。issue へのコメントは行っていない。"
+                  printf '%s\n' "$ISSUE" > /tmp/issue-number || fail "/tmp/issue-number を書けなかった。issue へのコメントは行っていない。"
                   : > /tmp/no-pr || fail "/tmp/no-pr を書けなかった。起票は行っていない。"
                   exit 0
                 fi
@@ -204,7 +223,7 @@ spec:
             volumeMounts:
               - {name: tmp, mountPath: /tmp}
               - {name: github-gateway-key, mountPath: /github-gateway-key, readOnly: true}
-              # 過去の全 run の棚（taskflow ADR-0003）。PR の URL と全周回の仕分けを読む。
+              # 過去の全 run の棚（taskflow ADR-0003）。PR の URL と全周回の仕分け・検証、止まった理由を読む。
               - {name: flow-workspace, mountPath: /results, subPath: results, readOnly: true}
             resources:
               requests: {cpu: 100m, memory: 128Mi}
@@ -240,6 +259,43 @@ spec:
 
                 if [ -f /tmp/no-pr ]; then
                   printf 'PR が作られる前にフローが終わった（%s）。起票するものは無い。\n' "$ENDING" > "$FILED/report.md"
+                  [ -n "${MCP_CLIENT_KEY:-}" ] || give_up "issue にコメントする鍵（MCP のクライアント鍵）が空。PR が作られる前に終わった理由は issue に残っていない。"
+                  REPO=$(cat /tmp/repo); ISSUE=$(cat /tmp/issue-number)
+                  { printf 'implement flow は PR を作る前に終わった（%s）。\n' "$ENDING"
+                    if [ -s /tmp/stop-reason.md ]; then
+                      printf '\n## 止まった理由\n\n'
+                      cat /tmp/stop-reason.md
+                    fi
+                  } > /tmp/issue-comment.md \
+                    || give_up "issue へのコメントの本文を書けなかった。PR が作られる前に終わった理由は issue に残っていない。"
+                  jq -n --arg owner "${REPO%%/*}" --arg repo "${REPO#*/}" --argjson n "$ISSUE" --rawfile body /tmp/issue-comment.md \
+                    '{jsonrpc: "2.0", id: 1, method: "tools/call",
+                      params: {name: "add_issue_comment", arguments: {owner: $owner, repo: $repo, issue_number: $n, body: $body}}}' \
+                    > /tmp/issue-comment.json \
+                    || give_up "issue へのコメントの要求を組み立てられなかった。PR が作られる前に終わった理由は issue に残っていない。"
+                  # 鍵は argv に載せない。printf は組み込みなので exec されず、curl にはファイルで渡す。
+                  ( umask 077; printf 'x-github-client: %s\n' "$MCP_CLIENT_KEY" > /tmp/mcp-headers ) \
+                    || give_up "MCP の鍵を渡すヘッダを書けなかった。PR が作られる前に終わった理由は issue に残っていない。"
+                  code=$(curl -s --max-time 60 -o /tmp/issue-comment.out -w '%{http_code}' -X POST \
+                    -H @/tmp/mcp-headers \
+                    -H 'Content-Type: application/json' \
+                    -H 'Accept: application/json, text/event-stream' \
+                    --data-binary @/tmp/issue-comment.json \
+                    http://github-mcp.llm-gateway.svc.cluster.local/issues) || code=
+                  rm -f /tmp/mcp-headers
+                  [ "$code" = 200 ] \
+                    || give_up "issue #${ISSUE} にコメントできなかった（HTTP ${code:-なし}）。PR が作られる前に終わった理由は issue に残っていない。$(head -c 500 /tmp/issue-comment.out 2>/dev/null)"
+                  # 応答は JSON か SSE（data: 行）のどちらかで来る。HTTP 200 でも道具の失敗は
+                  # error か result.isError で返る。
+                  if grep -q '^data: ' /tmp/issue-comment.out; then
+                    sed -n 's/^data: //p' /tmp/issue-comment.out > /tmp/issue-comment.rpc
+                  else
+                    cp /tmp/issue-comment.out /tmp/issue-comment.rpc
+                  fi
+                  if ! jq -se 'map(select(.id == 1)) | last | . != null and .error == null and .result != null and .result.isError != true' \
+                       /tmp/issue-comment.rpc > /dev/null 2>&1; then
+                    give_up "issue #${ISSUE} にコメントできなかった（MCP が失敗を返した）。PR が作られる前に終わった理由は issue に残っていない。$(head -c 500 /tmp/issue-comment.out)"
+                  fi
                   sync; exit 0
                 fi
                 if [ -f /tmp/fetch-error ]; then

@@ -1,6 +1,7 @@
 # 起票（#1081）。implement flow の finally として、終わり方に関係なく 1 回走る。仕分けが
 # 「この PR では直さない」「確かめられなかった」として残した候補を、issue にする・既存の issue に
-# 足す・起票しない、のどれかに決めて GitHub に書き、PR に結果をコメントで残す。PR が作られる前に
+# 足す・起票しない、のどれかに決めて GitHub に書き、PR に結果をコメントで残す。完了まで進んだ
+# ときは PR の draft も外す。PR が作られる前に
 # 終わったときは起票せず、終わり方と止まった理由を元の issue にスクリプトが MCP の /issues で
 # コメントする。
 #
@@ -62,8 +63,8 @@ spec:
               items:
                 - key: taskflow-review
                   path: key
-          # gh-rw の呼び出し元鍵（PR へのコメントの投稿だけに使う）。github-key init にだけ
-          # マウントし、ファイルに写す。agent 側の入口で root が読んで消す。
+          # gh-rw の呼び出し元鍵（PR へのコメントの投稿と、完了したときの draft 解除に使う）。
+          # github-key init にだけマウントし、ファイルに写す。agent 側の入口で root が読んで消す。
           - name: github-gateway-key-rw
             secret:
               secretName: github-gateway-client-keys
@@ -460,6 +461,14 @@ spec:
                 if ! bg gh_rw api -X POST \
                      "repos/${REPO}/issues/${PR}/comments" -F body=@"$FILED/report.md" > /dev/null 2>/tmp/comment.err; then
                   give_up "PR #${PR} にコメントできなかった。起票の結果は書かれていたが PR には残っていない。$(tail -3 /tmp/comment.err)"
+                fi
+                # 完了まで進んだ PR だけ draft を外す。それ以外の終わり方では draft のまま残す。
+                if [ "${FLOW_ENDING:-}" = Success ]; then
+                  if [ $(( DEADLINE - $(date +%s) )) -lt 60 ]; then
+                    printf 'PR #%s の draft を外さなかった: 内部の期限まで余裕が無い\n' "$PR" >&2
+                  elif ! bg gh_rw pr ready "$PR" --repo "$REPO" > /dev/null 2>/tmp/ready.err; then
+                    printf 'PR #%s の draft を外せなかった: %s\n' "$PR" "$(tail -3 /tmp/ready.err)" >&2
+                  fi
                 fi
                 sync
             env:

@@ -7,8 +7,8 @@
 # 判定は Task の終端（完了 / 要修正 / Escalated）に出る。通知は PrometheusRule から Discord
 # （manifests/monitoring/prometheusrule-taskflow.yaml）で、この sensor は関与しない。
 #
-# **draft PR は起こさない。** 実装 flow が出す PR は draft で始まり、人が ready にするまでは
-# 中身が動いている。ready_for_review で拾う。
+# **draft PR は起こさない。** 実装 flow が出す PR は draft で始まり、完了まで進むと flow が
+# draft を外す（人が外すこともある）。それまでは中身が動いている。ready_for_review で拾う。
 apiVersion: v1
 kind: ServiceAccount
 metadata:

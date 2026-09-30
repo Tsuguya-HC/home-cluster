@@ -265,6 +265,53 @@ spec:
                     echo "result イベントが無い。末尾:"
                     grep -v -e '"thinking_tokens"' -e '"redacted_thinking"' "$1" 2>/dev/null | tail -5 | jq -Rr '.[0:300]'
                   fi
+                  printf '道具の呼び出し: %s\n' "$(claude_tool_summary "$1")"
+                }
+                # ターン数の上限（error_max_turns）で終わったか。上限は正しさの判定ではないので、
+                # 結論を書き終えていればこの後の機械の確認（赤・緑・検証の回）に委ねる。
+                claude_hit_turn_limit() {
+                  jq -cR 'fromjson? | select(.type == "result") | .subtype' "$1" 2>/dev/null \
+                    | tail -1 | grep -qx '"error_max_turns"'
+                }
+                # 道具の呼び出しの集計（1 行、区切りは「; 」）。モデルが決める値は報告（issue や PR に載る）へ
+                # 素通しにしない。名前は文字種と長さを絞り、Agent は種類ごとの件数に畳み、
+                # run_in_background は真偽だけ。入力や出力の中身は出さない。JSON だが object でない
+                # 行や要素は読み飛ばす。
+                claude_tool_summary() {
+                  jq -nrR 'def san: (. // "-") | tostring | gsub("[^A-Za-z0-9_.:-]"; "?") | .[0:40];
+                    def kind: (.input | if type == "object" then .subagent_type else null end) | san;
+                    def bg: (.input | type == "object" and .run_in_background == true);
+                    [inputs | fromjson? | objects | select(.type == "assistant" and .parent_tool_use_id == null)
+                      | .message | objects | .content | arrays | .[] | objects | select(.type == "tool_use")] as $t
+                    | ($t | map(.name | san) | group_by(.) | map("\(.[0])×\(length)")) as $names
+                    | ($t | map(select((.name | san) == "Agent" or (.name | san) == "Task"))
+                        | group_by(kind)
+                        | map("\(.[0] | kind)×\(length)" + (map(select(bg)) | length | if . > 0 then "（裏で起動 \(.)）" else "" end))) as $agents
+                    | ($names + (if ($agents | length) > 0 then ["Agent: " + ($agents | join(", "))] else [] end))
+                    | if length == 0 then "なし" else join("; ") end' "$1" 2>/dev/null
+                }
+                # ターン数の上限で終わった回を続行に回す。引数は ログ・注記の書き先・回の名前・
+                # 注記が書けなかったときの give_up の末尾・注記に添える留意。結論は /tmp/stop-expect に
+                # 並べたどれかにあるとき。受け入れたら 0 を返す。注記は agent 所有のファイルへ root が
+                # 追記しない（symlink に替えられると書き先を誘導される）ので、書き先は handler の
+                # 一時ファイルか、親ディレクトリも含めて symlink を通らない通常ファイルだけ。
+                # 関数は現在のシェルで呼ぶ（give_up の exit のため）。
+                claude_accept_turn_limit() {
+                  claude_hit_turn_limit "$1" || return 1
+                  tl_concluded=""
+                  while IFS= read -r tl_path; do
+                    [ -s "$tl_path" ] && tl_concluded=1
+                  done < /tmp/stop-expect
+                  [ -n "$tl_concluded" ] || return 1
+                  echo "${3}の claude はターン数の上限で終わったが、結論は書かれている。機械の確認に進む。" >&2
+                  tl_dir=$(dirname "$2")
+                  if [ "$(realpath "$tl_dir" 2>/dev/null)" != "$tl_dir" ] \
+                     || [ -L "$2" ] || { [ -e "$2" ] && [ ! -f "$2" ]; }; then
+                    give_up "${3}の報告の書き先が通常ファイルではない（symlink を通る）。${4}"
+                  fi
+                  printf '\n（%sの claude はターン数の上限で打ち切られた。結論はそれまでに書かれたもの。終わる前の確認で手順の見直しを宣言した後の打ち切りなら見直しは反映されていない。%s道具の呼び出し: %s）\n' \
+                    "$3" "$5" "$(claude_tool_summary "$1")" >> "$2" \
+                    || give_up "${3}の報告に打ち切りの注記を書けなかった。${4}"
                 }
                 give_up_file() {
                   DONE=$(cat /workspace/done/report.md 2>/dev/null || true)
@@ -664,6 +711,9 @@ spec:
                   --max-turns 60 || CLAUDE_RC=$?
                 # 終了コードを握り潰すと、モデル slug 無効・認証失敗・クレジット切れが
                 # 全部「テストが 1 行も書かれなかった」に化ける。実態を先に報告する。
+                if [ "$CLAUDE_RC" -eq 1 ] && claude_accept_turn_limit /tmp/claude-tests.log /tmp/tests-turn-note.md "テストの回" "実装は行っていない。" "テストのファイルが書きかけのまま残っている可能性がある。"; then
+                  CLAUDE_RC=0
+                fi
                 if [ "$CLAUDE_RC" -ne 0 ]; then
                   { echo "テストの回の claude が失敗した（exit ${CLAUDE_RC}）。実装には進んでいない。"
                     if [ "$CLAUDE_RC" -eq 137 ]; then
@@ -680,6 +730,10 @@ spec:
                 # give_up が同じファイルを上書きすると skill の書いた理由が消えるので、
                 # ここで先に拾って終わる。done/ は書かれていないのでそのまま空。
                 if [ -s /workspace/escalate/report.md ]; then
+                  if [ -s /tmp/tests-turn-note.md ]; then
+                    { cat /workspace/escalate/report.md; cat /tmp/tests-turn-note.md; } > /tmp/giveup.txt
+                    give_up_file /tmp/giveup.txt
+                  fi
                   sync; exit 0
                 fi
 
@@ -788,6 +842,9 @@ spec:
                   give_up_file /tmp/giveup.txt
                 fi
                 cp /scratch/out/tests-report.md /tmp/tests-report.md 2>/dev/null || echo '(報告なし)' > /tmp/tests-report.md
+                if [ -s /tmp/tests-turn-note.md ]; then
+                  cat /tmp/tests-turn-note.md >> /tmp/tests-report.md
+                fi
                 if [ -s /tmp/mutants.log ]; then
                   { echo; echo "## 変異を入れたときのテストの結果"; echo; cat /tmp/mutants.log; } >> /tmp/tests-report.md
                 fi
@@ -847,6 +904,11 @@ spec:
                     --max-turns 120 || CLAUDE_RC=$?
                   # 実モデルの特定（後段）はこのファイルを読む。
                   cp "/tmp/claude-implement-${attempt}.log" /tmp/claude-implement.log || true
+                  # done の報告があればそこへ、escalate だけなら done/ を作らない（NoAnswer になる）ので一時ファイルへ。
+                  if [ -s /workspace/done/report.md ]; then TURN_NOTE=/workspace/done/report.md; else TURN_NOTE=/tmp/impl-turn-note.md; fi
+                  if [ "$CLAUDE_RC" -eq 1 ] && claude_accept_turn_limit /tmp/claude-implement.log "$TURN_NOTE" "実装の回" "${NOT_PUSHED}" "修正の回では検証役の結果の反映が済んでいない可能性がある。"; then
+                    CLAUDE_RC=0
+                  fi
                   if [ "$CLAUDE_RC" -ne 0 ]; then
                     { echo "実装の回の claude が失敗した（exit ${CLAUDE_RC}、${attempt} 回目）。${NOT_PUSHED}"
                       if [ "$CLAUDE_RC" -eq 137 ]; then
@@ -865,6 +927,7 @@ spec:
                   # skill が「テストのほうが誤り」として escalate に理由を書いたなら、やり直さない。
                   if [ -s /workspace/escalate/report.md ]; then
                     { cat /workspace/escalate/report.md
+                      if [ -s /tmp/impl-turn-note.md ]; then cat /tmp/impl-turn-note.md; fi
                       echo
                       echo "## $TEST_CMD の結果（${attempt} 回目の後）"
                       echo
@@ -905,7 +968,7 @@ spec:
                 # implement skill が「テストは間違っている」と判断して escalate/ に理由を
                 # 書いて降りた後でも、緑判定が通れば先へ進んでしまう。捨てずに本文へ
                 # 畳み込む（下で escalate ディレクトリを空にする前に読む）。
-                ESCALATE_NOTE=$(cat /workspace/escalate/report.md 2>/dev/null || true)
+                ESCALATE_NOTE=$({ cat /workspace/escalate/report.md 2>/dev/null; cat /tmp/impl-turn-note.md 2>/dev/null; } || true)
                 # gateway 経由になったので、この Pod が知っているのは alias だけ（実モデルは
                 # gateway 側で決まる）。「どのモデルが書いたか」は PR を読む人が要る情報なので、
                 # stream-json の応答が名乗った実モデルを拾う。拾えなければ拾えないと書く —

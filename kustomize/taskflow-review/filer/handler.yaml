@@ -1,8 +1,8 @@
 # 起票（#1081）。implement flow の finally として、終わり方に関係なく 1 回走る。仕分けが
 # 「この PR では直さない」「確かめられなかった」として残した候補を、issue にする・既存の issue に
 # 足す・起票しない、のどれかに決めて GitHub に書き、PR に結果をコメントで残す。完了まで進んだ
-# ときは PR の draft も外す。PR が作られる前に
-# 終わったときは起票せず、終わり方と止まった理由を元の issue にスクリプトが MCP の /issues で
+# ときは PR の draft も外す。完了まで進まなかったときは、止まった理由も同じコメントに載せる。
+# PR が作られる前に終わったときは起票せず、終わり方と止まった理由を元の issue にスクリプトが MCP の /issues で
 # コメントする。
 #
 # finally の置き場は filed の 1 つだけ。書かなければ仕組みが「片付かなかった」として知らせる
@@ -151,23 +151,32 @@ spec:
                   [ -f "$f" ] || continue
                   PR_URL=$(head -1 "$f")
                 done
-                # PR が作られる前に終わった（調査で止まった等）なら起票はしない。止まった理由を元の
-                # issue に残すため、番号が最大の escalate の報告だけを先頭で切って渡す。
-                if [ -z "$PR_URL" ]; then
-                  STOP=
-                  for f in $(printf '%s\n' /results/*/escalate/report.md | sort -t/ -k3,3n); do
-                    [ -f "$f" ] || continue
-                    STOP=$f
-                  done
-                  if [ -n "$STOP" ]; then
-                    head -n 60 "$STOP" > /tmp/stop-reason.md \
-                      || fail "止まった理由（${STOP}）を読めなかった。issue へのコメントは行っていない。"
-                    if [ "$(wc -l < "$STOP")" -gt 60 ]; then
-                      n=${STOP#/results/}; n=${n%%/*}
-                      printf '\n（先頭 60 行。全文は results/%s/escalate/report.md）\n' "$n" >> /tmp/stop-reason.md \
-                        || fail "止まった理由を書けなかった。issue へのコメントは行っていない。"
-                    fi
+                # 止まった理由。番号が最大の escalate の報告だけを先頭で切って渡す。PR が無ければ元の
+                # issue に、あれば PR へのコメントに載せる。
+                STOP=
+                for f in $(printf '%s\n' /results/*/escalate/report.md | sort -t/ -k3,3n); do
+                  [ -f "$f" ] || continue
+                  STOP=$f
+                done
+                # 切り出せなかったとき、PR がある経路は理由なしで続ける。PR が無い経路は理由を残すことが
+                # 目的なので fail する。
+                stop_failed() {
+                  rm -f /tmp/stop-reason.md
+                  [ -n "$PR_URL" ] || fail "止まった理由（${STOP}）を書けなかった。issue へのコメントは行っていない。"
+                  printf '止まった理由（%s）を書けなかった。理由なしで PR にコメントする。\n' "$STOP" >&2
+                }
+                if [ -n "$STOP" ]; then
+                  rm -f /tmp/stop-reason.md
+                  if ! head -n 60 "$STOP" > /tmp/stop-reason.md; then
+                    stop_failed
+                  elif [ "$(wc -l < "$STOP")" -gt 60 ]; then
+                    n=${STOP#/results/}; n=${n%%/*}
+                    printf '\n（先頭 60 行。全文は results/%s/escalate/report.md）\n' "$n" >> /tmp/stop-reason.md \
+                      || stop_failed
                   fi
+                fi
+                # PR が作られる前に終わった（調査で止まった等）なら起票はしない。
+                if [ -z "$PR_URL" ]; then
                   printf '%s\n' "$REPO" > /tmp/repo || fail "/tmp/repo を書けなかった。issue へのコメントは行っていない。"
                   printf '%s\n' "$ISSUE" > /tmp/issue-number || fail "/tmp/issue-number を書けなかった。issue へのコメントは行っていない。"
                   : > /tmp/no-pr || fail "/tmp/no-pr を書けなかった。起票は行っていない。"
@@ -243,6 +252,7 @@ spec:
                 FILED=/workspace/filed
                 # finally の置き場は filed だけ。降りるときは filed を空にし、理由はログに出す。
                 give_up() {
+                  [ -z "${PR_COMMENT:-}" ] || rm -f "$PR_COMMENT"
                   find "$FILED" -mindepth 1 -delete 2>/dev/null || true
                   printf '起票は片付かなかった: %s\n' "$1" >&2; sync; exit 0
                 }
@@ -254,6 +264,17 @@ spec:
                 # report.md に紛れ込ませないため）。
                 GH_RO_KEY=$(cat /github-token/ro 2>/dev/null || true)
                 rm -f /github-token/ro
+                # 止まった理由は claude を起動する前に root のシェル変数へ取り込む。起動後の /tmp には
+                # agent が symlink を置けるので、ファイルは読み直さない。
+                STOP_REASON=
+                if [ -f /tmp/stop-reason.md ] && [ ! -L /tmp/stop-reason.md ]; then
+                  STOP_REASON=$(cat /tmp/stop-reason.md) || STOP_REASON=
+                fi
+                stop_section() {
+                  if [ -n "$STOP_REASON" ]; then
+                    printf '\n## 止まった理由\n\n%s\n' "$STOP_REASON"
+                  fi
+                }
                 ENDING="終端: ${FLOW_ENDING:-不明}／終端のフェーズ: ${FLOW_ENDING_PHASE:-不明}／そこでの結論: ${FLOW_ENDING_OUTCOME:-なし}"
                 # 宣言ディレクトリは prepare が敷く。降りた先から書けるように所有者を渡す。
                 for d in /workspace/*/; do chown 65533:65533 "$d" 2>/dev/null || true; done
@@ -263,10 +284,7 @@ spec:
                   [ -n "${MCP_CLIENT_KEY:-}" ] || give_up "issue にコメントする鍵（MCP のクライアント鍵）が空。PR が作られる前に終わった理由は issue に残っていない。"
                   REPO=$(cat /tmp/repo); ISSUE=$(cat /tmp/issue-number)
                   { printf 'implement flow は PR を作る前に終わった（%s）。\n' "$ENDING"
-                    if [ -s /tmp/stop-reason.md ]; then
-                      printf '\n## 止まった理由\n\n'
-                      cat /tmp/stop-reason.md
-                    fi
+                    stop_section
                   } > /tmp/issue-comment.md \
                     || give_up "issue へのコメントの本文を書けなかった。PR が作られる前に終わった理由は issue に残っていない。"
                   jq -n --arg owner "${REPO%%/*}" --arg repo "${REPO#*/}" --argjson n "$ISSUE" --rawfile body /tmp/issue-comment.md \
@@ -458,8 +476,18 @@ spec:
 
                 # --- PR へのコメント（スクリプトが gh-rw で投稿する） ----------------
                 check_deadline
-                if ! bg gh_rw api -X POST \
-                     "repos/${REPO}/issues/${PR}/comments" -F body=@"$FILED/report.md" > /dev/null 2>/tmp/comment.err; then
+                # 完了まで進まなかったときは、止まった回が書いた理由も同じコメントに載せる。
+                # /tmp は agent と共有なので、書き先は mktemp で新しく作る（置かれた symlink を辿らない）。
+                PR_COMMENT=$(mktemp) && cat "$FILED/report.md" > "$PR_COMMENT" \
+                  || give_up "PR へのコメントの本文を組み立てられなかった。"
+                if [ "${FLOW_ENDING:-}" != Success ]; then
+                  stop_section >> "$PR_COMMENT" || give_up "PR へのコメントに止まった理由を足せなかった。"
+                fi
+                posted=
+                bg gh_rw api -X POST \
+                  "repos/${REPO}/issues/${PR}/comments" -F body=@"$PR_COMMENT" > /dev/null 2>/tmp/comment.err && posted=1
+                rm -f "$PR_COMMENT"
+                if [ -z "$posted" ]; then
                   give_up "PR #${PR} にコメントできなかった。起票の結果は書かれていたが PR には残っていない。$(tail -3 /tmp/comment.err)"
                 fi
                 # 完了まで進んだ PR だけ draft を外す。それ以外の終わり方では draft のまま残す。

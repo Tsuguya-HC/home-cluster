@@ -27,7 +27,7 @@ metadata:
 data:
   # renovate: datasource=git-refs depName=https://github.com/Tsuguya-HC/parts
   branch: main
-  sha: 91e69e4801d84e689bfdb7ab554b0136586cc2c9
+  sha: 49bd00575ad833f5d812a46170e87cd79daac82b
 ---
 # Claude Code は ANTHROPIC_BASE_URL を向けても api.anthropic.com へ直行する経路を持つ
 # （feature flag fetch / telemetry event logging / fast mode の可否チェック、

@@ -182,7 +182,7 @@ spec:
             requests: {cpu: 10m, memory: 64Mi}
             limits: {memory: 256Mi}
       container:
-        image: registry.infra.tgy.io/tools/claude-code:latest@sha256:47543823e8aaa9469833aafdcd66dfec205035c4d0719719d380769c77989f99
+        image: registry.infra.tgy.io/tools/claude-code:latest@sha256:2dca2d432651b266d8128f172f5c60dea4219bafe1517b5cce8c23fd5a5fdcee
         command: [sh, -c]
         workingDir: /workspace
         args:
@@ -482,7 +482,7 @@ spec:
             requests: {cpu: 10m, memory: 32Mi}
             limits: {memory: 64Mi}
       container:
-        image: registry.infra.tgy.io/tools/claude-code:latest@sha256:47543823e8aaa9469833aafdcd66dfec205035c4d0719719d380769c77989f99
+        image: registry.infra.tgy.io/tools/claude-code:latest@sha256:2dca2d432651b266d8128f172f5c60dea4219bafe1517b5cce8c23fd5a5fdcee
         command: [sh, -c]
         args:
           - |

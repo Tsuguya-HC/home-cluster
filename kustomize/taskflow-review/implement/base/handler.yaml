@@ -7,8 +7,9 @@ spec:
   runner:
     type: Job
   # 打ち切りはこれだけ（claude の回ごとには切らない）。競合を落ちるテストにする回が、
-  # 1 回ごとの打ち切りを超えた（#1081）。
-  timeout: 120m
+  # 1 回ごとの打ち切りを超えた（#1081）。この上限は claude の全ターンと前面で待つ
+  # 検証・テストの合計に掛かる。
+  timeout: 180m
   maxInfraRetries: 1
   # 判定（done / escalate）の置き場。Block スクラッチには置けない — FS がゲスト内にあるので
   # publish サイドカーから読めない（docs/kata-storage.md）。重い作業は Block、渡すものは workspace。
@@ -535,6 +536,11 @@ spec:
                   fi
                 fi
 
+                # サブエージェントとバックグラウンドの Bash は前面で走らせる。-p は裏の作業の
+                # 完了を待つ上限で打ち切り、呼んだ側は結果を受け取れないまま待ちでターンを
+                # 使い切る。前面で長いビルドや e2e を待てるよう Bash の timeout を伸ばす。
+                # claude だけが読む変数で、同じ関数を通るテスト（cargo / pnpm / e2e）には
+                # 影響しない。
                 as_agent() {
                   setpriv --reuid 65533 --regid 65533 --clear-groups --inh-caps=-all --no-new-privs -- \
                     env HOME=/tmp \
@@ -543,6 +549,9 @@ spec:
                         ANTHROPIC_API_KEY= \
                         ANTHROPIC_CUSTOM_HEADERS="$ANTHROPIC_CUSTOM_HEADERS" \
                         CLAUDE_CODE_SUBAGENT_MODEL="$LLM_ALIAS" \
+                        CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 \
+                        BASH_DEFAULT_TIMEOUT_MS=600000 \
+                        BASH_MAX_TIMEOUT_MS=1800000 \
                         CARGO_HOME=/scratch/cargo \
                         XDG_DATA_HOME=/scratch/xdg-data \
                         PNPM_HOME=/scratch/pnpm \
@@ -708,7 +717,7 @@ spec:
                   --dangerously-skip-permissions \
                   --allowedTools "Bash,Read,Write,Edit,Glob,Grep" \
                   --model "$LLM_ALIAS" \
-                  --max-turns 60 || CLAUDE_RC=$?
+                  --max-turns 120 || CLAUDE_RC=$?
                 # 終了コードを握り潰すと、モデル slug 無効・認証失敗・クレジット切れが
                 # 全部「テストが 1 行も書かれなかった」に化ける。実態を先に報告する。
                 if [ "$CLAUDE_RC" -eq 1 ] && claude_accept_turn_limit /tmp/claude-tests.log /tmp/tests-turn-note.md "テストの回" "実装は行っていない。" "テストのファイルが書きかけのまま残っている可能性がある。"; then

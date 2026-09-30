@@ -16,8 +16,8 @@
       "algorithm": "sha256"
     },
     {
-      "id": "http/dl.k8s.io/v1.36.3/bin/linux/amd64/kubectl",
-      "checksum": "EBBD080E7C2E275093B55915722043257EB24004363E20ACB3C4D71919F88336",
+      "id": "http/dl.k8s.io/v1.37.1/bin/linux/amd64/kubectl",
+      "checksum": "65691FF77EB6FA44C908B77A1082C9F092C3B9733B5CEFABEC0D1104890E21A8",
       "algorithm": "sha256"
     },
     {

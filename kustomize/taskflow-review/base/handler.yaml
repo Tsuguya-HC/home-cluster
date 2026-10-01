@@ -61,6 +61,8 @@ spec:
           - name: scripts
             configMap:
               name: review-scripts
+              # agent-shell.sh は CLAUDE_CODE_SHELL_PREFIX として直接 exec される。
+              defaultMode: 0555
           # 呼び出し元鍵。**GitHub の資格情報ではない** — gateway が installation token に
           # 付け替える。init にだけマウントする。
           - name: github-gateway-key
@@ -166,7 +168,9 @@ spec:
 
                 cd /tmp/src
                 git checkout --quiet pr
-                claude -p "/${SKILL} ${REPO} の PR #${PR}" \
+                AGENT_DATA_LIMIT=$((2 * 1024 * 1024 * 1024))
+                CLAUDE_CODE_SHELL_PREFIX=/etc/review-scripts/agent-shell.sh AGENT_DATA_LIMIT="$AGENT_DATA_LIMIT" \
+                  claude -p "/${SKILL} ${REPO} の PR #${PR}" \
                   --plugin-dir /parts \
                   --append-system-prompt-file /parts/CLAUDE.md \
                   --verbose \
@@ -248,6 +252,7 @@ spec:
               - {name: flow-workspace, mountPath: /inputs, subPath: inputs, readOnly: true}
               - {name: tmp, mountPath: /tmp}
               - {name: parts, mountPath: /parts, readOnly: true}
+              - {name: scripts, mountPath: /etc/review-scripts, readOnly: true}
             resources:
               requests:
                 cpu: 500m
@@ -255,4 +260,5 @@ spec:
               limits:
                 # Kata では limit がそのまま VM のサイズ。cpu limit を書かないと 1 vCPU になる。
                 cpu: "2"
+                # 下げるなら AGENT_DATA_LIMIT（この半分）も下げる。
                 memory: 4Gi

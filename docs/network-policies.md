@@ -89,7 +89,7 @@ All policies are CiliumNetworkPolicy (CNP) and CiliumClusterwideNetworkPolicy (C
 | Horenso (horenso) | task-dispatch-eventsource (argo) | 12002 | Task dispatch webhook |
 | Workflow pods (claude-code) | task-dispatch-eventsource (argo) | 12002 | Adjudication webhook |
 | Workflow pods (claude-code) | ArgoCD server (argocd) | 8080 | ArgoCD API access |
-| memory (memory) | qdrant (qdrant) | 6333 | Vector database |
+| memory (memory) | qdrant (qdrant) | 6333, 6334 | Vector database |
 | memory (memory) | ollama (ollama) | 11434 | LLM inference |
 | Workflow pods (claude-code) | memory (memory) | 3000 | Memory API access |
 | Collector pods (trading) | SeaweedFS filer (seaweedfs) | 8333 | Market data ingestion |

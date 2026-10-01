@@ -109,7 +109,7 @@ spec:
           # private な parts リポを gateway の ro ホスト経由で引く（#1038）。鍵は ro の
           # 呼び出し元鍵で、この init の env にだけある（agent には渡らない）。
           - name: parts
-            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:1b5e2aeaec72aae2b0d13f68efd22ac516a45804abdc6d958377f85c1543470a
+            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:5d22ced803af974a856e999b102cd72bfefe755bc2061c5231642e3dff84a36f
             command: [parts]
             args: [-s, implement-tests, -s, implement, -s, fix-tests, -s, fix, -a, fix-verifier, -c, verdict-protocol, -c, untrusted-input, -c, build-sandbox]
             env:
@@ -201,7 +201,7 @@ spec:
         # agent が知っているのは gateway の URL と alias だけ。
         containers:
           - name: agent
-            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:1b5e2aeaec72aae2b0d13f68efd22ac516a45804abdc6d958377f85c1543470a
+            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:5d22ced803af974a856e999b102cd72bfefe755bc2061c5231642e3dff84a36f
             workingDir: /workspace
             securityContext:
               # VM の中の特権。ホストには及ばない（containerd が

@@ -57,11 +57,9 @@ GH_HOST="$GW" GH_ENTERPRISE_TOKEN="$KEY" gh api "repos/${REPO}/pulls/${PR}" > /t
   || fail "PR #${PR} を取得できなかった。レビューは行っていない。"
 jq '{title, body, changed_files, additions, deletions}' < /tmp/pr-raw.json > /tmp/pr.json 2>/dev/null \
   || fail "PR #${PR} の本文を読めなかった。レビューは行っていない。"
-GH_HOST="$GW" GH_ENTERPRISE_TOKEN="$KEY" gh api "repos/${REPO}/issues/${ISSUE}" > /tmp/issue-raw.json \
-  || fail "issue #${ISSUE} を取得できなかった。レビューは行っていない。"
-jq '{title, body}' < /tmp/issue-raw.json > /tmp/issue.json 2>/dev/null \
-  || fail "issue #${ISSUE} の本文を読めなかった。レビューは行っていない。"
-rm -f /tmp/pr-raw.json /tmp/issue-raw.json
+GH_HOST="$GW" GH_ENTERPRISE_TOKEN="$KEY" sh /etc/review-scripts/issue-json.sh "$REPO" "$ISSUE" /tmp/issue.json 2>/tmp/issue-json.err \
+  || fail "issue #${ISSUE} を取得できなかった（$(cat /tmp/issue-json.err)）。レビューは行っていない。"
+rm -f /tmp/pr-raw.json /tmp/issue-json.err
 
 # 前の周回の仕分けが差し戻した内容（仕分けが前回との重複判定に、検証が採用の重さの判定に読む）。
 # fix/ は仕分けの語彙。
@@ -74,6 +72,17 @@ for f in $(printf '%s\n' /results/*/fix/report.md | sort -t/ -k3,3n); do
     || fail "前回の仕分け結果をコピーできなかった（${f}）。レビューは行っていない。"
 done
 rmdir /tmp/previous-triage 2>/dev/null || true
+
+# 実装と修正の回の報告。done/ は両方の語彙。
+mkdir -p /tmp/previous-impl \
+  || fail "/tmp/previous-impl を作れなかった。レビューは行っていない。"
+for f in $(printf '%s\n' /results/*/done/report.md | sort -t/ -k3,3n); do
+  [ -f "$f" ] || continue
+  n=${f#/results/}; n=${n%%/*}
+  cp "$f" "/tmp/previous-impl/${n}.md" \
+    || fail "実装の回の報告をコピーできなかった（${f}）。レビューは行っていない。"
+done
+rmdir /tmp/previous-impl 2>/dev/null || true
 
 # agent はここに書かれた値だけを使う（検証済み）。
 printf '%s\n' "$REPO" > /tmp/repo || fail "/tmp/repo を書けなかった。レビューは行っていない。"

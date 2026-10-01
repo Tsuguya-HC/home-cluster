@@ -150,9 +150,23 @@ spec:
 
                 GH_HOST="$GW" GH_ENTERPRISE_TOKEN="$KEY" gh api "repos/${REPO}/issues/${ISSUE}" > /tmp/issue-raw.json \
                   || fail "issue #${ISSUE} を取得できなかった。調査は行っていない。"
-                jq '{title, body, created_at}' < /tmp/issue-raw.json > /tmp/issue.json 2>/dev/null \
+                # public リポでは誰でも書けるので、リポの関係者のコメントだけ。この絞りは implement と review の
+                # 側にも同じものがある。片方だけ変えない。
+                : > /tmp/issue-comments.jsonl
+                page=1
+                while :; do
+                  GH_HOST="$GW" GH_ENTERPRISE_TOKEN="$KEY" gh api "repos/${REPO}/issues/${ISSUE}/comments?per_page=100&page=${page}" > /tmp/issue-comments-page.json \
+                    || fail "issue #${ISSUE} のコメントを取得できなかった。調査は行っていない。"
+                  jq '.[] | select(.author_association == "OWNER" or .author_association == "MEMBER" or .author_association == "COLLABORATOR") | {author: .user.login, body}' /tmp/issue-comments-page.json >> /tmp/issue-comments.jsonl \
+                    || fail "issue #${ISSUE} のコメントを絞れなかった。調査は行っていない。"
+                  n=$(jq length /tmp/issue-comments-page.json) || fail "issue #${ISSUE} のコメントの件数を数えられなかった。調査は行っていない。"
+                  [ "$n" -lt 100 ] && break
+                  [ "$page" -lt 10 ] || fail "issue #${ISSUE} のコメントが 1000 件を超えている。調査は行っていない。"
+                  page=$((page + 1))
+                done
+                jq -s --slurpfile c /tmp/issue-comments.jsonl '.[0] | {title, body, created_at, comments: $c}' /tmp/issue-raw.json > /tmp/issue.json 2>/dev/null \
                   || fail "issue #${ISSUE} の本文を読めなかった。調査は行っていない。"
-                rm -f /tmp/issue-raw.json
+                rm -f /tmp/issue-raw.json /tmp/issue-comments.jsonl /tmp/issue-comments-page.json
 
                 # agent はここに書かれた値だけを使う（検証済み）。
                 printf '%s\n' "$REPO" > /tmp/repo

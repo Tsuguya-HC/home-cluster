@@ -102,6 +102,9 @@ spec:
               items:
                 - key: taskflow-implement
                   path: key
+          - name: scripts
+            configMap:
+              name: review-scripts
         initContainers:
           # private な parts リポを gateway の ro ホスト経由で引く（#1038）。鍵は ro の
           # 呼び出し元鍵で、この init の env にだけある（agent には渡らない）。
@@ -221,6 +224,7 @@ spec:
               - {name: flow-workspace, mountPath: /inputs, subPath: inputs, readOnly: true}
               - {name: tmp, mountPath: /tmp}
               - {name: parts, mountPath: /parts, readOnly: true}
+              - {name: scripts, mountPath: /etc/review-scripts, readOnly: true}
               - {name: github-token, mountPath: /github-token}
             command: [bash, -c]
             args:
@@ -473,10 +477,8 @@ spec:
                   chown -R 65533:65533 /scratch/src
                 fi
 
-                ghgw gh api "repos/${REPO}/issues/${ISSUE}" > /tmp/issue-raw.json \
-                  || give_up "issue #${ISSUE} を取得できなかった。実装は行っていない。"
-                jq '{title, body}' < /tmp/issue-raw.json > /tmp/issue.json 2>/dev/null \
-                  || give_up "issue #${ISSUE} の本文を読めなかった。実装は行っていない。"
+                ghgw sh /etc/review-scripts/issue-json.sh "$REPO" "$ISSUE" /tmp/issue.json 2>/tmp/issue-json.err \
+                  || give_up "issue #${ISSUE} を取得できなかった（$(cat /tmp/issue-json.err)）。実装は行っていない。"
                 chmod 0644 /tmp/issue.json
 
                 # 調査の報告。located/ は調査 handler の語彙で、この flow では調査が start なので
@@ -638,9 +640,33 @@ spec:
                 fi
                 jq -n --arg r "$reason" '{decision: "block", reason: $r}'
                 HOOK
-                printf '%s\n' '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"sh /tmp/claude-stop-hook.sh"}]}]}}' > /tmp/claude-stop-settings.json \
+                # .github/workflows への書き込みは書く時点で断る。Bash 経由の書き込みはここを通らない。
+                cat > /tmp/claude-guard-hook.sh <<'HOOK' \
+                  || give_up "書き込みの確認（PreToolUse hook）を書き出せなかった。実装は行っていない。"
+                in=$(cat)
+                deny() {
+                  jq -n --arg r "$1" '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: $r}}'
+                  exit 0
+                }
+                p=$(printf '%s' "$in" | jq -r '.tool_input.file_path // .tool_input.notebook_path // empty')
+                [ -n "$p" ] || exit 0
+                case "$p" in
+                  /*) ;;
+                  *) c=$(printf '%s' "$in" | jq -r '.cwd // empty')
+                     case "$c" in
+                       /*) p="$c/$p" ;;
+                       *) deny "書き込み先のパスを解決できなかった。絶対パスで書き直すこと。" ;;
+                     esac ;;
+                esac
+                case "/$(realpath -m -- "$p")/" in
+                  */.github/workflows/*)
+                    deny ".github/workflows の下は、この flow の権限では変えられない。変えずに、skill の指示どおりに、権限が無く積めない変更として、ファイルと必要な変更を書くこと。" ;;
+                esac
+                exit 0
+                HOOK
+                printf '%s\n' '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"sh /tmp/claude-stop-hook.sh"}]}],"PreToolUse":[{"matcher":"Edit|Write|MultiEdit|NotebookEdit","hooks":[{"type":"command","command":"sh /tmp/claude-guard-hook.sh"}]}]}}' > /tmp/claude-stop-settings.json \
                   || give_up "終わる前の確認（Stop hook）の設定を書き出せなかった。実装は行っていない。"
-                chmod 0644 /tmp/claude-stop-hook.sh /tmp/claude-stop-settings.json \
+                chmod 0644 /tmp/claude-stop-hook.sh /tmp/claude-guard-hook.sh /tmp/claude-stop-settings.json \
                   || give_up "終わる前の確認（Stop hook）を用意できなかった。実装は行っていない。"
                 # gateway に繋がらない（Envoy が落ちている・CNP が閉じている）と、claude は
                 # upstream の 5xx とは違って error_status:null/"unknown" のまま延々リトライし続け、
@@ -972,6 +998,21 @@ spec:
                 git config user.name "tgy-cluster-bot[bot]"
                 git config user.email "tgy-cluster-bot[bot]@users.noreply.github.com"
                 git add -A
+                # .github/workflows の変更は、rename の旧・新どちらでも、両方のパスを外してから積む。
+                WF_DROPPED=$(git -c core.quotePath=false diff --cached --name-status -M | awk -F'\t' '
+                  { w = 0; for (i = 2; i <= NF; i++) if ($i ~ /^\.github\/workflows\//) w = 1
+                    if (w) for (i = 2; i <= NF; i++) print $i }')
+                if [ -n "$WF_DROPPED" ]; then
+                  printf '%s\n' "$WF_DROPPED" | while IFS= read -r f; do git --literal-pathspecs reset -q HEAD -- "$f" || exit 1; done \
+                    || give_up "ワークフローの変更を外せなかった。${NOT_PUSHED}"
+                  { echo
+                    echo "## 権限が無く積めなかった変更"
+                    echo
+                    echo "この flow の App は workflows 権限を持たないので、次のファイルの変更は外して積んだ。要るなら人が入れる。"
+                    echo
+                    printf '%s\n' "$WF_DROPPED" | sed 's/^/- /'
+                  } >> /tmp/red-note.md
+                fi
 
                 # 実モデルの特定と escalate の拾い上げは、PR 作成と修正モードの両方で使う。
                 # implement skill が「テストは間違っている」と判断して escalate/ に理由を
@@ -996,7 +1037,11 @@ spec:
                     || give_up "作業ツリーの HEAD が PR のブランチの先頭からずれている。直しは積んでいない。"
                 fi
                 if git -C /scratch/src diff --cached --quiet; then
-                  { echo "テストの回もその後の回も作業ツリーに差分を残さなかった。署名コミットは呼んでいない。${NOT_PUSHED}"
+                  { if [ -n "$WF_DROPPED" ]; then
+                      echo "変更は .github/workflows の下だけで、この flow の権限では積めない（$(printf '%s' "$WF_DROPPED" | tr '\n' ' ')）。署名コミットは呼んでいない。${NOT_PUSHED}"
+                    else
+                      echo "テストの回もその後の回も作業ツリーに差分を残さなかった。署名コミットは呼んでいない。${NOT_PUSHED}"
+                    fi
                     if [ -n "$ESCALATE_NOTE" ]; then
                       echo
                       echo "## エージェントが escalate に書いていたこと"
@@ -1066,6 +1111,7 @@ spec:
                 # する（中身は上で PR 本文に畳み込み済み）。rm -f report.md だけだと report.md
                 # 以外の置き土産が残ってディレクトリが空にならないので、中身ごと空にする。
                 find /workspace/escalate -mindepth 1 -delete 2>/dev/null || true
+                { echo; cat /tmp/red-note.md; echo; } >> /workspace/done/report.md
                 printf '%s\n' "$PR_URL" >> /workspace/done/report.md
                 # 後段（レビューの各フェーズと、差し戻された次の実装）が棚から PR を引く口。
                 # report.md の最終行は人向けで、形を約束しない。

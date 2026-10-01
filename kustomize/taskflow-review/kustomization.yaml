@@ -39,5 +39,7 @@ configMapGenerator:
   - name: review-scripts
     files:
       - scripts/fetch-pr.sh
+      - scripts/issue-comments.jq
+      - scripts/issue-json.sh
     options:
       disableNameSuffixHash: true

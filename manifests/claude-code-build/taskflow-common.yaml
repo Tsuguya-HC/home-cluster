@@ -11,4 +11,4 @@ metadata:
 data:
   # renovate: datasource=git-refs depName=https://github.com/Tsuguya-HC/parts
   branch: main
-  sha: 49bd00575ad833f5d812a46170e87cd79daac82b
+  sha: 1dbba88b79fcdeb153042d366c9eba66b6e7a082

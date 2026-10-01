@@ -12,7 +12,9 @@ err() { printf '%s\n' "$1" >&2; exit 1; }
 REPO=$1 ISSUE=$2 OUT=$3
 
 JQ_FILE=$(dirname "$0")/issue-comments.jq
-COMMENTS_JQ=$(cat "$JQ_FILE") && [ -n "$COMMENTS_JQ" ] || err "コメントの絞り（${JQ_FILE}）を読めなかった"
+if ! COMMENTS_JQ=$(cat "$JQ_FILE") || [ -z "$COMMENTS_JQ" ]; then
+  err "コメントの絞り（${JQ_FILE}）を読めなかった"
+fi
 
 W=$(mktemp -d) || err "作業ディレクトリを作れなかった"
 trap 'rm -rf "$W"' EXIT

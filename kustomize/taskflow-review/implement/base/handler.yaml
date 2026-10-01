@@ -105,8 +105,6 @@ spec:
           - name: scripts
             configMap:
               name: review-scripts
-              # agent-shell.sh は CLAUDE_CODE_SHELL_PREFIX として直接 exec される。
-              defaultMode: 0555
         initContainers:
           # private な parts リポを gateway の ro ホスト経由で引く（#1038）。鍵は ro の
           # 呼び出し元鍵で、この init の env にだけある（agent には渡らない）。
@@ -540,8 +538,6 @@ spec:
                   fi
                 fi
 
-                # agent コンテナの memory limit の半分。
-                AGENT_DATA_LIMIT=$((4 * 1024 * 1024 * 1024))
                 # サブエージェントとバックグラウンドの Bash は前面で走らせる。-p は裏の作業の
                 # 完了を待つ上限で打ち切り、呼んだ側は結果を受け取れないまま待ちでターンを
                 # 使い切る。前面で長いビルドや e2e を待てるよう Bash の timeout を伸ばす。
@@ -610,14 +606,13 @@ spec:
                 # REPO_TEST_BODY はここでだけ渡す。as_agent 全体に入れると claude 本体
                 # （信頼できない入力を読む）の環境にも見えてしまう。
                 run_tests() {
-                  supervise as_agent env REPO_TEST_BODY="$REPO_TEST_BODY" AGENT_DATA_LIMIT="$AGENT_DATA_LIMIT" sh /etc/review-scripts/agent-shell.sh "cd /scratch/src && $TEST_RUN" > "$1" 2>&1
+                  supervise as_agent env REPO_TEST_BODY="$REPO_TEST_BODY" sh -c "cd /scratch/src && $TEST_RUN" > "$1" 2>&1
                 }
                 # claude は作業ツリー（/scratch/src）ではなく workingDir の /workspace で
-                # 起動してしまうので、sh -c 越しに cd する。
+                # 起動してしまうので、run_tests と同じく sh -c 越しに cd する。
                 run_agent() {
                   log="$1"; shift
-                  supervise as_agent env CLAUDE_CODE_SHELL_PREFIX=/etc/review-scripts/agent-shell.sh AGENT_DATA_LIMIT="$AGENT_DATA_LIMIT" \
-                    sh -c "cd /scratch/src && exec claude \"\$@\"" claude "$@" < /dev/null > "$log" 2>&1
+                  supervise as_agent sh -c "cd /scratch/src && exec claude \"\$@\"" claude "$@" < /dev/null > "$log" 2>&1
                 }
                 # 終わる前の確認（Stop hook）。結論の置き場所（/tmp/stop-expect に並べたどれか）が空のまま、
                 # または手順を見直した宣言（PROCEDURE-CHECKED）無しに終わろうとしたら、1 回だけ戻す。
@@ -704,7 +699,7 @@ spec:
                 # NEEDS_PNPM_INSTALL で判定する（package.json 分岐でのみ立つ）— TEST_CMD の
                 # 文字列一致だと e2e を足した後の "pnpm test && bash e2e/run.sh" が外れる。
                 if [ -n "${NEEDS_PNPM_INSTALL:-}" ]; then
-                  if ! supervise as_agent env AGENT_DATA_LIMIT="$AGENT_DATA_LIMIT" sh /etc/review-scripts/agent-shell.sh "cd /scratch/src && pnpm install --frozen-lockfile" > /tmp/pnpm-install.log 2>&1; then
+                  if ! supervise as_agent sh -c "cd /scratch/src && pnpm install --frozen-lockfile" > /tmp/pnpm-install.log 2>&1; then
                     { echo "pnpm install --frozen-lockfile に失敗した。実装は行っていない。"
                       echo
                       tail -30 /tmp/pnpm-install.log
@@ -1174,5 +1169,4 @@ spec:
                 # Kata では limits がそのまま VM のサイズ。cpu を書かないと 1 vCPU になり、
                 # cargo のビルドだけで timeout する（image-build で実測済み）。
                 cpu: "4"
-                # 下げるなら AGENT_DATA_LIMIT（この半分）も下げる。
                 memory: 8Gi

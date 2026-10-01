@@ -59,8 +59,6 @@ spec:
           - name: scripts
             configMap:
               name: review-scripts
-              # agent-shell.sh は CLAUDE_CODE_SHELL_PREFIX として直接 exec される。
-              defaultMode: 0555
           # Block スクラッチ。virtiofs を通らない唯一の経路で、FS はゲスト内にある。
           # Pod と同じ寿命（消えるときに PVC ごと消える）。
           - name: scratch
@@ -208,7 +206,6 @@ spec:
               - {name: flow-workspace, mountPath: /inputs, subPath: inputs, readOnly: true}
               - {name: tmp, mountPath: /tmp}
               - {name: parts, mountPath: /parts, readOnly: true}
-              - {name: scripts, mountPath: /etc/review-scripts, readOnly: true}
             command: [bash, -c]
             args:
               - |
@@ -257,13 +254,10 @@ spec:
                 for d in /workspace/*/; do chown 65533:65533 "$d" 2>/dev/null || true; done
 
                 E2E_DATABASE_URL=
-                AGENT_DATA_LIMIT=$((4 * 1024 * 1024 * 1024))
                 as_agent() {
                   setpriv --reuid 65533 --regid 65533 --clear-groups --inh-caps=-all --no-new-privs -- \
                     env HOME=/tmp CARGO_HOME=/scratch/cargo XDG_DATA_HOME=/scratch/xdg-data \
-                        E2E_DATABASE_URL="$E2E_DATABASE_URL" \
-                        CLAUDE_CODE_SHELL_PREFIX=/etc/review-scripts/agent-shell.sh AGENT_DATA_LIMIT="$AGENT_DATA_LIMIT" \
-                        "$@"
+                        E2E_DATABASE_URL="$E2E_DATABASE_URL" "$@"
                 }
                 # setpriv が黙って降格に失敗すると、この後の再現が全部 root で走る。
                 ACTUAL_UID=$(as_agent id -u 2>&1) || true
@@ -388,5 +382,4 @@ spec:
               limits:
                 # Kata では limits がそのまま VM のサイズ。
                 cpu: "4"
-                # 下げるなら AGENT_DATA_LIMIT（この半分）も下げる。
                 memory: 8Gi

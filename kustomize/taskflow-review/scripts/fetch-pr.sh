@@ -81,6 +81,12 @@ for f in $(printf '%s\n' /results/*/done/report.md | sort -t/ -k3,3n); do
   n=${f#/results/}; n=${n%%/*}
   cp "$f" "/tmp/previous-impl/${n}.md" \
     || fail "実装の回の報告をコピーできなかった（${f}）。レビューは行っていない。"
+  # テストの通らない変更行の計測。handler が報告本文とは別に書く。
+  c="${f%/report.md}/coverage.md"
+  if [ -f "$c" ]; then
+    cp "$c" "/tmp/previous-impl/${n}.coverage.md" \
+      || fail "実装の回の計測をコピーできなかった（${c}）。レビューは行っていない。"
+  fi
 done
 rmdir /tmp/previous-impl 2>/dev/null || true
 

@@ -383,10 +383,12 @@ spec:
                 # cargo test が必ず Permission denied で落ちる（変更前の baseline から失敗する）。
                 # PNPM_HOME も同じ。pnpm はリポの packageManager が指す版をここへ取りに行くので、
                 # イメージの既定（root 所有）のままだと pnpm install が EACCES で落ちる。
-                mkdir -p /scratch/cargo /scratch/xdg-data /scratch/pnpm \
-                  || give_up "/scratch/cargo・/scratch/xdg-data・/scratch/pnpm の作成に失敗した。実装は行っていない。"
-                chown 65533:65533 /scratch/cargo /scratch/xdg-data /scratch/pnpm \
-                  || give_up "/scratch/cargo・/scratch/xdg-data・/scratch/pnpm の所有者変更に失敗した。実装は行っていない。"
+                # GOPATH（モジュールキャッシュ）と GOCACHE も寄せる。既定の置き場の $HOME（/tmp）は
+                # emptyDir で、Kata では virtiofs になり遅い。
+                mkdir -p /scratch/cargo /scratch/xdg-data /scratch/pnpm /scratch/go /scratch/go-cache \
+                  || give_up "/scratch 下のキャッシュ用ディレクトリの作成に失敗した。実装は行っていない。"
+                chown 65533:65533 /scratch/cargo /scratch/xdg-data /scratch/pnpm /scratch/go /scratch/go-cache \
+                  || give_up "/scratch 下のキャッシュ用ディレクトリの所有者変更に失敗した。実装は行っていない。"
                 # 宣言ディレクトリは prepare が敷く。この Pod は root で起動して作業だけ
                 # 65533 に降りるので、降りた先から書けるように所有者を渡しておく
                 # （/workspace 直下は 0555 のままで、新しいディレクトリは作れない）。
@@ -541,7 +543,7 @@ spec:
                 # サブエージェントとバックグラウンドの Bash は前面で走らせる。-p は裏の作業の
                 # 完了を待つ上限で打ち切り、呼んだ側は結果を受け取れないまま待ちでターンを
                 # 使い切る。前面で長いビルドや e2e を待てるよう Bash の timeout を伸ばす。
-                # claude だけが読む変数で、同じ関数を通るテスト（cargo / pnpm / e2e）には
+                # claude だけが読む変数で、同じ関数を通るテスト（cargo / pnpm / go / e2e）には
                 # 影響しない。
                 as_agent() {
                   setpriv --reuid 65533 --regid 65533 --clear-groups --inh-caps=-all --no-new-privs -- \
@@ -557,6 +559,8 @@ spec:
                         CARGO_HOME=/scratch/cargo \
                         XDG_DATA_HOME=/scratch/xdg-data \
                         PNPM_HOME=/scratch/pnpm \
+                        GOPATH=/scratch/go \
+                        GOCACHE=/scratch/go-cache \
                         E2E_DATABASE_URL="$E2E_DATABASE_URL" \
                         "$@"
                 }
@@ -1157,8 +1161,10 @@ spec:
               # 上流を替えてもこの Pod は変わらない。
               - name: LLM_ALIAS
                 value: implement
+              # direct を付けない。proxy に無いモジュールを VCS から直接取りに行くと、
+              # 許可していない宛先でハングする。proxy で取れなければその場で失敗させる。
               - name: GOPROXY
-                value: "off"
+                value: https://proxy.golang.org
               - name: GOTOOLCHAIN
                 value: local
             resources:

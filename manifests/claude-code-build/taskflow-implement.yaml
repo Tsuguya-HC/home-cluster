@@ -57,8 +57,8 @@ spec:
     # 対向の ingress は manifests/llm-gateway/netpol.yaml 側が claude-code-build を含む。
     # 10080 は LLM（#942）、10443 は GitHub（#1038）。どちらも llm-gateway namespace の
     # Envoy で、この 1 本が両方に当たる（manifests/claude-code/netpol.yaml と同じ形）。
-    # **github.com / api.github.com は書かない** — この Pod は GitHub の資格情報を持たず、
-    # gateway を通さない GitHub 呼び出しは設定の取り違えなので、緑で通さず drop させる。
+    # **api.github.com は書かない** — この Pod は GitHub の資格情報を持たず、gateway を
+    # 通さない API 呼び出しは設定の取り違えなので、緑で通さず drop させる。
     - toEndpoints:
         - matchLabels:
             app.kubernetes.io/managed-by: envoy-gateway
@@ -76,6 +76,11 @@ spec:
         - matchName: "index.crates.io"
         - matchName: "static.crates.io"
         - matchName: "registry.npmjs.org"
+        - matchName: "proxy.golang.org"
+        - matchName: "sum.golang.org"
+        # Releases の配布物の入口。実体は *.githubusercontent.com へのリダイレクト。
+        # 資格情報が無いので、届くのは公開リポの読み取りだけ。
+        - matchName: "github.com"
       toPorts:
         - ports:
             - port: "443"

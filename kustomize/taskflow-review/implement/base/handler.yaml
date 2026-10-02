@@ -230,6 +230,7 @@ spec:
             args:
               - |
                 set -eu
+                JOB_START=$(date +%s)
                 ESCALATE=/workspace/escalate
                 # done と escalate の両方が非空だと判定不能（NoAnswer）になる。implement skill が
                 # 自分で done/report.md を書いた後にこの handler が escalate に倒れることがあるので、
@@ -540,6 +541,16 @@ spec:
                   fi
                 fi
 
+                # 計測スクリプトはデフォルトブランチの版だけを回す。作業ツリーの版を回すと、
+                # エージェントが書き換えて計測を素通りできる。
+                # 無いリポでは計測しない（行の差し戻しも PR への記載も無い）。
+                DIFFCOV_BODY=
+                if git -C /scratch/src cat-file -e "${BASE_SHA}:scripts/diff-coverage.sh" 2>/dev/null; then
+                  DIFFCOV_BODY=$(git -C /scratch/src show "${BASE_SHA}:scripts/diff-coverage.sh") \
+                    || give_up "scripts/diff-coverage.sh を読めなかった。実装は行っていない。"
+                  [ -n "$DIFFCOV_BODY" ] || give_up "scripts/diff-coverage.sh が空。実装は行っていない。"
+                fi
+
                 # サブエージェントとバックグラウンドの Bash は前面で走らせる。-p は裏の作業の
                 # 完了を待つ上限で打ち切り、呼んだ側は結果を受け取れないまま待ちでターンを
                 # 使い切る。前面で長いビルドや e2e を待てるよう Bash の timeout を伸ばす。
@@ -611,6 +622,18 @@ spec:
                 # （信頼できない入力を読む）の環境にも見えてしまう。
                 run_tests() {
                   supervise as_agent env REPO_TEST_BODY="$REPO_TEST_BODY" sh -c "cd /scratch/src && $TEST_RUN" > "$1" 2>&1
+                }
+                # 起点は、実装の回はデフォルトブランチとの分岐点以降（BASE_SHA）、修正の回は
+                # この回の直しの前の PR の先頭以降（FIX_BASE_SHA）。修正の回に PR 全体を測ると、
+                # 直す範囲の外の行（前の回が理由を付けて残した行）まで差し戻すことになる。
+                # 終了コードは 0 行なし / 1 行あり / それ以外は計測の失敗（timeout の 124 を含む）。
+                # 計測は gateway を使わないので、その資格情報は渡さない。
+                run_diff_coverage() {
+                  DIFFCOV_RC=0
+                  supervise as_agent env -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_CUSTOM_HEADERS -u ANTHROPIC_BASE_URL \
+                    DIFFCOV_BODY="$DIFFCOV_BODY" \
+                    timeout 1800 sh -c "cd /scratch/src && bash -c \"\$DIFFCOV_BODY\" scripts/diff-coverage.sh ${FIX_BASE_SHA:-$BASE_SHA}" \
+                    > /tmp/diffcov.txt 2> /tmp/diffcov.err || DIFFCOV_RC=$?
                 }
                 # claude は作業ツリー（/scratch/src）ではなく workingDir の /workspace で
                 # 起動してしまうので、run_tests と同じく sh -c 越しに cd する。
@@ -925,13 +948,55 @@ spec:
                 # claude 自体の失敗（exit が 0 以外）はやり直しても直らないので、そのまま降りる。
                 IMPL_ATTEMPTS=3
                 attempt=1
+                # 緑の後にテストの通らない変更行が残れば、その一覧を渡して同じ回をやり直させる。
+                # 一覧が前と変わらなければ（残りはテストで通せないと判断された）やり直さない。
+                # 上限を超えて残った行も打ち切らず、PR に載せてレビューと仕分けに渡す。
+                COVER_ATTEMPTS=2
+                cover_attempt=0
+                # 一覧を渡す前に緑の状態（作業ツリー・報告・計測結果）を控える。渡した回が赤のまま
+                # 終わるとき、緑だった実装を捨てずにここへ戻す。
+                GREEN_TREE=
+                GREEN_RESTORED=
+                GREEN_SKIPPED=
+                TIME_OVER=
+                RED_LATE=
+                COVER_RED=
+                # 一覧を渡す差し戻しは、スクリプトの開始からの経過がこの秒数を越えたら始めない。
+                # 赤のままこの秒数を越えたら直さず緑へ戻す。どちらも Job の timeout より前に残す。
+                COVER_START_LIMIT=6000
+                RESTORE_AFTER=7800
+                restore_green() {
+                  [ -s /tmp/green-report.md ] || return 1
+                  cp /workspace/escalate/report.md /tmp/restored-escalate.md 2>/dev/null || : > /tmp/restored-escalate.md
+                  git -C /scratch/src read-tree --reset -u "$GREEN_TREE" \
+                    && git -C /scratch/src clean -fdq \
+                    && chown -R 65533:65533 /scratch/src \
+                    && find /workspace/done -mindepth 1 -delete \
+                    && cp /tmp/green-report.md /workspace/done/report.md \
+                    && find /workspace/escalate -mindepth 1 -delete \
+                    && rm -f /tmp/impl-turn-note.md \
+                    && cp /tmp/diffcov-green.txt /tmp/diffcov.txt \
+                    && DIFFCOV_RC=$DIFFCOV_RC_GREEN
+                }
+                # 計測の結果は報告本文とは別のファイル（done/coverage.md）で次の周回に渡す。報告本文は
+                # エージェントが書くので、同じ見出しの節や閉じないフェンスで計測の節を偽れる。
+                # エージェントが同名のファイルを置いていても、ここで消してから書く。
+                append_red_note() {
+                  rm -f /workspace/done/coverage.md
+                  if [ -s /tmp/coverage.md ]; then
+                    cp /tmp/coverage.md /workspace/done/coverage.md
+                  fi
+                  { echo; cat /tmp/red-note.md; echo; } >> /workspace/done/report.md
+                }
+                KEPT_REASONS=
+                : > /tmp/uncovered.prev
                 prompt="$IMPL_PROMPT"
                 while :; do
                   CLAUDE_RC=0
                   # Agent は修正フェーズだけに要る（直した後に検証役のサブエージェントを呼ぶ）。
                   # 実装（/implement）は使わず、信頼できない入力（issue 本文）を読む回でもある。
                   printf '%s\n' /workspace/done/report.md /workspace/escalate/report.md > /tmp/stop-expect
-                  run_agent "/tmp/claude-implement-${attempt}.log" \
+                  run_agent "/tmp/claude-implement-${attempt}-${cover_attempt}.log" \
                     --settings /tmp/claude-stop-settings.json \
                     -p "$prompt" \
                     --plugin-dir /parts \
@@ -942,7 +1007,7 @@ spec:
                     --model "$LLM_ALIAS" \
                     --max-turns 120 || CLAUDE_RC=$?
                   # 実モデルの特定（後段）はこのファイルを読む。
-                  cp "/tmp/claude-implement-${attempt}.log" /tmp/claude-implement.log || true
+                  cp "/tmp/claude-implement-${attempt}-${cover_attempt}.log" /tmp/claude-implement.log || true
                   # done の報告があればそこへ、escalate だけなら done/ を作らない（NoAnswer になる）ので一時ファイルへ。
                   if [ -s /workspace/done/report.md ]; then TURN_NOTE=/workspace/done/report.md; else TURN_NOTE=/tmp/impl-turn-note.md; fi
                   if [ "$CLAUDE_RC" -eq 1 ] && claude_accept_turn_limit /tmp/claude-implement.log "$TURN_NOTE" "実装の回" "${NOT_PUSHED}" "修正の回では検証役の結果の反映が済んでいない可能性がある。"; then
@@ -961,7 +1026,64 @@ spec:
 
                   # --- 5. 緑の確認 ------------------------------------------------
                   if run_tests /tmp/green.log; then
-                    break
+                    COVER_RED=
+                    [ -n "$DIFFCOV_BODY" ] || break
+                    run_diff_coverage
+                    [ "$DIFFCOV_RC" -eq 1 ] && grep -q "$(printf '\t')untested$" /tmp/diffcov.txt || break
+                    # 上限でも、赤を挟んで理由を控えている間は 1 回だけ渡し直す（赤を直した回は一覧を
+                    # 受け取っていないので、そのままでは理由の無い報告で終わる）。
+                    [ "$cover_attempt" -lt "$COVER_ATTEMPTS" ] || [ -n "$KEPT_REASONS" ] || break
+                    if [ $(( $(date +%s) - JOB_START )) -gt "$COVER_START_LIMIT" ]; then TIME_OVER=1; break; fi
+                    grep "$(printf '\t')untested$" /tmp/diffcov.txt > /tmp/uncovered.md && chmod 0644 /tmp/uncovered.md \
+                      || give_up "テストの通らない変更行を次の回に渡せなかった。${NOT_PUSHED}"
+                    cmp -s /tmp/uncovered.md /tmp/uncovered.prev && break
+                    cp /tmp/uncovered.md /tmp/uncovered.prev
+                    # 渡した回が赤で終わったら戻す先。agent の権限で、別の index に積んで tree を取る
+                    # （root で書くと .git に root 所有のファイルが残り、agent が書けなくなる。
+                    # 本物の index にステージすると、検証役が git diff で見る直しが消える）。
+                    NEW_TREE=$(as_agent sh -c 'cd /scratch/src && cp .git/index /tmp/green.index && GIT_INDEX_FILE=/tmp/green.index git add -A && GIT_INDEX_FILE=/tmp/green.index git write-tree') \
+                      || { GREEN_SKIPPED=1; break; }
+                    GREEN_TREE=$NEW_TREE
+                    # 赤を挟んで理由を控えている間は、理由のある控えの報告を緑の報告にする。
+                    if [ -n "$KEPT_REASONS" ] && [ -s /tmp/previous-report.md ]; then
+                      cp /tmp/previous-report.md /tmp/green-report.md
+                    else
+                      cp /workspace/done/report.md /tmp/green-report.md 2>/dev/null || : > /tmp/green-report.md
+                    fi
+                    cp /tmp/diffcov.txt /tmp/diffcov-green.txt
+                    DIFFCOV_RC_GREEN=$DIFFCOV_RC
+                    # 前の回の報告は、テストで通せないと書いた理由を次の回が引き継げるよう /tmp に移す。
+                    # done は空にする — 残すと Stop hook が結論を置いたとみなし、書き直さずに終われる。
+                    # 赤を挟んで控えた報告（理由を書いた回のもの）は、赤を直しただけの回の報告で上書きしない。
+                    if [ -n "$KEPT_REASONS" ]; then
+                      KEPT_REASONS=
+                    else
+                      cp /workspace/done/report.md /tmp/previous-report.md 2>/dev/null && chmod 0644 /tmp/previous-report.md \
+                        || rm -f /tmp/previous-report.md
+                    fi
+                    find /workspace/done -mindepth 1 -delete 2>/dev/null || true
+                    # 前の回の escalate も控えへ移す。残すと、次の回が書き直した報告の横に古い主張が並ぶ。
+                    if [ -s /workspace/escalate/report.md ]; then
+                      { echo; echo "## 前の回が escalate に書いていたこと"; echo; cat /workspace/escalate/report.md; } >> /tmp/previous-report.md
+                      chmod 0644 /tmp/previous-report.md
+                    fi
+                    find /workspace/escalate -mindepth 1 -delete 2>/dev/null || true
+                    prev_note=
+                    if [ -f /tmp/previous-report.md ]; then prev_note="前の回の報告は /tmp/previous-report.md にある。"; fi
+                    prompt="${IMPL_PROMPT}。テストは通ったが、この回の変更行のうちどのテストも通らない行が /tmp/uncovered.md にある。${prev_note}作業ツリーには前の回の変更が残っている"
+                    cover_attempt=$((cover_attempt + 1))
+                    continue
+                  fi
+                  # 緑だった実装は、一覧を渡した回の赤で捨てない。直す回が尽きた・escalate された・
+                  # 時間が尽きたときは、渡す前の緑に戻して終える。戻せなければ従来どおり降りる。
+                  if [ -n "$GREEN_TREE" ]; then
+                    RED_LATE=
+                    if [ $(( $(date +%s) - JOB_START )) -gt "$RESTORE_AFTER" ]; then RED_LATE=1; fi
+                    if { [ -s /workspace/escalate/report.md ] || [ "$attempt" -ge "$IMPL_ATTEMPTS" ] || [ -n "$RED_LATE" ]; } \
+                      && restore_green; then
+                      GREEN_RESTORED=1
+                      break
+                    fi
                   fi
                   # skill が「テストのほうが誤り」として escalate に理由を書いたなら、やり直さない。
                   if [ -s /workspace/escalate/report.md ]; then
@@ -986,11 +1108,74 @@ spec:
                   fi
                   tail -80 /tmp/green.log > /tmp/green-failure.md && chmod 0644 /tmp/green-failure.md \
                     || give_up "テストの失敗を次の回に渡せなかった。${NOT_PUSHED}"
-                  # 落ちた回が書いた done は、次の回の報告と混ざるので消す。
+                  # 落ちた回が書いた done は、次の回の報告と混ざるので消す。行の一覧も、緑に戻った後に
+                  # 測り直して渡すので消す（残すと、渡されていない回に古い一覧が見える）。
+                  # 落ちたのが一覧を渡した回なら、その報告（テストで通せない理由）は控えに残し、
+                  # 前回の一覧も忘れる — 緑に戻った後に同じ一覧をもう一度渡し、理由を書き直させる。
+                  if [ -f /tmp/uncovered.md ]; then
+                    COVER_RED=1
+                    cp /workspace/done/report.md /tmp/previous-report.md 2>/dev/null && chmod 0644 /tmp/previous-report.md \
+                      && KEPT_REASONS=1 || true
+                    : > /tmp/uncovered.prev
+                  elif [ -z "$KEPT_REASONS" ]; then
+                    rm -f /tmp/previous-report.md
+                  fi
                   find /workspace/done -mindepth 1 -delete 2>/dev/null || true
                   prompt="${IMPL_PROMPT}。${attempt} 回目の後、テストが通らなかった。失敗の出力は /tmp/green-failure.md にある。テストは書き換えず、実装を直すこと。作業ツリーには前の回の変更が残っている"
+                  # 一覧を渡した回で落ちたなら、落ちたのはその回が足したテストかもしれない。
+                  # 緑に戻るまで、赤の直しの回でも同じ。
+                  if [ -n "$COVER_RED" ]; then
+                    prev_note=
+                    if [ -f /tmp/previous-report.md ]; then prev_note="前の回の報告は /tmp/previous-report.md にある。"; fi
+                    prompt="${IMPL_PROMPT}。${attempt} 回目の後、テストが通らなかった。失敗の出力は /tmp/green-failure.md にある。テストの通らない行を渡された回がその行のために足したテストが落ちているなら、そのテストは直してよい。それより前の回のテストは書き換えない。${prev_note}作業ツリーには前の回の変更が残っている"
+                  fi
+                  rm -f /tmp/uncovered.md
                   attempt=$((attempt + 1))
                 done
+                : > /tmp/coverage.md
+                if [ -n "$DIFFCOV_BODY" ]; then
+                  { echo "## テストの通らない変更行（機械の計測）"
+                    echo
+                    case "$DIFFCOV_RC" in
+                      0) echo "無し（足した・変えた行はすべてどれかのテストが通る）" ;;
+                      1) echo "untested は単体テストで通せるのに通らない行、e2e-only は e2e でしか通らない行、no-coverage-data は計測に出てこないファイル。"
+                         echo
+                         # パスは PR が決める。``` を含んでも閉じないフェンスにする。
+                         echo '~~~~'
+                         tr -d '~' < /tmp/diffcov.txt
+                         echo '~~~~' ;;
+                      *) echo "計測に失敗した（scripts/diff-coverage.sh の exit ${DIFFCOV_RC}）。どの行がテストに通っているかは分からない。"
+                         echo
+                         echo '~~~~'
+                         tail -20 /tmp/diffcov.err | tr -d '~'
+                         echo '~~~~' ;;
+                    esac
+                    if [ -n "$GREEN_RESTORED" ]; then
+                      echo
+                      echo "テストの通らない行の差し戻しで赤になり、差し戻し前の緑に戻した。"
+                      if [ -n "$RED_LATE" ]; then echo "時間の予算を超えたので、直さずに戻した。"; fi
+                    fi
+                    if [ -n "$TIME_OVER" ]; then
+                      echo
+                      echo "時間の予算を超えたので差し戻していない。"
+                    fi
+                    if [ -n "$GREEN_SKIPPED" ]; then
+                      echo
+                      echo "緑の状態を控えられなかったので差し戻していない。"
+                    fi
+                  } > /tmp/coverage.md
+                  { echo; cat /tmp/coverage.md
+                    # エージェントが書いた文は、機械の計測のファイル（coverage.md）には入れない。
+                    if [ -n "$GREEN_RESTORED" ] && [ -s /tmp/restored-escalate.md ]; then
+                      echo
+                      echo "差し戻しの回が escalate に書いていたこと:"
+                      echo
+                      echo '~~~~'
+                      tr -d '~' < /tmp/restored-escalate.md
+                      echo '~~~~'
+                    fi
+                  } >> /tmp/red-note.md
+                fi
                 if [ -n "$DEFER_MUTATIONS" ]; then
                   check_mutations "$NOT_PUSHED"
                   { echo; echo "## 変異を入れたときのテストの結果（緑の後）"; echo; cat /tmp/mutants.log; } >> /tmp/tests-report.md
@@ -1074,7 +1259,7 @@ spec:
                     || COMMENT_NOTE="（PR へのコメントに失敗した。直しはブランチに積んである）"
                   find /workspace/escalate -mindepth 1 -delete 2>/dev/null || true
                   # done/report.md に赤の観測を足す。
-                  { echo; cat /tmp/red-note.md; echo; } >> /workspace/done/report.md
+                  append_red_note
                   printf '%s%s\n' "$PR_URL" "$COMMENT_NOTE" >> /workspace/done/report.md
                   printf '%s\n' "$PR_URL" > /workspace/done/pr-url
                   sync
@@ -1115,7 +1300,7 @@ spec:
                 # する（中身は上で PR 本文に畳み込み済み）。rm -f report.md だけだと report.md
                 # 以外の置き土産が残ってディレクトリが空にならないので、中身ごと空にする。
                 find /workspace/escalate -mindepth 1 -delete 2>/dev/null || true
-                { echo; cat /tmp/red-note.md; echo; } >> /workspace/done/report.md
+                append_red_note
                 printf '%s\n' "$PR_URL" >> /workspace/done/report.md
                 # 後段（レビューの各フェーズと、差し戻された次の実装）が棚から PR を引く口。
                 # report.md の最終行は人向けで、形を約束しない。

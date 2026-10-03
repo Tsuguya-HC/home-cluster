@@ -806,6 +806,21 @@ spec:
                 # untestable.md があれば赤を観測せず進む。
                 UNTESTABLE=
                 if [ -s /scratch/out/untestable.md ]; then UNTESTABLE=1; fi
+                # 作業ツリーの状態を tree として控え、そこへ戻す。HEAD と本物の index は動かさない
+                # （エージェントが git diff で自分の変更を見るので）。戻すのは控えた
+                # tree なので、テストの実行が整形や生成でファイルを書き換えていても元に戻る。
+                # agent の権限で書く（root で書くと .git に root 所有のファイルが残り、agent が書けなくなる）。
+                snapshot_tree() {
+                  as_agent sh -c 'cd /scratch/src && idx=$(mktemp) && cp .git/index "$idx" && GIT_INDEX_FILE="$idx" git add -A && GIT_INDEX_FILE="$idx" git write-tree; rc=$?; rm -f "$idx"; exit $rc'
+                }
+                # ignore されたファイル（ビルドの成果物）は消さない。index は HEAD に戻し、変更は
+                # ステージしていない状態にする。
+                restore_tree() {
+                  as_agent git -C /scratch/src read-tree --reset -u "$1" \
+                    && as_agent git -C /scratch/src clean -fdq \
+                    && as_agent git -C /scratch/src reset -q \
+                    && [ "$(snapshot_tree)" = "$1" ]
+                }
                 # 当てる前に触るパスを見る。テストのファイルを書き換える変異は、テストごと
                 # 差し替えて赤を作れてしまい、捕まえたことにならない。Rust の同一ファイル内
                 # テスト（#[cfg(test)]）はパスでは見分けられない — 残る限界。
@@ -834,9 +849,10 @@ spec:
                   : > /tmp/mutants.log
                   : > /tmp/mutants-caught.txt
                   : > /tmp/mutants-skipped.txt
+                  MUT_BASE=$(snapshot_tree) \
+                    || give_up "変異を当てる前の作業ツリーを控えられなかった。$1"
                   for m in /scratch/out/mutations/*.patch; do
                     check_mutation_shape "$m" "$1"
-                    before=$(as_agent git -C /scratch/src diff | sha256sum)
                     # 実装が同じ箇所を変えると当たらない。git apply は当たらなければ何も変えないので、
                     # 緑まで通した成果を捨てずに記録して先へ進む。実装前は打ち切る。
                     if ! as_agent git -C /scratch/src apply "$m"; then
@@ -847,7 +863,7 @@ spec:
                       continue
                     fi
                     if run_tests /tmp/mutant.log; then
-                      as_agent git -C /scratch/src apply -R "$m" || true
+                      restore_tree "$MUT_BASE" || true
                       { echo "変異 $(basename "$m") を入れてもテストが通る。テストが壊し方を捕まえていない。$1"
                         echo
                         cat "$m"
@@ -856,10 +872,8 @@ spec:
                     fi
                     basename "$m" >> /tmp/mutants-caught.txt
                     { echo "## $(basename "$m")"; tail -20 /tmp/mutant.log; echo; } >> /tmp/mutants.log
-                    as_agent git -C /scratch/src apply -R "$m" \
-                      || give_up "変異 $(basename "$m") を外せなかった。作業ツリーが壊れている。$1"
-                    [ "$(as_agent git -C /scratch/src diff | sha256sum)" = "$before" ] \
-                      || give_up "変異 $(basename "$m") を外した後、作業ツリーが元に戻らなかった。$1"
+                    restore_tree "$MUT_BASE" \
+                      || give_up "変異 $(basename "$m") を当てる前の作業ツリーに戻せなかった。$1"
                   done
                 }
                 write_mutation_note() {
@@ -968,9 +982,7 @@ spec:
                 restore_green() {
                   [ -s /tmp/green-report.md ] || return 1
                   cp /workspace/escalate/report.md /tmp/restored-escalate.md 2>/dev/null || : > /tmp/restored-escalate.md
-                  git -C /scratch/src read-tree --reset -u "$GREEN_TREE" \
-                    && git -C /scratch/src clean -fdq \
-                    && chown -R 65533:65533 /scratch/src \
+                  restore_tree "$GREEN_TREE" \
                     && find /workspace/done -mindepth 1 -delete \
                     && cp /tmp/green-report.md /workspace/done/report.md \
                     && find /workspace/escalate -mindepth 1 -delete \
@@ -1040,10 +1052,8 @@ spec:
                       || give_up "テストの通らない変更行を次の回に渡せなかった。${NOT_PUSHED}"
                     cmp -s /tmp/uncovered.md /tmp/uncovered.prev && break
                     cp /tmp/uncovered.md /tmp/uncovered.prev
-                    # 渡した回が赤で終わったら戻す先。agent の権限で、別の index に積んで tree を取る
-                    # （root で書くと .git に root 所有のファイルが残り、agent が書けなくなる。
-                    # 本物の index にステージすると、検証役が git diff で見る直しが消える）。
-                    NEW_TREE=$(as_agent sh -c 'cd /scratch/src && cp .git/index /tmp/green.index && GIT_INDEX_FILE=/tmp/green.index git add -A && GIT_INDEX_FILE=/tmp/green.index git write-tree') \
+                    # 渡した回が赤で終わったら戻す先。
+                    NEW_TREE=$(snapshot_tree) \
                       || { GREEN_SKIPPED=1; break; }
                     GREEN_TREE=$NEW_TREE
                     # 赤を挟んで理由を控えている間は、理由のある控えの報告を緑の報告にする。

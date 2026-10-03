@@ -246,8 +246,9 @@ spec:
                 cp -a /tmp/src /scratch/src \
                   || give_up "作業ツリーを Block スクラッチに写せなかった。判定は行っていない。"
                 # CARGO_HOME・pnpm store も Block スクラッチに寄せる。イメージの既定の
-                # CARGO_HOME は root 所有で 65533 から書けない。
-                mkdir -p /scratch/cargo /scratch/xdg-data \
+                # CARGO_HOME は root 所有で 65533 から書けない。GOPATH と GOCACHE も寄せる。既定の
+                # 置き場の $HOME（/tmp）は emptyDir で、Kata では virtiofs になり遅い。
+                mkdir -p /scratch/cargo /scratch/xdg-data /scratch/go /scratch/go-cache \
                   && chown -R 65533:65533 /scratch \
                   || give_up "Block スクラッチの準備（所有者の変更）に失敗した。判定は行っていない。"
                 # 宣言ディレクトリは prepare が敷く。降りた先から書けるように所有者を渡す。
@@ -257,6 +258,7 @@ spec:
                 as_agent() {
                   setpriv --reuid 65533 --regid 65533 --clear-groups --inh-caps=-all --no-new-privs -- \
                     env HOME=/tmp CARGO_HOME=/scratch/cargo XDG_DATA_HOME=/scratch/xdg-data \
+                        GOPATH=/scratch/go GOCACHE=/scratch/go-cache \
                         E2E_DATABASE_URL="$E2E_DATABASE_URL" "$@"
                 }
                 # setpriv が黙って降格に失敗すると、この後の再現が全部 root で走る。
@@ -370,9 +372,10 @@ spec:
               # サブエージェントは親のモデルを継がない。固定しないと gateway にルートが無い。
               - name: CLAUDE_CODE_SUBAGENT_MODEL
                 value: review
-              # go のモジュール取得先は開けていない。取りに行くと失敗ではなくハングする。
+              # direct を付けない。proxy に無いモジュールを VCS から直接取りに行くと、
+              # 許可していない宛先でハングする。proxy で取れなければその場で失敗させる。
               - name: GOPROXY
-                value: "off"
+                value: https://proxy.golang.org
               - name: GOTOOLCHAIN
                 value: local
             resources:

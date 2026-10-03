@@ -641,31 +641,15 @@ spec:
                   log="$1"; shift
                   supervise as_agent sh -c "cd /scratch/src && exec claude \"\$@\"" claude "$@" < /dev/null > "$log" 2>&1
                 }
-                # 終わる前の確認（Stop hook）。結論の置き場所（/tmp/stop-expect に並べたどれか）が空のまま、
-                # または手順を見直した宣言（PROCEDURE-CHECKED）無しに終わろうとしたら、1 回だけ戻す。
-                # 2 回目（stop_hook_active）は通す。止め続けると回が終わらない。
+                # 終わる前の確認（Stop hook）。結論の置き場所（/tmp/stop-expect に並べたどれか）が空のまま
+                # 終わろうとしたら、1 回だけ戻す。2 回目（stop_hook_active）は通す。止め続けると回が終わらない。
                 # root が書き、agent（65533）からは書き換えられない。
                 cat > /tmp/claude-stop-hook.sh <<'HOOK' \
                   || give_up "終わる前の確認（Stop hook）を書き出せなかった。実装は行っていない。"
                 in=$(cat)
                 [ "$(printf '%s' "$in" | jq -r '.stop_hook_active // false')" = true ] && exit 0
-                wrote=
-                while IFS= read -r f; do [ -s "$f" ] && wrote=1; done < /tmp/stop-expect
-                tp=$(printf '%s' "$in" | jq -r '.transcript_path // empty')
-                last=
-                if [ -n "$tp" ] && [ -r "$tp" ]; then
-                  last=$(jq -rs '[.[] | select(.type == "assistant") | .message.content[]? | select(.type == "text") | .text] | last // ""' "$tp" 2>/dev/null)
-                fi
-                case "$last" in *PROCEDURE-CHECKED*) declared=1 ;; *) declared= ;; esac
-                [ -n "$wrote" ] && [ -n "$declared" ] && exit 0
-                reason="まだ終わらないこと。"
-                if [ -z "$wrote" ]; then
-                  reason="$reason 結論をまだ置いていない。skill の手順に戻り、置くべき場所（$(tr '\n' ' ' < /tmp/stop-expect)）のどれかに書いてから終わること。テストを回していなければ回すこと。"
-                fi
-                if [ -z "$declared" ]; then
-                  reason="$reason 終わる前に skill の手順を 1 つずつ見直し、やり残しが無ければ最後の発言に PROCEDURE-CHECKED と書いてから終わること。"
-                fi
-                jq -n --arg r "$reason" '{decision: "block", reason: $r}'
+                while IFS= read -r f; do [ -s "$f" ] && exit 0; done < /tmp/stop-expect
+                jq -n --arg r "まだ終わらないこと。結論をまだ置いていない。置くべき場所（$(tr '\n' ' ' < /tmp/stop-expect)）のどれかに書いてから終わること。" '{decision: "block", reason: $r}'
                 HOOK
                 # .github/workflows への書き込みは書く時点で断る。Bash 経由の書き込みはここを通らない。
                 cat > /tmp/claude-guard-hook.sh <<'HOOK' \

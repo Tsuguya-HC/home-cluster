@@ -72,7 +72,7 @@ spec:
                   path: key
         initContainers:
           - name: parts
-            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:3cfeb95e96b05acf7096cbe08b9f168f6a2fb57fcfca6ed6ff2db87ef8aecc08
+            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:16578b8dea85c40e4039d3ef9fd9e40565b74ab516ed0ba712a6d600bb8e9410
             command: [sh, -c]
             args:
               - |
@@ -112,7 +112,7 @@ spec:
               # 伝わらない。
               limits: {cpu: 500m, memory: 256Mi}
           - name: fetch
-            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:3cfeb95e96b05acf7096cbe08b9f168f6a2fb57fcfca6ed6ff2db87ef8aecc08
+            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:16578b8dea85c40e4039d3ef9fd9e40565b74ab516ed0ba712a6d600bb8e9410
             command: [sh, /etc/review-scripts/fetch-pr.sh]
             env:
               - name: HOME
@@ -132,7 +132,7 @@ spec:
               limits: {cpu: "1", memory: 512Mi}
         containers:
           - name: agent
-            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:3cfeb95e96b05acf7096cbe08b9f168f6a2fb57fcfca6ed6ff2db87ef8aecc08
+            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:16578b8dea85c40e4039d3ef9fd9e40565b74ab516ed0ba712a6d600bb8e9410
             workingDir: /workspace
             command: [sh, -c]
             args:

@@ -228,7 +228,7 @@ spec:
               emptyDir: {}
           containers:
             - name: rotate
-              image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:9e1dd7b0bf77791b3b4769b46fe93a74da5c350fe0d25d670791e5c84f69e712
+              image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:c7880af8bbff8d5ae87387d19da26eacd4221d9faf215f545c173f0cadd6f49f
               command: [/script/rotate.sh]
               securityContext:
                 allowPrivilegeEscalation: false
@@ -316,7 +316,7 @@ spec:
           emptyDir: {}
       containers:
         - name: rotate
-          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:9e1dd7b0bf77791b3b4769b46fe93a74da5c350fe0d25d670791e5c84f69e712
+          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:c7880af8bbff8d5ae87387d19da26eacd4221d9faf215f545c173f0cadd6f49f
           command: [/script/rotate.sh]
           env:
             - name: MODE

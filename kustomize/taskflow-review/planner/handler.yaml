@@ -47,7 +47,7 @@ spec:
                   path: key
         containers:
           - name: planner
-            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:5d22ced803af974a856e999b102cd72bfefe755bc2061c5231642e3dff84a36f
+            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:3cfeb95e96b05acf7096cbe08b9f168f6a2fb57fcfca6ed6ff2db87ef8aecc08
             workingDir: /workspace
             command: [python3, /etc/review-planner/plan.py]
             env:

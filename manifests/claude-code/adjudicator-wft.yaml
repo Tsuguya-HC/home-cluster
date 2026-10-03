@@ -53,7 +53,7 @@ spec:
         runAsGroup: 65532
         fsGroup: 65532
       container:
-        image: registry.infra.tgy.io/tools/claude-code:latest@sha256:5d22ced803af974a856e999b102cd72bfefe755bc2061c5231642e3dff84a36f
+        image: registry.infra.tgy.io/tools/claude-code:latest@sha256:3cfeb95e96b05acf7096cbe08b9f168f6a2fb57fcfca6ed6ff2db87ef8aecc08
         command: [sh, -c]
         args:
           - |
@@ -194,7 +194,7 @@ spec:
         runAsGroup: 65532
         fsGroup: 65532
       container:
-        image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:9e1dd7b0bf77791b3b4769b46fe93a74da5c350fe0d25d670791e5c84f69e712
+        image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:c7880af8bbff8d5ae87387d19da26eacd4221d9faf215f545c173f0cadd6f49f
         command: [sh, -c]
         args:
           - |
@@ -258,7 +258,7 @@ spec:
         runAsUser: 65532
         runAsNonRoot: true
       container:
-        image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:9e1dd7b0bf77791b3b4769b46fe93a74da5c350fe0d25d670791e5c84f69e712
+        image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:c7880af8bbff8d5ae87387d19da26eacd4221d9faf215f545c173f0cadd6f49f
         command: [sh, -c]
         args:
           - |

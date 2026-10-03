@@ -78,6 +78,8 @@ spec:
         - matchName: "registry.npmjs.org"
         - matchName: "proxy.golang.org"
         - matchName: "sum.golang.org"
+        # Go toolchain の配布物の取得先。
+        - matchName: "storage.googleapis.com"
         # Releases の配布物の入口。実体は *.githubusercontent.com へのリダイレクト。
         # 資格情報が無いので、届くのは公開リポの読み取りだけ。
         - matchName: "github.com"

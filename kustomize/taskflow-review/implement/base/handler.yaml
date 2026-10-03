@@ -1005,7 +1005,9 @@ spec:
                     --dangerously-skip-permissions \
                     --allowedTools "Bash,Read,Write,Edit,Glob,Grep${FIX:+,Agent}" \
                     --model "$LLM_ALIAS" \
-                    --max-turns 120 || CLAUDE_RC=$?
+                    --max-turns 200 || CLAUDE_RC=$?
+                  # ターン数は時間の上限ではない（それは Job の timeout が持つ）。ビルドとテストの往復が
+                  # 多いリポでも、1 つの要求の実装が収まる値にする。
                   # 実モデルの特定（後段）はこのファイルを読む。
                   cp "/tmp/claude-implement-${attempt}-${cover_attempt}.log" /tmp/claude-implement.log || true
                   # done の報告があればそこへ、escalate だけなら done/ を作らない（NoAnswer になる）ので一時ファイルへ。

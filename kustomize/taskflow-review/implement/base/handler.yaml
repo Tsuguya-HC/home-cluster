@@ -1123,13 +1123,13 @@ spec:
                     rm -f /tmp/previous-report.md
                   fi
                   find /workspace/done -mindepth 1 -delete 2>/dev/null || true
-                  prompt="${IMPL_PROMPT}。${attempt} 回目の後、テストが通らなかった。失敗の出力は /tmp/green-failure.md にある。テストは書き換えず、実装を直すこと。作業ツリーには前の回の変更が残っている"
+                  prompt="${IMPL_PROMPT}。${attempt} 回目の後、テストが通らなかった。失敗の出力は /tmp/green-failure.md にある。テストは、skill の「越えない線」が許す書き換えのほかは変えず、実装を直すこと。作業ツリーには前の回の変更が残っている"
                   # 一覧を渡した回で落ちたなら、落ちたのはその回が足したテストかもしれない。
                   # 緑に戻るまで、赤の直しの回でも同じ。
                   if [ -n "$COVER_RED" ]; then
                     prev_note=
                     if [ -f /tmp/previous-report.md ]; then prev_note="前の回の報告は /tmp/previous-report.md にある。"; fi
-                    prompt="${IMPL_PROMPT}。${attempt} 回目の後、テストが通らなかった。失敗の出力は /tmp/green-failure.md にある。テストの通らない行を渡された回がその行のために足したテストが落ちているなら、そのテストは直してよい。それより前の回のテストは書き換えない。${prev_note}作業ツリーには前の回の変更が残っている"
+                    prompt="${IMPL_PROMPT}。${attempt} 回目の後、テストが通らなかった。失敗の出力は /tmp/green-failure.md にある。テストの通らない行を渡された回がその行のために足したテストが落ちているなら、そのテストは直してよい。それより前の回のテストは、skill の「越えない線」が許す書き換えのほかは変えない。${prev_note}作業ツリーには前の回の変更が残っている"
                   fi
                   rm -f /tmp/uncovered.md
                   attempt=$((attempt + 1))

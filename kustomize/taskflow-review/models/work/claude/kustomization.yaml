@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+# 鍵は work 専用の client のものに限る。work の Pod は未レビューのコードを実行するので、他の役割と
+# 共有の鍵を持たせると、その鍵が入れる alias（Max を含む）すべてに届く。
+configMapGenerator:
+  - name: model-work
+    literals:
+      - alias=implement-claude
+      - key=taskflow-implement-claude
+      - "header=x-tf-handler: taskflow-implement-claude"
+    options:
+      disableNameSuffixHash: true
+      annotations:
+        config.kubernetes.io/local-config: "true"
+components:
+  - ../set

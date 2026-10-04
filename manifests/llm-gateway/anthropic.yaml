@@ -25,7 +25,7 @@ spec:
   # 次の Sonnet が出た日に、gateway は旧モデルを配り続ける。**沈黙して乖離する**ので、
   # モデルを上げるときはここを人が上げる。
   rules:
-    # レビュー系（pr-review / adjudicator 等）。handler は --model review で入る。
+    # レビュー系（pr-review / adjudicator 等）。WFT は --model review、taskflow-review の handler は LLM_ALIAS（既定 review）で入る。
     - matches:
         - headers:
             - type: Exact

@@ -1,0 +1,109 @@
+# issue を受けて実装し、draft PR を出す flow のひな形。flows/ の組み合わせごとに、名前に
+# nameSuffix が付いた TaskFlow と handler の一式になる。
+#
+# 入口は 調査（taskflow-investigate.yaml、#939）。症状がコードのどこで起きているかを先に
+# 確かめ、実装 handler はその報告を results の棚から読む。
+#
+# TDD を約束ではなく事実で進める。claude を 2 回呼び、その間でスクリプトがテストを走らせる:
+#
+#   1. baseline  変更前に全部通ることを確認     … 通らなければ前提が壊れている → escalate
+#   2. claude #1 テストだけ書かせる（/implement-tests）
+#   3. red       新しいテストが落ちることを確認 … 落ちなければ、赤を示せない理由（untestable.md）が無い限り escalate
+#                （今のコードで通るのが正しいテストは、claude #1 が置いた変異のパッチを
+#                当てて落ちることで赤とみなす。赤を示せないと claude #1 が理由を書いた
+#                要求は赤を観測せずに進む）
+#   4. claude #2 実装させる（/implement）
+#   5. green     全部通ることを確認             … 通らなければ → escalate
+#                （変異のパッチが落ちるテストと混ざっていたときは、ここで当てて落ちることを確認）
+#   6. PR        ref を作り、署名コミットして draft PR（完了まで進んだら finally が draft を外す）
+#
+# 3 が本体。モデルは「TDD でやった」と報告することはできても、赤を観測させることはできない。
+#
+# 投げ方:
+#   kubectl -n claude-code-build create -f - <<EOF
+#   apiVersion: flow.tgy.io/v1alpha1
+#   kind: Task
+#   metadata: {generateName: implement-, namespace: claude-code-build}
+#   spec:
+#     flow: implement   # flows/ のディレクトリ名
+#     input: {repo: Tsuguya-HC/home-rss, issue: 106}
+#   EOF
+apiVersion: flow.tgy.io/v1alpha1
+kind: TaskFlow
+metadata:
+  name: implement
+spec:
+  profile: investigate
+  start: 調査
+  workspace: {}
+  bindings:
+    # 症状が見つからない・要求が定まらないなら実装に進まず人間へ。
+    # investigator はこの一式の外にあり、nameSuffix が付かない（全組み合わせで共有）。
+    調査:
+      handler: investigator
+      next:
+        実装: located
+        Escalated: escalate
+    実装:
+      handler: implement-writer
+      next:
+        観点出し: done
+        Escalated: escalate
+    # Jev が選んだ観点と、毎回の general を起動する（#1081）。general は always に置かない —
+    # 分岐元が 1 つも書かないと always があっても NoAnswer なので（ADR-0013 決定1）、
+    # 観点出しが必ず書ける行き先として残す。
+    観点出し:
+      handler: review-planner
+      next:
+        general: general
+        failpath: failpath
+        boundary: boundary
+        runtime: runtime
+        states: states
+        precedent: precedent
+        ui: ui
+        Escalated: escalate
+      join:
+        phase: 仕分け
+        always: [documented, tests]
+    general: {handler: review-general, next: {仕分け: reviewed, Escalated: escalate}}
+    failpath: {handler: review-failpath, next: {仕分け: reviewed, Escalated: escalate}}
+    boundary: {handler: review-boundary, next: {仕分け: reviewed, Escalated: escalate}}
+    runtime: {handler: review-runtime, next: {仕分け: reviewed, Escalated: escalate}}
+    states: {handler: review-states, next: {仕分け: reviewed, Escalated: escalate}}
+    precedent: {handler: review-precedent, next: {仕分け: reviewed, Escalated: escalate}}
+    ui: {handler: review-ui, next: {仕分け: reviewed, Escalated: escalate}}
+    documented: {handler: review-documented, next: {仕分け: reviewed, Escalated: escalate}}
+    tests: {handler: review-tests, next: {仕分け: reviewed, Escalated: escalate}}
+    # 仕分けは止まらず、この PR で直さないものは起票の候補に残す。escalate は仕分けそのものが
+    # 成り立たないときだけ。
+    仕分け:
+      handler: review-triage
+      next:
+        完了: clean
+        修正: fix
+        Escalated: escalate
+    # 最新の仕分けが採用した指摘を直す。検証から戻されたときも同じ（まだ直っていない点を読む）。
+    修正:
+      handler: implement-fixer
+      next:
+        検証: done
+        Escalated: escalate
+    # 採用した指摘が直ったかだけを確かめ、新しい欠陥は探さない（周回を閉じるため）。直った
+    # ときの行き先は handler のスクリプトが仕分けの採用の重さで決める: MEDIUM 以上を直したなら
+    # rereview（もう一度レビュー）、LOW 以下だけなら verified。escalate は持たない。
+    # 周回は maxRunsPerPhase で止まる（上限に当たると RunLimitReached → Escalated）。
+    検証:
+      handler: review-verify
+      next:
+        修正: unfixed
+        観点出し: rereview
+        完了: verified
+  terminals:
+    完了: Success
+  # 起票の候補を issue にし、PR に結果を残すのは、終わり方に関係なく 1 回（差し戻しの上限や
+  # escalate で終わっても候補を捨てない）。
+  finally:
+    handler: review-file-issues
+    done: filed
+  maxRunsPerPhase: 3

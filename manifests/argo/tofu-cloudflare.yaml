@@ -119,7 +119,7 @@ spec:
             capabilities:
               drop: [ALL]
       container:
-        image: ghcr.io/opentofu/opentofu:1.12.6@sha256:22cb52f6c5bf5c72a48a8f56d993d8df3e9462b1cdfb5db7e77143c87e8d159f
+        image: ghcr.io/opentofu/opentofu:1.13.1@sha256:1df996fca13806a20d5a3d3ad54acdcf76bcb1aa4ac30b5ba169b9e4cecdbcc8
         resources:
           requests:
             cpu: 50m
@@ -268,7 +268,7 @@ spec:
             capabilities:
               drop: [ALL]
       container:
-        image: ghcr.io/opentofu/opentofu:1.12.6@sha256:22cb52f6c5bf5c72a48a8f56d993d8df3e9462b1cdfb5db7e77143c87e8d159f
+        image: ghcr.io/opentofu/opentofu:1.13.1@sha256:1df996fca13806a20d5a3d3ad54acdcf76bcb1aa4ac30b5ba169b9e4cecdbcc8
         resources:
           requests:
             cpu: 50m

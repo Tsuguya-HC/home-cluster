@@ -93,6 +93,8 @@ kind: TaskFlow
 metadata:
   name: implement
   namespace: claude-code-build
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
 spec:
   profile: investigate
   start: 調査
@@ -178,6 +180,8 @@ kind: TaskFlow
 metadata:
   name: implement-fast
   namespace: claude-code-build
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
 spec:
   profile: investigate
   start: 調査
@@ -251,6 +255,8 @@ kind: TaskFlow
 metadata:
   name: implement-claude
   namespace: claude-code-build
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
 spec:
   profile: investigate
   start: 調査

@@ -31,7 +31,7 @@ All policies are CiliumNetworkPolicy (CNP) and CiliumClusterwideNetworkPolicy (C
 | Workflow pods (claude-code) | SeaweedFS filer (seaweedfs) | 8333 | Artifact/log storage |
 | Workflow pods (rss) | SeaweedFS filer (seaweedfs) | 8333 | Artifact/log storage |
 | Workflow pods (claude-code) | Loki gateway (monitoring) | 8080 | Log query (logcli) |
-| Workflow pods (claude-code-build) | Envoy data plane (llm-gateway) | 10080 | LLM API (via alias). **Next stage; handler-side egress not implemented** |
+| Workflow pods (claude-code-build) | Envoy data plane (llm-gateway) | 10080 | LLM API (via alias); all claude-code-build handlers |
 | Workflow pods (claude-code) | Envoy data plane (llm-gateway) | 10080 | LLM API (via alias); all claude-code handlers |
 | Envoy data plane (llm-gateway) | Envoy Gateway (envoy-gateway-system) | 18000 | xDS |
 | Envoy data plane (llm-gateway, gateway `llm-gateway` only) | Tempo (monitoring) | 4318 | GenAI traces with message content (OTLP HTTP) |

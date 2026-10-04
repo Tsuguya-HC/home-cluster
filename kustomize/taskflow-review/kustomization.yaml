@@ -2,38 +2,27 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: claude-code-build
 
-# implement flow の実装とレビュー（#1081）。観点ごとの枝は base の 1 つの形をフェーズ違いで並べる。
-# 実行して判定する仕分けと検証は judge の形、実装と修正は implement の形を、それぞれフェーズ違いで
-# 並べる。flow の配線は manifests/claude-code-build の TaskFlow implement。
+# implement flow（#1081）の組み合わせ。flows/<名前> が TaskFlow <名前> と、その名前を suffix に
+# 持つ handler の一式になる。組み合わせを足すときは flows/ にディレクトリを作り、
+#   resources: [../../flow]、nameSuffix: <名前から implement を除いた部分>、
+#   components: runtime/（任意）と models/<役割>/<モデル> を役割（work / review / judge / filer）ごとに 1 つずつ
+# を書いてここに並べる。役割を省くと、その役割はひな形の alias のまま動く。
+# モデルを足すときは models/<役割>/<モデル> と、その鍵に許可した gateway の alias を足す。
 resources:
   - common.yaml
-  - planner/handler.yaml
-  - roles/general
-  - roles/documented
-  - roles/tests
-  - roles/failpath
-  - roles/boundary
-  - roles/runtime
-  - roles/states
-  - roles/precedent
-  - roles/ui
-  - judge/triage
-  - judge/verify
-  - implement/writer
-  - implement/fixer
-  - implement/writer-runc
-  - implement/fixer-runc
-  - implement/writer-claude
-  - implement/fixer-claude
-  - filer/handler.yaml
+  - flows/implement
+  - flows/implement-fast
+  - flows/implement-claude
+  - flows/implement-claude-review-muse
+  - flows/implement-fast-review-muse
 
 # TaskHandler は CRD なので、kustomize は中の ConfigMap 参照を書き換えない。
 # ハッシュを付けると参照が切れる。
 configMapGenerator:
   - name: review-planner
     files:
-      - planner/plan.py
-      - planner/roles.json
+      - flow/planner/plan.py
+      - flow/planner/roles.json
     options:
       disableNameSuffixHash: true
   - name: review-scripts

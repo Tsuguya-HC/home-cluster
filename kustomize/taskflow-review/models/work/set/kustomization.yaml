@@ -1,0 +1,20 @@
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+# 鍵・alias・名乗りは 3 つ揃えて替える — 鍵と alias の片方だけだと gateway のルートに当たらず 404、
+# 名乗りを残すとアクセスログの tf.handler が llm.client と食い違う。
+replacements:
+  - source: {kind: ConfigMap, name: model-work, fieldPath: data.alias}
+    targets:
+      - select: {kind: TaskHandler, labelSelector: taskflow-role=work}
+        fieldPaths:
+          - spec.jobTemplate.template.spec.containers.[name=agent].env.[name=LLM_ALIAS].value
+  - source: {kind: ConfigMap, name: model-work, fieldPath: data.key}
+    targets:
+      - select: {kind: TaskHandler, labelSelector: taskflow-role=work}
+        fieldPaths:
+          - spec.jobTemplate.template.spec.containers.[name=agent].env.[name=ANTHROPIC_AUTH_TOKEN].valueFrom.secretKeyRef.key
+  - source: {kind: ConfigMap, name: model-work, fieldPath: data.header}
+    targets:
+      - select: {kind: TaskHandler, labelSelector: taskflow-role=work}
+        fieldPaths:
+          - spec.jobTemplate.template.spec.containers.[name=agent].env.[name=ANTHROPIC_CUSTOM_HEADERS].value

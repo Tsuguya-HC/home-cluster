@@ -196,7 +196,7 @@ sync-wave をこれ以上早める手段は無く（cainjector の反応速度�
 | **TaskFlow CR を持つ app**（`claude-code` / `claude-code-build`） | sync が進まず止まる |
 | `taskflow` app | **止まらない**（CRD / コントローラ / webhook 定義しか持たず、TaskFlow の書き込みが無いため） |
 
-詰まるのは webhook そのものを配る `taskflow` app ではなく、**TaskFlow の実インスタンスを配る app** の方（`manifests/claude-code/taskflow-*.yaml`、`manifests/claude-code-build/taskflow-*.yaml`）。2026-09-07 の実測でも、窓を開けている間 OutOfSync のまま `retryCount` が進んだのは `claude-code` app だった（`claude-code-build` は当時まだ無く未検証だが、同じ webhook・同じ CR を配るので同じ窓で止まる）。
+詰まるのは webhook そのものを配る `taskflow` app ではなく、**TaskFlow の実インスタンスを配る app** の方（`manifests/claude-code/taskflow-*.yaml`、`manifests/claude-code-build/taskflow-*.yaml`、`kustomize/taskflow-review/flows/`）。2026-09-07 の実測でも、窓を開けている間 OutOfSync のまま `retryCount` が進んだのは `claude-code` app だった（`claude-code-build` は当時まだ無く未検証だが、同じ webhook・同じ CR を配るので同じ窓で止まる）。
 
 **切り分け**:
 

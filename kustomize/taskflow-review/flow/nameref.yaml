@@ -1,0 +1,23 @@
+# TaskFlow から TaskHandler への参照に nameSuffix を伝える。キーにワイルドカードは使えないので、
+# フェーズを足したらここにも足すこと — 足さないとそのフェーズだけ suffix の無い handler を指し、
+# 組み立ては黙って通る。
+nameReference:
+  - kind: TaskHandler
+    group: flow.tgy.io
+    fieldSpecs:
+      - {kind: TaskFlow, group: flow.tgy.io, path: spec/bindings/調査/handler}
+      - {kind: TaskFlow, group: flow.tgy.io, path: spec/bindings/実装/handler}
+      - {kind: TaskFlow, group: flow.tgy.io, path: spec/bindings/観点出し/handler}
+      - {kind: TaskFlow, group: flow.tgy.io, path: spec/bindings/general/handler}
+      - {kind: TaskFlow, group: flow.tgy.io, path: spec/bindings/documented/handler}
+      - {kind: TaskFlow, group: flow.tgy.io, path: spec/bindings/tests/handler}
+      - {kind: TaskFlow, group: flow.tgy.io, path: spec/bindings/failpath/handler}
+      - {kind: TaskFlow, group: flow.tgy.io, path: spec/bindings/boundary/handler}
+      - {kind: TaskFlow, group: flow.tgy.io, path: spec/bindings/runtime/handler}
+      - {kind: TaskFlow, group: flow.tgy.io, path: spec/bindings/states/handler}
+      - {kind: TaskFlow, group: flow.tgy.io, path: spec/bindings/precedent/handler}
+      - {kind: TaskFlow, group: flow.tgy.io, path: spec/bindings/ui/handler}
+      - {kind: TaskFlow, group: flow.tgy.io, path: spec/bindings/仕分け/handler}
+      - {kind: TaskFlow, group: flow.tgy.io, path: spec/bindings/修正/handler}
+      - {kind: TaskFlow, group: flow.tgy.io, path: spec/bindings/検証/handler}
+      - {kind: TaskFlow, group: flow.tgy.io, path: spec/finally/handler}

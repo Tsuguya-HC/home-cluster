@@ -122,9 +122,9 @@ spec:
                   ALIAS="$LLM_ALIAS_DEFAULT"
                 fi
                 case "$ALIAS" in
-                  implement|implement-claude|review|investigate) ;;
+                  implement|implement-claude|review|review-muse|investigate) ;;
                   # 違反値そのものは返さない（taskflow-pr-review と同じ idiom）。
-                  *) escalate "spec.input.alias が未知の値（implement / implement-claude / review / investigate のみ）。gateway 経路は一切確かめていない。" ;;
+                  *) escalate "spec.input.alias が未知の値（implement / implement-claude / review / review-muse / investigate のみ）。gateway 経路は一切確かめていない。" ;;
                 esac
                 echo "alias=$ALIAS"
 

@@ -1,0 +1,29 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# implement flow の一式（#1081）。観点ごとの枝は review/base の 1 つの形をフェーズ違いで並べる。
+# 実行して判定する仕分けと検証は judge の形、実装と修正は implement の形を、それぞれフェーズ違いで
+# 並べる。
+#
+# metadata.labels の taskflow-role（work / review / judge / filer）は models/ と runtime/ の
+# component が対象を選ぶ印。gateway の LLM を使う handler には必ず付けること — 付け忘れた
+# handler は組み合わせのモデルに関係なくひな形の alias のまま動く。
+resources:
+  - taskflow.yaml
+  - planner/handler.yaml
+  - review/general
+  - review/documented
+  - review/tests
+  - review/failpath
+  - review/boundary
+  - review/runtime
+  - review/states
+  - review/precedent
+  - review/ui
+  - judge/triage
+  - judge/verify
+  - implement/writer
+  - implement/fixer
+  - filer/handler.yaml
+
+configurations:
+  - nameref.yaml

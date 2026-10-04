@@ -255,7 +255,7 @@ spec:
 
                 # PR 番号は上で数字だと確かめてある。手順は /parts の skill、常時効く前提は
                 # /parts/CLAUDE.md（parts が claude-md 断片を連結したもの）。--bare は使わない
-                # （OAuth を読まなくなる）。HOME=/tmp で ~/.claude は空、cwd に CLAUDE.md は無い。
+                # （OAuth を読まなくなる）。HOME=/tmp で ~/.claude は空。
                 claude -p "/pr-review ${REPO} の PR #${PR}" \
                   --plugin-dir /parts \
                   --append-system-prompt-file /parts/CLAUDE.md \

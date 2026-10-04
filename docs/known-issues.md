@@ -248,7 +248,7 @@ echo | openssl s_client -connect 192.168.10.193:443 -servername pg.infra.tgy.io 
 
 **症状**: `prometheus.infra.tgy.io` にアクセスすると Prometheus Web UI が 403 を返す（oauth2-proxy 自体のログイン・OIDC コールバックは通るが、その先の Prometheus への L7 プロキシで弾かれる）。`hubble observe --verdict DROPPED` で `http-request DROPPED` が出る場合はこれ。
 
-**原因として切り分け済みのもの（該当しない）**: CLAUDE.md に記載の Cilium Gateway bug（#41970）は、issue 本文によれば **GAMMA（mesh）HTTPRoute を Service に直接貼った場合限定**の症状。`manifests/infra/prometheus-route.yaml` の `parentRefs` は `kind: Gateway`（`main-gateway`）であり GAMMA ではない。このクラスタに GAMMA 型 HTTPRoute は存在せず、同一構成（Gateway HTTPRoute → oauth2-proxy Service → 別 CNP の L7 ルールでバックエンドへ）の oauth2-proxy-hubble / oauth2-proxy-seaweedfs / oauth2-proxy-rss は本番稼働していて 403 を起こしていない。**#41970 が原因である可能性は排除済み**なので、403 が出た場合は別の原因（正規表現の組み方、Envoy の `:path` がクエリ文字列込みであることの見落とし等）を先に疑うこと。
+**原因として切り分け済みのもの（該当しない）**: AGENTS.md に記載の Cilium Gateway bug（#41970）は、issue 本文によれば **GAMMA（mesh）HTTPRoute を Service に直接貼った場合限定**の症状。`manifests/infra/prometheus-route.yaml` の `parentRefs` は `kind: Gateway`（`main-gateway`）であり GAMMA ではない。このクラスタに GAMMA 型 HTTPRoute は存在せず、同一構成（Gateway HTTPRoute → oauth2-proxy Service → 別 CNP の L7 ルールでバックエンドへ）の oauth2-proxy-hubble / oauth2-proxy-seaweedfs / oauth2-proxy-rss は本番稼働していて 403 を起こしていない。**#41970 が原因である可能性は排除済み**なので、403 が出た場合は別の原因（正規表現の組み方、Envoy の `:path` がクエリ文字列込みであることの見落とし等）を先に疑うこと。
 
 **緊急切り戻し手順（セキュリティ低下を伴う）**: `manifests/monitoring/netpol-prometheus.yaml` の oauth2-proxy-prometheus 用 ingress ブロックから `rules.http` を丸ごと削除し、`toPorts.ports` だけの L4 ルールに戻す。
 

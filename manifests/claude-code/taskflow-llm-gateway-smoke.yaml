@@ -117,7 +117,7 @@ spec:
                   # ここを既定に落とすと、`{alais: review}` のような typo や壊れた JSON が
                   # **証明済みの alias（implement）で成功して緑になる** — 確かめたいのは
                   # まだ通したことのない経路の方なので、それでは何も証明していない。
-                  # taskflow-implement.yaml が同じ形を名指しで拒否しているのと同じ理由。
+                  # kustomize/taskflow-review/flow/implement/base/handler.yaml が同じ形を名指しで拒否しているのと同じ理由。
                   [ -z "${FLOW_INPUT:-}" ] || escalate "spec.input が JSON として読めないか .alias を持たない（キーの typo・空文字・null も含む）。alias の取り違えを既定で握り潰さないため止めた。gateway 経路は一切確かめていない。"
                   ALIAS="$LLM_ALIAS_DEFAULT"
                 fi
@@ -255,8 +255,8 @@ spec:
               # （親 → api.anthropic.com / 個人の Max、子 → openrouter.ai / 従量課金）。
               # この smoke は Agent を許可していないので今は起きないが、これをテンプレにして
               # 本番 handler を切り替えるときは、親に括り付けること
-              # （taskflow-implement.yaml は CLAUDE_CODE_SUBAGENT_MODEL="$LLM_ALIAS" で
-              # そうしている）。
+              # （kustomize/taskflow-review/flow/ の handler は script 内で LLM_ALIAS を
+              # CLAUDE_CODE_SUBAGENT_MODEL に渡してそうしている）。
               - name: CLAUDE_CODE_SUBAGENT_MODEL
                 value: implement
             # api.anthropic.com への直行を止める 3 本。根拠は taskflow-common.yaml 参照。

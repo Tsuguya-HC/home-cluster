@@ -181,7 +181,7 @@ spec:
             - **claude-code 以外の namespace（argo / claude-code-build 等）の handler**:
               configMapRef は同一 namespace しか解決できないので、3 本をリテラル env で書く
               （manifests/argo/pluto-check.yaml、
-              manifests/claude-code-build/taskflow-implement.yaml が実例）
+              kustomize/taskflow-review/flow/review/base/handler.yaml が実例）
 
             ## クライアントキーの用意（env を書く前に必要）
             上の secretKeyRef が指すキーは自動では生えない。**先に 3 箇所に足すこと。**

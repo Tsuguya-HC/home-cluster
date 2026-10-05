@@ -19,10 +19,11 @@ spec:
       verifyImages:
         - imageReferences:
             - "registry.infra.tgy.io/*"
-          # trading は署名を別リポジトリに置くので下のルールで扱う。
+          # private プロジェクト（trading、agents）は署名を別リポジトリに置くので下のルールで扱う。
           # ここを tools/* に狭めると新規プロジェクトが検証対象から外れてしまう。
           skipImageReferences:
             - "registry.infra.tgy.io/trading/*"
+            - "registry.infra.tgy.io/agents/*"
           attestors:
             - entries:
                 - keys:
@@ -50,6 +51,7 @@ spec:
       verifyImages:
         - imageReferences:
             - "registry.infra.tgy.io/trading/*"
+            - "registry.infra.tgy.io/agents/*"
           repository: registry.infra.tgy.io/tools/signatures
           attestors:
             - entries:

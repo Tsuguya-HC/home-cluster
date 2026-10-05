@@ -213,6 +213,9 @@ spec:
         command: [sh, -c]
         args:
           - |
+            # 無いと buildctl の失敗が素通りし、digest が空のまま後段（構造検査・署名）へ進んでいた
+            # （2026-10-05、home-trading-browser のビルドで apt が失敗したのに build が Succeeded）。
+            set -eu
             apk add --no-cache jq >/dev/null
             mkdir -p /workspace/.buildkit /workspace/.buildkit/tmp
             export BUILDKIT_TMPDIR=/workspace/.buildkit
@@ -225,6 +228,16 @@ spec:
               --output 'type=image,"name=registry.infra.tgy.io/{{workflow.parameters.project}}/{{workflow.parameters.image-name}}:{{workflow.parameters.commit-sha}},registry.infra.tgy.io/{{workflow.parameters.project}}/{{workflow.parameters.image-name}}:latest",push=true' \
               --metadata-file /workspace/metadata.json
             jq -r '."containerimage.digest"' /workspace/metadata.json > /workspace/digest
+            grep -q '^sha256:' /workspace/digest
+            # 構造検査は Dockerfile ごとに選ぶ。既定の Dockerfile は structure-test.yaml、
+            # Dockerfile.<名前> は structure-test.<名前>.yaml（無ければ検査しない）。
+            # 1 リポジトリから複数イメージを出すとき、本体用の検査を別イメージに当てないため。
+            dockerfile='{{workflow.parameters.dockerfile}}'
+            if [ "$dockerfile" != Dockerfile ]; then
+              selected="/workspace/structure-test.${dockerfile#Dockerfile.}.yaml"
+              if [ -f "$selected" ]; then cp "$selected" /workspace/structure-test.yaml
+              else rm -f /workspace/structure-test.yaml; fi
+            fi
             # 中身は when に入れられない（複数行が式に展開されて壊れる）。
             # 判定は有無だけの 1 語で行う。
             # yes/no は式パーサにブールと解釈される余地があるので使わない。

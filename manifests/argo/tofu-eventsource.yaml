@@ -179,6 +179,20 @@ spec:
         key: credential
       active: false
       contentType: json
+    agents:
+      owner: Tsuguya-HC
+      repository: agents
+      webhook:
+        endpoint: /agents
+        port: "12000"
+        method: POST
+      events:
+        - push
+      webhookSecret:
+        name: agents-github-webhook
+        key: credential
+      active: false
+      contentType: json
     renovate-home-cluster:
       owner: Tsuguya-HC
       repository: home-cluster

@@ -54,9 +54,12 @@ features:
 webhooksCleanup:
   enabled: true
 
-# 署名検証はレジストリから .sig を引くため、private プロジェクトには認証が要る。
+# private プロジェクト（trading, agents）のタグを digest に解決する（mutateDigest）には
+# 認証が要る。署名は public な tools/signatures に置くのでそちらには要らない
+# （署名の取得には使われない、kyverno/kyverno#15120）。
 # ポリシー側の imageRegistryCredentials ではレジストリクライアントに届かない
 # （起動ログの `setup registry client... secrets=` が空のまま）。
 # --imagePullSecrets に渡るのはこの値なので、ここで指定する。
+# Harbor の system robot robot$verify（trading と agents の pull + read artifact）。
 existingImagePullSecrets:
-  - harbor-trading-pull
+  - harbor-verify

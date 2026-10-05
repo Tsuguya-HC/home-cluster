@@ -199,6 +199,43 @@ spec:
                 dependencyName: home-trading-push
                 dataKey: body.after
               dest: spec.arguments.parameters.2.value
+    # home-trading の 2 本目のイメージ（ヘッドレス Chromium 入り、信用取引銘柄の一覧の収集だけに使う）。
+    # 同じ push で Dockerfile.browser を別名でビルドする。署名の置き場は本体と同じ。
+    - template:
+        name: home-trading-browser-build
+        conditions: "home-trading-push"
+        argoWorkflow:
+          operation: submit
+          source:
+            resource:
+              apiVersion: argoproj.io/v1alpha1
+              kind: Workflow
+              metadata:
+                generateName: home-trading-browser-build-
+                namespace: image-build
+              spec:
+                workflowTemplateRef:
+                  name: single-repo-image-build
+                arguments:
+                  parameters:
+                    - name: repo-url
+                      value: github.com/Tsuguya-HC/home-trading
+                    - name: image-name
+                      value: home-trading-browser
+                    - name: commit-sha
+                      value: ""
+                    # commit-sha は位置参照 (parameters.2.value) されているので末尾に足す
+                    - name: project
+                      value: trading
+                    - name: signature-repository
+                      value: registry.infra.tgy.io/tools/signatures
+                    - name: dockerfile
+                      value: Dockerfile.browser
+          parameters:
+            - src:
+                dependencyName: home-trading-push
+                dataKey: body.after
+              dest: spec.arguments.parameters.2.value
     # taskflow は 1 リポジトリから 2 イメージ（controller と Pod 内 sidecar）。
     # 同じ push で 2 本の Workflow を投げ、Dockerfile だけ切り替える。
     - template:

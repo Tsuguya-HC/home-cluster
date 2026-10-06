@@ -7,6 +7,9 @@ kind: WorkflowTemplate
 metadata:
   name: tofu-harbor
   namespace: argo
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
+    argocd.argoproj.io/compare-options: IgnoreExtraneous
 spec:
   activeDeadlineSeconds: 600
   serviceAccountName: tofu-executor
@@ -136,6 +139,9 @@ kind: WorkflowTemplate
 metadata:
   name: tofu-harbor-plan
   namespace: argo
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
+    argocd.argoproj.io/compare-options: IgnoreExtraneous
 spec:
   # 600s covered plan alone. The merge now waits out the required
   # checks on the PR head (up to 10 x 30s) before giving up.

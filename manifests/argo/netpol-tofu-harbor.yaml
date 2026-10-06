@@ -3,6 +3,9 @@ kind: CiliumNetworkPolicy
 metadata:
   name: tofu-harbor
   namespace: argo
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
+    argocd.argoproj.io/compare-options: IgnoreExtraneous
 spec:
   endpointSelector:
     matchLabels:

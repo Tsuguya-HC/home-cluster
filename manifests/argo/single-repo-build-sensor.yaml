@@ -74,6 +74,13 @@ spec:
                   or string.find(f, "requirements", 1, true) then
                   return true
                 end
+                -- Dockerfile が COPY するディレクトリ。先頭一致にするのは、短い名前
+                -- （l1/ や llm/）が docs/ や tests/ の下のパスにも部分一致するため。
+                for _, p in ipairs({"arm/", "dataaccess/", "features/", "l1/", "llm/", "prompts/", "scripts/"}) do
+                  if string.sub(f, 1, #p) == p then
+                    return true
+                  end
+                end
               end
             end
           end

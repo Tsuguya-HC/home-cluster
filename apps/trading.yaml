@@ -3,6 +3,11 @@ kind: Application
 metadata:
   name: trading
   namespace: argocd
+  annotations:
+    # Being handed over to another app-of-apps: keep the Application when this
+    # file is removed, and do not hold app-of-apps OutOfSync over it meanwhile.
+    argocd.argoproj.io/sync-options: Prune=false
+    argocd.argoproj.io/compare-options: IgnoreExtraneous
 spec:
   project: apps
   source:

@@ -276,6 +276,9 @@ kind: Sensor
 metadata:
   name: tofu-cloudflare
   namespace: argo
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
+    argocd.argoproj.io/compare-options: IgnoreExtraneous
 spec:
   template:
     serviceAccountName: workflow-executor
@@ -408,6 +411,9 @@ kind: Sensor
 metadata:
   name: tofu-unifi
   namespace: argo
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
+    argocd.argoproj.io/compare-options: IgnoreExtraneous
 spec:
   template:
     serviceAccountName: workflow-executor
@@ -506,6 +512,9 @@ kind: Sensor
 metadata:
   name: tofu-harbor
   namespace: argo
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
+    argocd.argoproj.io/compare-options: IgnoreExtraneous
 spec:
   template:
     serviceAccountName: workflow-executor

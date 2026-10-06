@@ -3,6 +3,9 @@ kind: CronWorkflow
 metadata:
   name: tofu-cloudflare-periodic
   namespace: argo
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
+    argocd.argoproj.io/compare-options: IgnoreExtraneous
 spec:
   schedules:
     - "0 15 * * 0"

@@ -6,7 +6,6 @@ ArgoCD GitOps で管理される Kubernetes マニフェスト・Helm values。p
 
 ```
 apps/              # ArgoCD Application 定義（各サービス1ファイル）
-argocd/            # app-of-apps.yaml（ArgoCD ブートストラップ）
 helm-values/       # Helm chart の values.yaml（サービスごとにディレクトリ）
 manifests/         # 生の K8s マニフェスト（namespace ごとにディレクトリ）
   infra/           # Gateway, CertManager, IP Pool, CCNP

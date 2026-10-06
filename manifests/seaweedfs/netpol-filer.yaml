@@ -56,6 +56,10 @@ spec:
         - matchLabels:
             io.kubernetes.pod.namespace: trading
             trading: collector
+        # LLM 比較アーム（ADR-0019）。資料一式の読み取りと記録の書き込み。
+        - matchLabels:
+            io.kubernetes.pod.namespace: trading
+            trading: arm
       toPorts:
         - ports:
             - port: "8333"

@@ -147,6 +147,12 @@ filer:
       - name: argo-artifacts
       - name: nextcloud
       - name: harbor
+      # 既定保持（GOVERNANCE）はこの hook では付かない。作成後に S3 API の
+      # put-object-lock-configuration で付ける。付けるまで PUT に保持は付かない。
+      - name: trading-arm-materials
+        objectLock: true
+      - name: trading-arm-records
+        objectLock: true
   extraEnvironmentVars:
     WEED_LEVELDB2_ENABLED: "false"
     WEED_POSTGRES2_ENABLED: "true"

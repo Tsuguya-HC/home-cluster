@@ -93,6 +93,8 @@ All policies are CiliumNetworkPolicy (CNP) and CiliumClusterwideNetworkPolicy (C
 | memory (memory) | ollama (ollama) | 11434 | LLM inference |
 | Workflow pods (claude-code) | memory (memory) | 3000 | Memory API access |
 | Collector pods (trading) | SeaweedFS filer (seaweedfs) | 8333 | Market data ingestion |
+| LLM arm pods (trading) | SeaweedFS filer (seaweedfs) | 8333 | Read dossier, write arm records |
+| LLM arm pods (trading) | Envoy data plane (llm-gateway) | 10080 | LLM API (client `trading-arm`) |
 | aqua-checksum (argo) | SeaweedFS filer (seaweedfs) | 8333 | Workflow step log/artifact upload |
 | Collector pods (trading) | shared-pg (database) | 5432 | Market data ingestion |
 | Reporter pods (trading) | shared-pg (database) | 5432 | Weekly report (read-only) |
@@ -210,7 +212,7 @@ All policies are CiliumNetworkPolicy (CNP) and CiliumClusterwideNetworkPolicy (C
 |---|---|---|
 | **master** | master/volume/filer/bucket-hook → 9333/19333; prometheus (monitoring) → 9327 | master (self):9333/19333, volume:8080/18080, filer:8888/18888 |
 | **volume** | master/filer/volume (self) → 8080/18080; prometheus (monitoring) → 9327 | master:9333/19333, volume (self):8080/18080 |
-| **filer** | loki (monitoring), tempo (monitoring), workflow-pods (argo), workflow-pods (talos-build), workflow-pods (image-build), workflow-pods (claude-code), workflow-pods (rss), workflows-server (argo), etcd-backup (argo), pxe-sync (argo), kanidm-backup (argo), kanidm-repl-exchange (argo), aqua-checksum (argo), nextcloud (nextcloud), harbor-registry (harbor), collector (trading), ingress (main-gateway: s3.infra.tgy.io) → 8333; filer/master/bucket-hook/oauth2-proxy-seaweedfs (oauth2-proxy) → 8888/18888; prometheus (monitoring) → 9327 | master:9333/19333, volume:8080/18080, filer (self):8888/18888, shared-pg (database):5432 |
+| **filer** | loki (monitoring), tempo (monitoring), workflow-pods (argo), workflow-pods (talos-build), workflow-pods (image-build), workflow-pods (claude-code), workflow-pods (rss), workflows-server (argo), etcd-backup (argo), pxe-sync (argo), kanidm-backup (argo), kanidm-repl-exchange (argo), aqua-checksum (argo), nextcloud (nextcloud), harbor-registry (harbor), collector (trading), arm (trading), ingress (main-gateway: s3.infra.tgy.io) → 8333; filer/master/bucket-hook/oauth2-proxy-seaweedfs (oauth2-proxy) → 8888/18888; prometheus (monitoring) → 9327 | master:9333/19333, volume:8080/18080, filer (self):8888/18888, shared-pg (database):5432 |
 | **bucket-hook** (Job) | (deny world) | master:9333/19333, filer:8888/18888 |
 
 ## kube-system (6 policies)
@@ -378,7 +380,7 @@ All policies are CiliumNetworkPolicy (CNP) and CiliumClusterwideNetworkPolicy (C
 
 | Component | Ingress | Egress |
 |---|---|---|
-| **llm-gateway-envoy** | claude-code-build / claude-code → 10080; argo (SA `pluto-fixer` only) → 10080; host/remote-node → 19003 (probes) | envoy-gateway (envoy-gateway-system):18000, tempo (monitoring):4318 (OTLP HTTP, GenAI traces), openrouter.ai + api.anthropic.com:443 |
+| **llm-gateway-envoy** | claude-code-build / claude-code → 10080; argo (SA `pluto-fixer` only) → 10080; trading (`trading: arm` only) → 10080; host/remote-node → 19003 (probes) | envoy-gateway (envoy-gateway-system):18000, tempo (monitoring):4318 (OTLP HTTP, GenAI traces), openrouter.ai + api.anthropic.com:443 |
 | **github-mcp-envoy** | claude-code / claude-code-build → 10080, 10443; argo (SA `github-mcp-smoke`, `pluto-fixer` only) → 10080, 10443; host/remote-node → 19003 (probes) | envoy-gateway (envoy-gateway-system):18000, api.githubcopilot.com + api.github.com + github.com:443 |
 
 ## envoy-gateway-system (2 policies)

@@ -127,6 +127,56 @@ spec:
           priority: 0
       timeouts:
         request: 600s
+    # home-trading の LLM 比較アーム（ADR-0019）。系列はモデル名で固定されるので、
+    # alias ではなくモデル名のルートにして modelNameOverride を付けない。
+    # trading-arm を他のルールに足さないこと（呼べるモデルを 1 つに絞るのが目的）。
+    - matches:
+        - headers:
+            - type: Exact
+              name: x-ai-eg-model
+              value: claude-sonnet-5-5
+            - type: RegularExpression
+              name: x-llm-client
+              value: "^(trading-arm)$"
+      modelsOwnedBy: Envoy AI Gateway
+      backendRefs:
+        - name: claude-max
+          weight: 1
+          priority: 0
+      timeouts:
+        request: 600s
+---
+# trading-arm の呼び出し数の上限（ADR-0019 決定 7）。Local なので Envoy の Pod ごとの
+# メモリ上のバケットで、Envoy が再起動すると満タンに戻る。
+# トークン数での上限は Global（外部の rate limit サービス + Redis）が要り、今は無い。
+# Local は response 側の cost を受け付けない（CRD の CEL が拒否する）。
+#
+# **Gateway に付ける（ルートに付けない）。** SecurityPolicy と同じ理由で、モデルヘッダが
+# 埋まる前のリクエストは catch-all ルートにいる。Gateway 単位なら配下の全ルートに配られる
+# ので、どのルートで評価されても数える。clientSelectors に当たらないリクエストは
+# 上限なし（既定バケットは uint32 max）。
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: trading-arm-ratelimit
+  namespace: llm-gateway
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: llm-gateway
+  rateLimit:
+    type: Local
+    local:
+      rules:
+        - clientSelectors:
+            - headers:
+                - type: Exact
+                  name: x-llm-client
+                  value: trading-arm
+          limit:
+            requests: 7500
+            unit: Day
 ---
 apiVersion: aigateway.envoyproxy.io/v1beta1
 kind: AIServiceBackend

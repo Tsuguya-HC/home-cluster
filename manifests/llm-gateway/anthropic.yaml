@@ -151,8 +151,10 @@ spec:
 # トークン数での上限は Global（外部の rate limit サービス + Redis）が要り、今は無い。
 # Local は response 側の cost を受け付けない（CRD の CEL が拒否する）。
 #
-# targetRefs は AIGatewayRoute が生成する同名の HTTPRoute。clientSelectors に当たらない
-# リクエストは上限なしになる（既定バケットは uint32 max）。
+# **Gateway に付ける（ルートに付けない）。** SecurityPolicy と同じ理由で、モデルヘッダが
+# 埋まる前のリクエストは catch-all ルートにいる。Gateway 単位なら配下の全ルートに配られる
+# ので、どのルートで評価されても数える。clientSelectors に当たらないリクエストは
+# 上限なし（既定バケットは uint32 max）。
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: BackendTrafficPolicy
 metadata:
@@ -161,8 +163,8 @@ metadata:
 spec:
   targetRefs:
     - group: gateway.networking.k8s.io
-      kind: HTTPRoute
-      name: claude-max
+      kind: Gateway
+      name: llm-gateway
   rateLimit:
     type: Local
     local:

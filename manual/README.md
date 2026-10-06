@@ -41,7 +41,7 @@ helm install cilium cilium/cilium \
 
 ## 3. ArgoCD
 
-CNI が動いた後、ArgoCD 本体を手動インストールし、app-of-apps を適用する。
+CNI が動いた後、ArgoCD 本体を手動インストールし、AppProject を作成したうえで ArgoCD の root を適用する。
 以降は ArgoCD が自身を含む全 Application を管理する。
 
 ```bash
@@ -53,9 +53,9 @@ helm install argocd argo/argo-cd \
 
 # AppProject を先に作成（app-of-apps が project: platform を参照するため）
 kubectl apply -f manifests/argocd/appproject-*.yaml
-
-kubectl apply -f argocd/app-of-apps.yaml
 ```
+
+app-of-apps はこのリポジトリには無い。ArgoCD の root（app-of-apps を含む）は private のブートストラップ用リポジトリが持っており、その手順に従って適用する。
 
 ## 4. 1Password Connect Server Credentials
 

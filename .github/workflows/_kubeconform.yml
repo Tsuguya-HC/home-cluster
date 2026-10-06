@@ -37,7 +37,7 @@ jobs:
             -schema-location default \
             -schema-location '.github/schemas/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
             -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
-            -summary apps/ argocd/
+            -summary apps/
 
       - name: Validate kustomize renders
         run: |

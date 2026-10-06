@@ -217,3 +217,32 @@ spec:
   validation:
     wellKnownCACertificates: System
     hostname: openrouter.ai
+---
+# OpenRouter は Muse への要求に、ときどき「モデルが無い」（404、まれに 400）を返す。同じ要求を
+# 送り直せば通り、claude CLI は 400 を受けるとその場で終わるので、gateway で送り直す。
+# Gateway に付いた BackendTrafficPolicy（レート制限）を上書きしないよう StrategicMerge で重ねる。
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: openrouter-retry
+  namespace: llm-gateway
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: implement
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: review-muse
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: openrouter-models
+  mergeType: StrategicMerge
+  retry:
+    numRetries: 3
+    perRetry:
+      backOff:
+        baseInterval: 1s
+        maxInterval: 5s
+    retryOn:
+      httpStatusCodes: [400, 404]

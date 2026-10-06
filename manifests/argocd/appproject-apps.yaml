@@ -10,10 +10,6 @@ spec:
     - https://valkey.io/valkey-helm/
     - https://helm.goharbor.io
     - https://github.com/Tsuguya-HC/home-cluster.git
-    # trading のマニフェストは private リポに置く
-    # （CNP の egress ルールが取引先とデータソースを列挙するため）
-    - https://github.com/Tsuguya-HC/home-trading.git
-    - https://github.com/Tsuguya-HC/home-trading.git
   destinations:
     - server: https://kubernetes.default.svc
       namespace: nextcloud
@@ -25,8 +21,6 @@ spec:
       namespace: horenso
     - server: https://kubernetes.default.svc
       namespace: memory
-    - server: https://kubernetes.default.svc
-      namespace: trading
   clusterResourceWhitelist:
     - group: '*'
       kind: CustomResourceDefinition

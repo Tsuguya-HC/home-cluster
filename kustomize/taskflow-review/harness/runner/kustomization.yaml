@@ -1,0 +1,88 @@
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+patches:
+  - target:
+      kind: TaskHandler
+      labelSelector: taskflow-step=writer
+    patch: |-
+      - op: test
+        path: /spec/jobTemplate/template/spec/runtimeClassName
+        value: kata
+      - op: test
+        path: /spec/jobTemplate/template/spec/volumes/6/name
+        value: scripts
+      - op: remove
+        path: /spec/jobTemplate/template/spec/volumes/6
+      - op: test
+        path: /spec/jobTemplate/template/spec/volumes/2/name
+        value: parts
+      - op: remove
+        path: /spec/jobTemplate/template/spec/volumes/2
+      - op: test
+        path: /spec/jobTemplate/template/spec/initContainers/0/name
+        value: parts
+      - op: remove
+        path: /spec/jobTemplate/template/spec/initContainers/0
+      - op: add
+        path: /spec/jobTemplate/template/spec/imagePullSecrets
+        value:
+          - name: harbor-agents-pull
+      - op: test
+        path: /spec/jobTemplate/template/spec/containers/0/name
+        value: agent
+      - op: replace
+        path: /spec/jobTemplate/template/spec/containers/0/image
+        value: registry.infra.tgy.io/agents/runner:latest
+      - op: replace
+        path: /spec/jobTemplate/template/spec/containers/0/command
+        value: [bash, -c]
+      - op: replace
+        path: /spec/jobTemplate/template/spec/containers/0/args
+        value:
+          - |
+            set -u
+            give_up() {
+              mkdir -p /workspace/escalate
+              printf '%s\n' "$1" > /workspace/escalate/report.md
+              sync; exit 0
+            }
+            if [ -b /dev/scratch ]; then
+              mkfs.ext4 -q -F -E lazy_itable_init=0,lazy_journal_init=0,root_owner=65533:65533 /dev/scratch \
+                || give_up "Block スクラッチの mkfs に失敗した。実装は行っていない。"
+              mkdir -p /scratch && mount -o noatime /dev/scratch /scratch \
+                || give_up "Block スクラッチの mount に失敗した。実装は行っていない。"
+            fi
+            AGENT_MODEL="anthropic/${LLM_ALIAS}"
+            AGENT_MODELS_JSON=$(jq -cn --arg url "$ANTHROPIC_BASE_URL" --arg id "$LLM_ALIAS" --arg h "$ANTHROPIC_CUSTOM_HEADERS" '
+              {providers: {anthropic: {
+                baseUrl: $url,
+                headers: ($h | capture("^(?<k>[^:]+):[ ]*(?<v>.*)$") | {(.k): .v}),
+                models: [{id: $id, api: "anthropic-messages", reasoning: true,
+                          contextWindow: 1048576, maxTokens: 131072}]}}}') \
+              || give_up "ランナーのモデル設定を組めなかった。実装は行っていない。"
+            [ -n "$AGENT_MODELS_JSON" ] \
+              || give_up "ANTHROPIC_CUSTOM_HEADERS（$ANTHROPIC_CUSTOM_HEADERS）を名前: 値として読めなかった。実装は行っていない。"
+            export AGENT_MODEL AGENT_MODELS_JSON
+            exec node /opt/runner/dist/main.js run implement
+      # ランナーは /run の下に root 専用の作業場所を作る。/run にボリュームを被せないこと。
+      - op: test
+        path: /spec/jobTemplate/template/spec/containers/0/volumeMounts/5/mountPath
+        value: /etc/review-scripts
+      - op: remove
+        path: /spec/jobTemplate/template/spec/containers/0/volumeMounts/5
+      - op: test
+        path: /spec/jobTemplate/template/spec/containers/0/volumeMounts/4/mountPath
+        value: /parts
+      - op: remove
+        path: /spec/jobTemplate/template/spec/containers/0/volumeMounts/4
+      - op: test
+        path: /spec/jobTemplate/template/spec/containers/0/volumeMounts/2/mountPath
+        value: /inputs
+      - op: remove
+        path: /spec/jobTemplate/template/spec/containers/0/volumeMounts/2
+      - op: add
+        path: /spec/jobTemplate/template/spec/containers/0/env/-
+        value: {name: REPO_OWNER, value: Tsuguya-HC}
+      - op: add
+        path: /spec/jobTemplate/template/spec/containers/0/env/-
+        value: {name: GITHUB_GATEWAY_HOST, value: gh-rw.infra.tgy.io}

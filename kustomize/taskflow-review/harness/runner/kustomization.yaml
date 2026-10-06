@@ -30,9 +30,11 @@ patches:
       - op: test
         path: /spec/jobTemplate/template/spec/containers/0/name
         value: agent
+      # private プロジェクトのタグは Kyverno が digest に解決できず（401）Job ごと拒否されるので、
+      # digest で固定する。ランナーを上げるときはこの digest を上げる。
       - op: replace
         path: /spec/jobTemplate/template/spec/containers/0/image
-        value: registry.infra.tgy.io/agents/runner:latest
+        value: registry.infra.tgy.io/agents/runner:latest@sha256:41c9d96039c3108afcbad364d6994fe72304b2d978efaec1ab3ce5ad9c42df74
       - op: replace
         path: /spec/jobTemplate/template/spec/containers/0/command
         value: [bash, -c]

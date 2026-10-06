@@ -338,7 +338,7 @@ spec:
                 dataKey: body.after
               dest: spec.arguments.parameters.2.value
     # The taskflow handler runner. Private project: it will carry trading's agents and
-    # prompts. Handlers reference the tag and Kyverno resolves it to a digest per Pod.
+    # prompts. Handlers pin it by digest: Kyverno cannot resolve a private tag (401).
     - template:
         name: agents-build
         conditions: "agents-push"

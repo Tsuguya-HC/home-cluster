@@ -113,7 +113,7 @@ spec:
       eventName: agents
       filters:
         # Exactly what the Dockerfile copies in. Add a path here when the Dockerfile
-        # starts copying it (skills/ and agents/ will).
+        # starts copying it.
         script: |-
           if event.body == nil or event.body.ref ~= "refs/heads/main" or event.body.commits == nil then
             return false
@@ -123,6 +123,7 @@ spec:
               for _, f in ipairs(list) do
                 if f == "Dockerfile"
                   or string.sub(f, 1, 4) == "src/"
+                  or string.sub(f, 1, 7) == "agents/"
                   or f == ".dockerignore"
                   or f == "structure-test.yaml"
                   or f == "package.json"

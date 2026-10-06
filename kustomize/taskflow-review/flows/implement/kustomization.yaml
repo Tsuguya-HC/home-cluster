@@ -3,6 +3,7 @@ kind: Kustomization
 resources:
   - ../../flow
 components:
+  - ../../harness/runner
   - ../../models/work/muse
   - ../../models/review/claude
   - ../../models/judge/claude

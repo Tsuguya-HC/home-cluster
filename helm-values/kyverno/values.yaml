@@ -54,12 +54,13 @@ features:
 webhooksCleanup:
   enabled: true
 
-# private プロジェクト（trading, agents）のタグを digest に解決する（mutateDigest）には
+# private プロジェクトのタグを digest に解決する（mutateDigest）には
 # 認証が要る。署名は public な tools/signatures に置くのでそちらには要らない
 # （署名の取得には使われない、kyverno/kyverno#15120）。
 # ポリシー側の imageRegistryCredentials ではレジストリクライアントに届かない
 # （起動ログの `setup registry client... secrets=` が空のまま）。
 # --imagePullSecrets に渡るのはこの値なので、ここで指定する。
-# Harbor の system robot robot$verify（trading と agents の pull + read artifact）。
+# Harbor の system robot robot$verify（private プロジェクトの pull + read artifact）。
+# 新しい private プロジェクトをタグで参照するなら、この robot の権限にも足す。
 existingImagePullSecrets:
   - harbor-verify

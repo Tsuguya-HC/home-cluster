@@ -213,8 +213,7 @@ spec:
         command: [sh, -c]
         args:
           - |
-            # 無いと buildctl の失敗が素通りし、digest が空のまま後段（構造検査・署名）へ進んでいた
-            # （2026-10-05、あるイメージのビルドで apt が失敗したのに build が Succeeded）。
+            # 無いと buildctl の失敗が素通りし、digest が空のまま後段（構造検査・署名）へ進む。
             set -eu
             apk add --no-cache jq >/dev/null
             mkdir -p /workspace/.buildkit /workspace/.buildkit/tmp

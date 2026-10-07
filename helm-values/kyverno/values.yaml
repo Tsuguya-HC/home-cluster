@@ -60,7 +60,5 @@ webhooksCleanup:
 # ポリシー側の imageRegistryCredentials ではレジストリクライアントに届かない
 # （起動ログの `setup registry client... secrets=` が空のまま）。
 # --imagePullSecrets に渡るのはこの値なので、ここで指定する。
-# Harbor の system robot robot$verify（private プロジェクトの pull + read artifact）。
-# 新しい private プロジェクトをタグで参照するなら、この robot の権限にも足す。
 existingImagePullSecrets:
   - harbor-verify

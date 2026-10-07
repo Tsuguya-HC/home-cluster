@@ -101,8 +101,8 @@ spec:
             value: /tmp
           - name: DOCKER_CONFIG
             value: /tmp/docker
-          # Harbor の全プロジェクトを読むだけの robot。Secret は ExternalSecret ではなく、
-          # レジストリの設定を持つ側が直接書く。
+          # この Secret は ExternalSecret で作らない（このリポの外で直接書かれており、
+          # ESO で作ると上書きし合う）。
           - name: HARBOR_USER
             valueFrom:
               secretKeyRef:
@@ -127,10 +127,8 @@ spec:
                 end
             ' > /tmp/cosign.pub
 
-            # private プロジェクトは署名だけ tools/signatures に出している (Kyverno が
-            # imagePullSecrets を署名取得に使わない kyverno#15120 の回避)。署名の置き場の
-            # 候補は attestor の entry ごとにあり、Kyverno はどれか 1 つで検証できれば通す。
-            # 候補もポリシーから引く。"-" はイメージと同じリポジトリ。
+            # 署名の置き場の候補はポリシーの attestor entry から引く（ここに書くとポリシーと
+            # ずれる）。"-" はイメージと同じリポジトリ。
             printf '%s' "$POLICY" | jq -r '
               .spec.rules[].verifyImages[]
               | . as $v
@@ -247,9 +245,6 @@ spec:
               # 失った artifact は retention の件数ルールの保護外で、週次 GC が
               # 消す。参照している側から見れば「今日は引けるが来週引けない」で、
               # MISSING と同じ故障を、起きる前の姿で見ていることになる。
-              #
-              # 2026-08-19 と 2026-08-22 の 2 件とも、気付いたのは
-              # 消えた後だった。ここで見えていれば GC までの最大 7 日が猶予になる。
               proj=${repo%%/*}
               name=$(printf '%s' "${repo#*/}" | sed 's#/#%2F#g')
               meta=$(curl -sS --connect-timeout 10 --max-time 30 \
@@ -320,7 +315,6 @@ spec:
                 continue
               fi
 
-              # Kyverno と同じく、候補のどれか 1 つで検証できれば通す。
               verified=0
               : > /tmp/cosign.err
               for sigrepo in $sigrepos; do

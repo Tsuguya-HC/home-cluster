@@ -89,7 +89,7 @@ core:
           key: clientSecret
     # CONFIG_OVERWRITE_JSON が入っている間、Harbor は /configurations への PUT を
     # admin にも 403 で拒否する（認証キーだけでなくエンドポイント全体）。この
-    # エンドポイントの設定は Harbor API を扱う OpenTofu ではなくここが持ち場になる。
+    # エンドポイントで決まる設定は、API ではなくこの JSON に書く。
     - name: CONFIG_OVERWRITE_JSON
       value: '{"auth_mode":"oidc_auth","oidc_name":"Kanidm","oidc_endpoint":"https://idm.tgy.io/oauth2/openid/harbor","oidc_client_id":"harbor","oidc_client_secret":"$(OIDC_CLIENT_SECRET)","oidc_scope":"openid,profile,email","oidc_verify_cert":"true","oidc_auto_onboard":"true","oidc_user_claim":"preferred_username","project_creation_restriction":"adminonly"}'
   resources:
@@ -143,9 +143,6 @@ registry:
   # しかない。
   #
   # 代償として、中断したアップロードの断片が S3 の _upload/ に残り続ける。
-  # Harbor の GC は週次で回っている（OpenTofu が設定、土 18:00）が、それが
-  # 参照されない blob ではなく _upload/ の一時ファイルまで回収するかは
-  # 未確認。溜まるようなら別途始末する必要がある。
   upload_purging:
     enabled: false
 

@@ -24,6 +24,9 @@ spec:
         allowPrivilegeEscalation: false
         capabilities:
           drop: [ALL]
+    metadata:
+      labels:
+        webhook-receiver: "true"
   service:
     ports:
       - port: 12000

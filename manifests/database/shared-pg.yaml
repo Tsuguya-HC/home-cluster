@@ -86,10 +86,5 @@ spec:
         login: true
         passwordSecret:
           name: horenso-pg-credentials
-      - name: trading
-        ensure: present
-        connectionLimit: -1
-        inherit: true
-        login: true
-        passwordSecret:
-          name: trading-pg-credentials
+      # 別の場所で DatabaseRole として宣言するロールはここに書かない（同じ名前が
+      # ここにあると Cluster が優先され、DatabaseRole は待機する）。

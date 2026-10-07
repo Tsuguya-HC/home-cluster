@@ -54,7 +54,7 @@ HGW が下位ルータへ委任するプレフィックスは **/64 が 1 本だ
 - RA: 有効、優先度: 高
 - 自動 DNS サーバ: 有効
 
-**terrifi (OpenTofu provider) は IPv6 属性を持たない。** v0.9.3 時点で `terrifi_network` のスキーマに `ipv6_*` が 1 つも無いため、`home-unifi` の管理外になる。UI か UniFi API で設定する。terrifi が触らないフィールドなので `tofu plan` と競合しない。
+**terrifi (OpenTofu provider) は IPv6 属性を持たない。** v0.9.3 時点で `terrifi_network` のスキーマに `ipv6_*` が 1 つも無いため、UniFi を管理する OpenTofu の管理外になる。UI か UniFi API で設定する。terrifi が触らないフィールドなので `tofu plan` と競合しない。
 
 API で操作する場合:
 

@@ -101,15 +101,17 @@ spec:
             export RENOVATE_HOST_RULES=$(node -e "console.log(JSON.stringify([{matchHost:'registry.infra.tgy.io',username:process.env.HARBOR_USER,password:process.env.HARBOR_PASS,hostType:'docker'}]))")
             exec renovate
         env:
+          # Harbor の全プロジェクトを読むだけの robot。Secret は ExternalSecret ではなく、
+          # レジストリの設定を持つ側が直接書く。
           - name: HARBOR_USER
             valueFrom:
               secretKeyRef:
-                name: renovate-harbor-robot
+                name: harbor-read-robot
                 key: username
           - name: HARBOR_PASS
             valueFrom:
               secretKeyRef:
-                name: renovate-harbor-robot
+                name: harbor-read-robot
                 key: password
           - name: RENOVATE_PLATFORM
             value: github

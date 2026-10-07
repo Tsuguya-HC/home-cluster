@@ -101,15 +101,17 @@ spec:
             value: /tmp
           - name: DOCKER_CONFIG
             value: /tmp/docker
+          # Harbor の全プロジェクトを読むだけの robot。Secret は ExternalSecret ではなく、
+          # レジストリの設定を持つ側が直接書く。
           - name: HARBOR_USER
             valueFrom:
               secretKeyRef:
-                name: harbor-pull-robot
+                name: harbor-read-robot
                 key: username
           - name: HARBOR_PASS
             valueFrom:
               secretKeyRef:
-                name: harbor-pull-robot
+                name: harbor-read-robot
                 key: password
         command: [sh, -c]
         args:

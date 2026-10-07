@@ -147,8 +147,7 @@ filer:
       - name: argo-artifacts
       - name: nextcloud
       - name: harbor
-      # private の利用者のバケットはここに書かない（別の場所で作る）。この hook は
-      # 無いものを作るだけで、一覧から外したバケットを消さない。
+      # private 利用者のバケットはここに書かない（名前を public に出さない）。
   extraEnvironmentVars:
     WEED_LEVELDB2_ENABLED: "false"
     WEED_POSTGRES2_ENABLED: "true"

@@ -35,8 +35,8 @@ spec:
             - port: "8080"
               protocol: TCP
     - toEndpoints:
-        # Every GitHub webhook receiver carries this label, so a receiver added
-        # elsewhere does not need its name listed here.
+        # Select receivers by this label, never by name: receivers defined outside
+        # this repository rely on it.
         - matchLabels:
             webhook-receiver: "true"
             io.kubernetes.pod.namespace: argo

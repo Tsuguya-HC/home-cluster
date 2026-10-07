@@ -27,7 +27,7 @@ spec:
   arguments:
     parameters:
       - name: repositories
-        # Other repositories pass their own list from elsewhere.
+        # Public repositories only; never name a private repository here.
         value: '["Tsuguya-HC/home-cluster","Tsuguya-HC/home-infra"]'
   synchronization:
     mutexes:
@@ -102,8 +102,8 @@ spec:
             export RENOVATE_HOST_RULES=$(node -e "console.log(JSON.stringify([{matchHost:'registry.infra.tgy.io',username:process.env.HARBOR_USER,password:process.env.HARBOR_PASS,hostType:'docker'}]))")
             exec renovate
         env:
-          # Harbor の全プロジェクトを読むだけの robot。Secret は ExternalSecret ではなく、
-          # レジストリの設定を持つ側が直接書く。
+          # この Secret は ExternalSecret で作らない（このリポの外で直接書かれており、
+          # ESO で作ると上書きし合う）。
           - name: HARBOR_USER
             valueFrom:
               secretKeyRef:

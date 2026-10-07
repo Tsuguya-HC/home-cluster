@@ -63,16 +63,6 @@ spec:
       eventName: renovate-home-infra
       filters:
         script: *aquaFilter
-    - name: home-cloudflare
-      eventSourceName: github-webhook
-      eventName: renovate-home-cloudflare
-      filters:
-        script: *aquaFilter
-    - name: home-harbor
-      eventSourceName: github-webhook
-      eventName: harbor
-      filters:
-        script: *aquaFilter
     - name: home-rss
       eventSourceName: github-webhook
       eventName: home-rss
@@ -81,11 +71,6 @@ spec:
     - name: home-actions
       eventSourceName: github-webhook
       eventName: home-actions
-      filters:
-        script: *aquaFilter
-    - name: home-trading
-      eventSourceName: github-webhook
-      eventName: home-trading
       filters:
         script: *aquaFilter
     - name: taskflow
@@ -160,66 +145,6 @@ spec:
                     - name: branch
                       value: overwritten-by-parameters
     - template:
-        name: aqua-checksum-home-cloudflare
-        conditions: "home-cloudflare"
-        argoWorkflow:
-          operation: submit
-          parameters:
-            - src:
-                dependencyName: home-cloudflare
-                dataKey: body.repository.full_name
-              dest: spec.arguments.parameters.0.value
-            - src:
-                dependencyName: home-cloudflare
-                dataKey: body.pull_request.head.ref
-              dest: spec.arguments.parameters.1.value
-          source:
-            resource:
-              apiVersion: argoproj.io/v1alpha1
-              kind: Workflow
-              metadata:
-                generateName: aqua-checksum-
-                namespace: argo
-              spec:
-                workflowTemplateRef:
-                  name: aqua-checksum
-                arguments:
-                  parameters:
-                    - name: repository
-                      value: overwritten-by-parameters
-                    - name: branch
-                      value: overwritten-by-parameters
-    - template:
-        name: aqua-checksum-home-harbor
-        conditions: "home-harbor"
-        argoWorkflow:
-          operation: submit
-          parameters:
-            - src:
-                dependencyName: home-harbor
-                dataKey: body.repository.full_name
-              dest: spec.arguments.parameters.0.value
-            - src:
-                dependencyName: home-harbor
-                dataKey: body.pull_request.head.ref
-              dest: spec.arguments.parameters.1.value
-          source:
-            resource:
-              apiVersion: argoproj.io/v1alpha1
-              kind: Workflow
-              metadata:
-                generateName: aqua-checksum-
-                namespace: argo
-              spec:
-                workflowTemplateRef:
-                  name: aqua-checksum
-                arguments:
-                  parameters:
-                    - name: repository
-                      value: overwritten-by-parameters
-                    - name: branch
-                      value: overwritten-by-parameters
-    - template:
         name: aqua-checksum-home-rss
         conditions: "home-rss"
         argoWorkflow:
@@ -261,36 +186,6 @@ spec:
               dest: spec.arguments.parameters.0.value
             - src:
                 dependencyName: home-actions
-                dataKey: body.pull_request.head.ref
-              dest: spec.arguments.parameters.1.value
-          source:
-            resource:
-              apiVersion: argoproj.io/v1alpha1
-              kind: Workflow
-              metadata:
-                generateName: aqua-checksum-
-                namespace: argo
-              spec:
-                workflowTemplateRef:
-                  name: aqua-checksum
-                arguments:
-                  parameters:
-                    - name: repository
-                      value: overwritten-by-parameters
-                    - name: branch
-                      value: overwritten-by-parameters
-    - template:
-        name: aqua-checksum-home-trading
-        conditions: "home-trading"
-        argoWorkflow:
-          operation: submit
-          parameters:
-            - src:
-                dependencyName: home-trading
-                dataKey: body.repository.full_name
-              dest: spec.arguments.parameters.0.value
-            - src:
-                dependencyName: home-trading
                 dataKey: body.pull_request.head.ref
               dest: spec.arguments.parameters.1.value
           source:

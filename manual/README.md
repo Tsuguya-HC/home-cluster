@@ -123,7 +123,6 @@ S3 ストレージ（Loki、Tempo、Argo Workflows）は SeaweedFS が提供し�
 |---|---|---|---|
 | nextcloud-admin-credentials | nextcloud | username, password | Nextcloud 管理者 |
 | nextcloud-pg-credentials | database, nextcloud | username, password | Nextcloud DB ユーザー |
-| nextcloud-s3-credentials | nextcloud | username, password | SeaweedFS S3 認証 |
 | nextcloud-kanidm-oauth | nextcloud | password | Kanidm OIDC clientSecret |
 
 #### ストレージ
@@ -179,8 +178,7 @@ Kanidm pod が Running になった後（初回構築 or バックアップな�
 
 Nextcloud pod が Running になった後:
 
-1. SeaweedFS s3.conf に nextcloud 認証情報を追加（`seaweedfs-s3-config` 1Password item を更新）
-2. Kanidm OAuth2 クライアント作成:
+1. Kanidm OAuth2 クライアント作成:
    ```bash
    kanidm system oauth2 create nextcloud "Nextcloud" https://nc.tgy.io
    kanidm system oauth2 add-redirect-url nextcloud https://nc.tgy.io/apps/user_oidc/code
@@ -189,11 +187,11 @@ Nextcloud pod が Running になった後:
    kanidm group add-members nextcloud_users <users>
    kanidm system oauth2 update-scope-map nextcloud nextcloud_users openid profile email
    ```
-3. clientSecret を取得し 1Password に保存:
+2. clientSecret を取得し 1Password に保存:
    ```bash
    kanidm system oauth2 show-basic-secret nextcloud
    ```
-4. user_oidc インストール・設定（CNP に appstore/github egress を一時追加してから）:
+3. user_oidc インストール・設定（CNP に appstore/github egress を一時追加してから）:
    ```bash
    kubectl exec -n nextcloud deploy/nextcloud -c nextcloud -- php occ app:install user_oidc
    kubectl exec -n nextcloud deploy/nextcloud -c nextcloud -- php occ user_oidc:provider kanidm \
@@ -202,7 +200,7 @@ Nextcloud pod が Running になった後:
      --discoveryuri="https://idm.tgy.io/oauth2/openid/nextcloud/.well-known/openid-configuration"
    kubectl exec -n nextcloud deploy/nextcloud -c nextcloud -- php occ config:app:set --type=string --value=0 user_oidc allow_multiple_user_backends
    ```
-5. SSO ログイン後、OIDC ユーザーを管理者に追加:
+4. SSO ログイン後、OIDC ユーザーを管理者に追加:
    ```bash
    kubectl exec -n nextcloud deploy/nextcloud -c nextcloud -- php occ user:list
    kubectl exec -n nextcloud deploy/nextcloud -c nextcloud -- php occ group:adduser admin <oidc-user-id>

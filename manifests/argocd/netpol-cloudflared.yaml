@@ -35,9 +35,6 @@ spec:
             - port: "8080"
               protocol: TCP
     - toEndpoints:
-        - matchLabels:
-            eventsource-name: github-webhook
-            io.kubernetes.pod.namespace: argo
         # Every GitHub webhook receiver carries this label, so a receiver added
         # elsewhere does not need its name listed here.
         - matchLabels:

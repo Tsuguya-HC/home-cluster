@@ -45,9 +45,6 @@ spec:
           -- names a person and cannot be compared against the sender.
           -- Matched on the sender's immutable numeric id, not the login: a
           -- login can be renamed and the old one reclaimed by someone else.
-          -- This filter is shared via the anchor below, so it also applies to
-          -- the private home-trading dependency -- stricter than necessary
-          -- there, but harmless.
           -- To allow another sender, chain another `and sender.id ~= <id>`
           -- (not `or`, which would always be true and lock everyone out).
           -- Do not turn this into a numeric-keyed table: gopher-lua's
@@ -90,19 +87,6 @@ spec:
       eventName: renovate-home-infra
       filters:
         script: *renovateFilter
-    - name: home-cloudflare
-      eventSourceName: github-webhook
-      eventName: renovate-home-cloudflare
-      filters:
-        script: *renovateFilter
-    # Reuses the endpoint the build and aqua-checksum sensors already consume,
-    # rather than a renovate-* one of its own: the webhook and its secret exist,
-    # and one more consumer of the same event costs nothing.
-    - name: home-trading
-      eventSourceName: github-webhook
-      eventName: home-trading
-      filters:
-        script: *renovateFilter
   triggers:
     - template:
         name: renovate-home-cluster
@@ -142,41 +126,3 @@ spec:
                   parameters:
                     - name: repositories
                       value: '["Tsuguya-HC/home-infra"]'
-    - template:
-        name: renovate-home-cloudflare
-        conditions: "home-cloudflare"
-        argoWorkflow:
-          operation: submit
-          source:
-            resource:
-              apiVersion: argoproj.io/v1alpha1
-              kind: Workflow
-              metadata:
-                generateName: renovate-home-cloudflare-
-                namespace: argo
-              spec:
-                workflowTemplateRef:
-                  name: renovate
-                arguments:
-                  parameters:
-                    - name: repositories
-                      value: '["Tsuguya-HC/home-cloudflare"]'
-    - template:
-        name: renovate-home-trading
-        conditions: "home-trading"
-        argoWorkflow:
-          operation: submit
-          source:
-            resource:
-              apiVersion: argoproj.io/v1alpha1
-              kind: Workflow
-              metadata:
-                generateName: renovate-home-trading-
-                namespace: argo
-              spec:
-                workflowTemplateRef:
-                  name: renovate
-                arguments:
-                  parameters:
-                    - name: repositories
-                      value: '["Tsuguya-HC/home-trading"]'

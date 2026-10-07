@@ -53,38 +53,6 @@ spec:
       eventName: horenso
       filters:
         script: *buildFilter
-    - name: home-trading-push
-      eventSourceName: github-webhook
-      eventName: home-trading
-      filters:
-        # Python なので共通フィルタ（src/ や package.json）は当たらない。
-        # schemas/ を含めるのは、ベンダー DDL がイメージに焼かれているため。
-        script: |-
-          if event.body == nil or event.body.ref ~= "refs/heads/main" or event.body.commits == nil then
-            return false
-          end
-          for _, c in ipairs(event.body.commits) do
-            for _, list in ipairs({c.added or {}, c.modified or {}, c.removed or {}}) do
-              for _, f in ipairs(list) do
-                if string.find(f, "Dockerfile", 1, true)
-                  or string.find(f, "collectors/", 1, true)
-                  or string.find(f, "execution/", 1, true)
-                  or string.find(f, "strategies/", 1, true)
-                  or string.find(f, "schemas/", 1, true)
-                  or string.find(f, "requirements", 1, true) then
-                  return true
-                end
-                -- Dockerfile が COPY するディレクトリ。先頭一致にするのは、短い名前
-                -- （l1/ や llm/）が docs/ や tests/ の下のパスにも部分一致するため。
-                for _, p in ipairs({"arm/", "dataaccess/", "features/", "l1/", "llm/", "prompts/", "scripts/"}) do
-                  if string.sub(f, 1, #p) == p then
-                    return true
-                  end
-                end
-              end
-            end
-          end
-          return false
     - name: taskflow-push
       eventSourceName: github-webhook
       eventName: taskflow
@@ -102,34 +70,6 @@ spec:
                   or string.sub(f, -3) == ".go"
                   or f == "go.mod"
                   or f == "go.sum" then
-                  return true
-                end
-              end
-            end
-          end
-          return false
-    - name: agents-push
-      eventSourceName: github-webhook
-      eventName: agents
-      filters:
-        # Exactly what the Dockerfile copies in. Add a path here when the Dockerfile
-        # starts copying it.
-        script: |-
-          if event.body == nil or event.body.ref ~= "refs/heads/main" or event.body.commits == nil then
-            return false
-          end
-          for _, c in ipairs(event.body.commits) do
-            for _, list in ipairs({c.added or {}, c.modified or {}, c.removed or {}}) do
-              for _, f in ipairs(list) do
-                if f == "Dockerfile"
-                  or string.sub(f, 1, 4) == "src/"
-                  or string.sub(f, 1, 7) == "agents/"
-                  or f == ".dockerignore"
-                  or f == "structure-test.yaml"
-                  or f == "package.json"
-                  or f == "pnpm-lock.yaml"
-                  or f == "pnpm-workspace.yaml"
-                  or string.find(f, "tsconfig", 1, true) == 1 then
                   return true
                 end
               end
@@ -199,78 +139,6 @@ spec:
                 dependencyName: horenso-push
                 dataKey: body.after
               dest: spec.arguments.parameters.2.value
-    - template:
-        name: home-trading-build
-        conditions: "home-trading-push"
-        argoWorkflow:
-          operation: submit
-          source:
-            resource:
-              apiVersion: argoproj.io/v1alpha1
-              kind: Workflow
-              metadata:
-                generateName: home-trading-build-
-                namespace: image-build
-              spec:
-                workflowTemplateRef:
-                  name: single-repo-image-build
-                arguments:
-                  parameters:
-                    - name: repo-url
-                      value: github.com/Tsuguya-HC/home-trading
-                    - name: image-name
-                      value: home-trading
-                    - name: commit-sha
-                      value: ""
-                    # commit-sha は位置参照 (parameters.2.value) されているので末尾に足す
-                    - name: project
-                      value: trading
-                    # trading は private プロジェクト。Kyverno が署名を読めるよう
-                    # 署名だけ public な tools/signatures に置く（kyverno#15120）。
-                    - name: signature-repository
-                      value: registry.infra.tgy.io/tools/signatures
-          parameters:
-            - src:
-                dependencyName: home-trading-push
-                dataKey: body.after
-              dest: spec.arguments.parameters.2.value
-    # home-trading の 2 本目のイメージ（ヘッドレス Chromium 入り、信用取引銘柄の一覧の収集だけに使う）。
-    # 同じ push で Dockerfile.browser を別名でビルドする。署名の置き場は本体と同じ。
-    - template:
-        name: home-trading-browser-build
-        conditions: "home-trading-push"
-        argoWorkflow:
-          operation: submit
-          source:
-            resource:
-              apiVersion: argoproj.io/v1alpha1
-              kind: Workflow
-              metadata:
-                generateName: home-trading-browser-build-
-                namespace: image-build
-              spec:
-                workflowTemplateRef:
-                  name: single-repo-image-build
-                arguments:
-                  parameters:
-                    - name: repo-url
-                      value: github.com/Tsuguya-HC/home-trading
-                    - name: image-name
-                      value: home-trading-browser
-                    - name: commit-sha
-                      value: ""
-                    # commit-sha は位置参照 (parameters.2.value) されているので末尾に足す
-                    - name: project
-                      value: trading
-                    - name: signature-repository
-                      value: registry.infra.tgy.io/tools/signatures
-                    - name: dockerfile
-                      value: Dockerfile.browser
-          parameters:
-            - src:
-                dependencyName: home-trading-push
-                dataKey: body.after
-              dest: spec.arguments.parameters.2.value
     # taskflow は 1 リポジトリから 2 イメージ（controller と Pod 内 sidecar）。
     # 同じ push で 2 本の Workflow を投げ、Dockerfile だけ切り替える。
     - template:
@@ -335,42 +203,5 @@ spec:
           parameters:
             - src:
                 dependencyName: taskflow-push
-                dataKey: body.after
-              dest: spec.arguments.parameters.2.value
-    # The taskflow handler runner. Private project: it will carry trading's agents and
-    # prompts. Handlers pin it by digest: Kyverno cannot resolve a private tag (401).
-    - template:
-        name: agents-build
-        conditions: "agents-push"
-        argoWorkflow:
-          operation: submit
-          source:
-            resource:
-              apiVersion: argoproj.io/v1alpha1
-              kind: Workflow
-              metadata:
-                generateName: agents-build-
-                namespace: image-build
-              spec:
-                workflowTemplateRef:
-                  name: single-repo-image-build
-                arguments:
-                  parameters:
-                    - name: repo-url
-                      value: github.com/Tsuguya-HC/agents
-                    - name: image-name
-                      value: runner
-                    - name: commit-sha
-                      value: ""
-                    # commit-sha は位置参照 (parameters.2.value) されているので末尾に足す
-                    - name: project
-                      value: agents
-                    # private プロジェクト。Kyverno が署名を読めるよう署名だけ public な
-                    # tools/signatures に置く（kyverno#15120、trading と同じ）。
-                    - name: signature-repository
-                      value: registry.infra.tgy.io/tools/signatures
-          parameters:
-            - src:
-                dependencyName: agents-push
                 dataKey: body.after
               dest: spec.arguments.parameters.2.value

@@ -127,24 +127,6 @@ spec:
           priority: 0
       timeouts:
         request: 600s
-    # home-trading の LLM 比較アーム（ADR-0019）。系列はモデル名で固定されるので、
-    # alias ではなくモデル名のルートにして modelNameOverride を付けない。
-    # trading-arm を他のルールに足さないこと（呼べるモデルを 1 つに絞るのが目的）。
-    - matches:
-        - headers:
-            - type: Exact
-              name: x-ai-eg-model
-              value: claude-sonnet-5-5
-            - type: RegularExpression
-              name: x-llm-client
-              value: "^(trading-arm)$"
-      modelsOwnedBy: Envoy AI Gateway
-      backendRefs:
-        - name: claude-max
-          weight: 1
-          priority: 0
-      timeouts:
-        request: 600s
 ---
 # trading-arm の呼び出し数の上限（ADR-0019 決定 7）。Local なので Envoy の Pod ごとの
 # メモリ上のバケットで、Envoy が再起動すると満タンに戻る。
@@ -160,6 +142,9 @@ kind: BackendTrafficPolicy
 metadata:
   name: trading-arm-ratelimit
   namespace: llm-gateway
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
+    argocd.argoproj.io/compare-options: IgnoreExtraneous
 spec:
   targetRefs:
     - group: gateway.networking.k8s.io

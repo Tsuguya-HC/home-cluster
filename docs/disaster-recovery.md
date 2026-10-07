@@ -301,7 +301,7 @@ kubectl rollout restart deployment coredns -n kube-system
 | ローカル | ~/.talos/config | endpoints, nodes |
 | ローカル | ~/.kube/config | server (VIP) |
 
-> home-cloudflare は Tunnel ベースのため IP 直参照なし、変更不要。
+> Cloudflare 側の設定（別リポジトリ）は Tunnel ベースのため IP 直参照なし、変更不要。
 
 ## NAS IP 変更時の iSCSI 復旧
 
@@ -418,4 +418,4 @@ kubectl patch pv <nfs-pv-name> -p '{"metadata":{"finalizers":null}}'  # stuck �
 | NFS PV | spec.nfs.server (immutable) |
 | CNP (各 namespace) | toCIDR の NAS IP |
 | home-infra pxe/ | dnsmasq.conf, boot.ipxe |
-| home-cloudflare dns.tf | nas.tgy.io A レコード |
+| Cloudflare の DNS 設定（別リポジトリ） | nas.tgy.io A レコード |

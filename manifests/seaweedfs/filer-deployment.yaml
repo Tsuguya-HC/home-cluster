@@ -11,6 +11,10 @@ kind: Deployment
 metadata:
   name: seaweedfs-filer
   namespace: seaweedfs
+  annotations:
+    # -s3.config is read only at start, so a changed S3 configuration needs a
+    # restart. The rollout surges before it drains, so S3 stays up.
+    secret.reloader.stakater.com/reload: "seaweedfs-s3-config"
   labels:
     app.kubernetes.io/name: seaweedfs
     app.kubernetes.io/instance: seaweedfs

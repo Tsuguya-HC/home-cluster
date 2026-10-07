@@ -47,7 +47,6 @@ manual/        # Manual bootstrap steps
 - [Bootstrap手順](manual/README.md) — クラスタ再構築時の手動ステップ
 - [サービス一覧](docs/services.md) — 外部/内部エンドポイント
 - [SSO設定](docs/sso.md) — Kanidm OIDC 設定・新サービス追加手順
-- [ネットワークポリシー](docs/network-policies.md) — CNP/CCNP 全ポリシー一覧
 - [Pod Security](docs/pod-security.md) — PSA 設定・namespace 一覧
 - [ArgoCD Projects](docs/argocd-projects.md) — AppProject 構成・新サービス追加時の確認
 - [リソース設定](docs/resource-limits.md) — requests/limits 一覧と実測値

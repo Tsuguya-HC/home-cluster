@@ -139,7 +139,6 @@ spec:
             - Discord 通知パターンの統一（onExit + discord-notify templateRef）
 
             ### ドキュメント
-            - docs/network-policies.md に CNP が反映されているか
             - 新しい通信パスが文書化されているか
 
             ## 規約（改善時に適用）

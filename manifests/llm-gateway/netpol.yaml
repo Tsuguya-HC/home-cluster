@@ -37,11 +37,6 @@ spec:
         - matchLabels:
             io.kubernetes.pod.namespace: argo
             io.cilium.k8s.policy.serviceaccount: pluto-fixer
-        # trading は gateway を呼ばない収集ジョブが常駐しているので namespace 単位では開けない。
-        # LLM 比較アーム（ADR-0019）の Pod だけ。
-        - matchLabels:
-            io.kubernetes.pod.namespace: trading
-            trading: arm
       toPorts:
         - ports:
             - port: "10080"

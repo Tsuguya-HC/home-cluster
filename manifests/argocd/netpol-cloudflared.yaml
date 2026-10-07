@@ -38,6 +38,11 @@ spec:
         - matchLabels:
             eventsource-name: github-webhook
             io.kubernetes.pod.namespace: argo
+        # Every GitHub webhook receiver carries this label, so a receiver added
+        # elsewhere does not need its name listed here.
+        - matchLabels:
+            webhook-receiver: "true"
+            io.kubernetes.pod.namespace: argo
       toPorts:
         - ports:
             - port: "12000"

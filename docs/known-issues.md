@@ -244,7 +244,7 @@ echo | openssl s_client -connect 192.168.10.193:443 -servername pg.infra.tgy.io 
 
 ## Prometheus L7 ルールの緊急切り戻し（セキュリティ低下を伴う一時措置。恒久対応ではない）
 
-`manifests/monitoring/netpol-prometheus.yaml` の oauth2-proxy-prometheus 向け ingress ルールは `rules.http`（L7）で GET を `/debug` 以下を除いて許可、POST をクエリ系 API のみに絞っている（詳細・許可パスの一覧は `docs/network-policies.md` の prometheus 行）。この L7 ルールが原因で `prometheus.infra.tgy.io` 経由の正当なリクエストまで 403 になる場合の緊急対応を記す。
+`manifests/monitoring/netpol-prometheus.yaml` の oauth2-proxy-prometheus 向け ingress ルールは `rules.http`（L7）で GET を `/debug` 以下を除いて許可、POST をクエリ系 API のみに絞っている（許可パスの一覧は同ファイルの `rules.http`）。この L7 ルールが原因で `prometheus.infra.tgy.io` 経由の正当なリクエストまで 403 になる場合の緊急対応を記す。
 
 **症状**: `prometheus.infra.tgy.io` にアクセスすると Prometheus Web UI が 403 を返す（oauth2-proxy 自体のログイン・OIDC コールバックは通るが、その先の Prometheus への L7 プロキシで弾かれる）。`hubble observe --verdict DROPPED` で `http-request DROPPED` が出る場合はこれ。
 
@@ -252,7 +252,7 @@ echo | openssl s_client -connect 192.168.10.193:443 -servername pg.infra.tgy.io 
 
 **緊急切り戻し手順（セキュリティ低下を伴う）**: `manifests/monitoring/netpol-prometheus.yaml` の oauth2-proxy-prometheus 用 ingress ブロックから `rules.http` を丸ごと削除し、`toPorts.ports` だけの L4 ルールに戻す。
 
-**この切り戻しをすると何が起きるか（セキュリティが下がる）**: `rules.http` が抑えている危険なエンドポイント（詳細・許可パスの一覧は `docs/network-policies.md` の prometheus 行を参照）を SSO でログインできる全ユーザーが叩けるようになる。Prometheus 自体のフラグ構成（`--web.enable-lifecycle` / `--web.enable-remote-write-receiver` は config-reloader / tempo の内部利用があり落とせない）は変わらないため、UI 自体は L4 のみでも到達できてしまう。**復旧を確認したら速やかに `rules.http` を戻すこと**（外したまま放置しない）。
+**この切り戻しをすると何が起きるか（セキュリティが下がる）**: `rules.http` が抑えている危険なエンドポイント（許可パスの一覧は `netpol-prometheus.yaml` の `rules.http`）を SSO でログインできる全ユーザーが叩けるようになる。Prometheus 自体のフラグ構成（`--web.enable-lifecycle` / `--web.enable-remote-write-receiver` は config-reloader / tempo の内部利用があり落とせない）は変わらないため、UI 自体は L4 のみでも到達できてしまう。**復旧を確認したら速やかに `rules.http` を戻すこと**（外したまま放置しない）。
 
 ## Gateway API コントローラが起動に失敗したまま通常運転に入る（新規 HTTPRoute だけが reconcile されない）
 

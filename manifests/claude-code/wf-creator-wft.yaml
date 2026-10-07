@@ -104,8 +104,7 @@ spec:
             ## 作業手順
             1. 既存の WFT を読んでパターンを把握する（manifests/claude-code/ 配下）
             2. 必要なファイルを作成する
-            3. docs/network-policies.md を更新する（CNP 変更がある場合）
-            4. ブランチを切って commit → push → PR 作成
+            3. ブランチを切って commit → push → PR 作成
 
             ## WorkflowTemplate 規約（必ず守ること）
 
@@ -135,7 +134,6 @@ spec:
             - DNS は CCNP で共通適用済み — 個別 CNP には不要
             - 外部 HTTPS は toFQDNs（toCIDR 0.0.0.0/0 は原則禁止、ビルドジョブ等のみ例外）
             - ファイル名: manifests/<namespace>/netpol-<name>.yaml
-            - docs/network-policies.md も同時更新
 
             ### EventSource / Sensor（トリガーが必要な場合）
             - EventSource: manifests/argo/ に webhook 定義

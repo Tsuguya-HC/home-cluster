@@ -19,8 +19,6 @@ spec:
               - {}
     - fromEndpoints:
         - matchLabels:
-            sensor-name: tofu-cloudflare
-        - matchLabels:
             sensor-name: upgrade-k8s
         - matchLabels:
             sensor-name: pxe-sync

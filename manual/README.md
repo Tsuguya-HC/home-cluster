@@ -19,8 +19,9 @@ day-2 以降は `apps/gateway-api-crds.yaml` の ArgoCD Application が管理す
 バージョンは同ファイルの `targetRevision` が source of truth。
 
 ```bash
-# 初回ブートストラップ時のみ実行（バージョンは apps/gateway-api-crds.yaml の targetRevision に合わせる）
-kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.1/experimental-install.yaml
+# 初回ブートストラップ時のみ実行（バージョンは apps/gateway-api-crds.yaml の targetRevision）
+GW_API=$(yq '.spec.source.targetRevision' apps/gateway-api-crds.yaml)
+kubectl apply -f "https://github.com/kubernetes-sigs/gateway-api/releases/download/${GW_API}/experimental-install.yaml"
 ```
 
 > **重要**: TLSRoute CRD は Cilium operator 起動前にインストールすること。
@@ -35,7 +36,7 @@ ArgoCD デプロイ後は app-of-apps が Cilium の管理を引き継ぐ。
 helm repo add cilium https://helm.cilium.io
 helm install cilium cilium/cilium \
   --namespace kube-system \
-  --version 1.19.0 \
+  --version "$(yq '.spec.sources[0].targetRevision' apps/cilium.yaml)" \
   -f helm-values/cilium/values.yaml
 ```
 
@@ -48,7 +49,7 @@ CNI が動いた後、ArgoCD 本体を手動インストールし、AppProject �
 helm repo add argo https://argoproj.github.io/argo-helm
 helm install argocd argo/argo-cd \
   --namespace argocd --create-namespace \
-  --version 9.4.2 \
+  --version "$(yq '.spec.sources[0].targetRevision' apps/argocd.yaml)" \
   -f helm-values/argocd/values.yaml
 
 # AppProject を先に作成（app-of-apps が project: platform を参照するため）
@@ -77,14 +78,18 @@ ExternalSecret は専用の `secrets` ArgoCD Application で管理され、他 a
 
 credentials / token のローテーション（定常運用）は `docs/secrets-rotation.md` を参照。
 
-## 以降は自動
+## 以降
 
-上記 4 ステップ完了後、ArgoCD が app-of-apps 経由で全サービスを自動デプロイする:
-cert-manager, external-dns, SeaweedFS, CNPG, Grafana, Loki, Argo Workflows 等。
+上記 4 ステップの後は、private のブートストラップ用リポジトリの構築順に従う（app-of-apps の
+適用、root の sync、S3 の資格情報の初回生成）。app-of-apps が入れば ArgoCD が全サービスを
+自動デプロイする: cert-manager, external-dns, SeaweedFS, CNPG, Grafana, Loki, Argo Workflows 等。
 
 DNS レコードも external-dns が Gateway の HTTPRoute / TLSRoute から自動作成する（Cloudflare）。
 
-S3 ストレージ（Loki、Tempo、Argo Workflows）は SeaweedFS が提供し、クレデンシャルは 1Password → ExternalSecret で各 namespace にデプロイ。
+S3 ストレージ（Loki、Tempo、Argo Workflows、Harbor、Nextcloud）は SeaweedFS が提供する。
+S3 の identity 設定と各利用者の鍵は 1Password ではなく、private の tf リポジトリが
+Secret として直接書く。空のクラスタではその初回生成を
+ローカルで一度流すまで、SeaweedFS filer と Harbor は起動しない。
 
 ---
 
@@ -107,7 +112,7 @@ S3 ストレージ（Loki、Tempo、Argo Workflows）は SeaweedFS が提供し�
 | Item | Deployed Namespaces | Keys | 用途 |
 |---|---|---|---|
 | kanidm-grafana-oauth | monitoring | clientID, clientSecret | Kanidm OIDC (Grafana) |
-| github-repo-creds | argocd | url, type, password | ArgoCD private repo 認証 |
+| tgy-hc-argocd-github-app-private-key | argocd | private-key | ArgoCD の private repo 認証（GitHub App） |
 
 #### データベース
 

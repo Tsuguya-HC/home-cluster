@@ -65,7 +65,7 @@ patches:
       # digest で固定する。ランナーを上げるときはこの digest を上げる。
       - op: replace
         path: /spec/jobTemplate/template/spec/containers/0/image
-        value: registry.infra.tgy.io/agents/runner:latest@sha256:ea42547d02b79ead677b8c7abe6b325bfb1e1206a8721042abd6d377efded9b1
+        value: registry.infra.tgy.io/agents/runner:latest@sha256:2da7552c1407d5a0ebde8f062c70b09982a3c806aa13b6c2cfcb9f48647bb8ba
       - op: replace
         path: /spec/jobTemplate/template/spec/containers/0/command
         value: [bash, -c]

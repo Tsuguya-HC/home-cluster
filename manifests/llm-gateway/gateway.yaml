@@ -164,6 +164,16 @@ spec:
               # 上流が返したリクエスト ID（Anthropic は request-id ヘッダで返す）。Console の
               # リクエストログと 1 件ずつ突き合わせるための鍵。
               upstream_request_id: "%RESP(REQUEST-ID)%"
+              # どの枠で払われたか。トークンはどちらも sk-ant-oat01- で始まるので、見分けるのは
+              # 応答側。unified.* は Max（サブスク）の応答にだけ付き、API キーの応答には付かない。
+              # workspace_id は両方に付くので、値で見分ける。
+              anthropic.workspace_id: "%RESP(ANTHROPIC-WORKSPACE-ID)%"
+              anthropic.ratelimit.unified.status: "%RESP(ANTHROPIC-RATELIMIT-UNIFIED-STATUS)%"
+              anthropic.ratelimit.unified.representative_claim: "%RESP(ANTHROPIC-RATELIMIT-UNIFIED-REPRESENTATIVE-CLAIM)%"
+              anthropic.ratelimit.unified.5h_utilization: "%RESP(ANTHROPIC-RATELIMIT-UNIFIED-5H-UTILIZATION)%"
+              anthropic.ratelimit.unified.7d_utilization: "%RESP(ANTHROPIC-RATELIMIT-UNIFIED-7D-UTILIZATION)%"
+              anthropic.ratelimit.unified.7d_reset: "%RESP(ANTHROPIC-RATELIMIT-UNIFIED-7D-RESET)%"
+              anthropic.ratelimit.unified.reset: "%RESP(ANTHROPIC-RATELIMIT-UNIFIED-RESET)%"
               start_time: "%START_TIME%"
               method: "%REQ(:METHOD)%"
               x-envoy-origin-path: "%REQ(X-ENVOY-ORIGINAL-PATH?:PATH)%"

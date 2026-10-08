@@ -1,9 +1,5 @@
-# Max（Anthropic 直）向けの alias。issue #942 の表のうち `review` / `investigate` の 2 本、implement flow の
-# Claude 版が使う `implement-claude`、手元用のモデル名ルート。
-#
-# handler ごとに alias を切るのは、`x-ai-eg-model` がそのまま帰属の単位になるため。
-# review と investigate は今同じモデル（sonnet）・同じバックエンドに解決されるが、分けておくと
-# 「どの handler が Max の枠を食っているか」がログで分かれる。
+# Max（Anthropic 直）だけに向くルート。手元用のモデル名ルート。handler 用の alias は
+# claude-fallback（API クレジットが先、Max が予備）。
 apiVersion: aigateway.envoyproxy.io/v1beta1
 kind: AIGatewayRoute
 metadata:
@@ -21,80 +17,7 @@ spec:
       type: OutputToken
     - metadataKey: llm_total_token
       type: TotalToken
-  # modelNameOverride は**固定 ID** で、WFT が使ってきた `sonnet`（浮動 alias）とは追随しない。
-  # 次の Sonnet が出た日に、gateway は旧モデルを配り続ける。**沈黙して乖離する**ので、
-  # モデルを上げるときはここを人が上げる。
   rules:
-    # レビュー系（pr-review / adjudicator 等）。WFT は --model review、taskflow-review の handler は LLM_ALIAS（既定 review）で入る。
-    - matches:
-        - headers:
-            - type: Exact
-              name: x-ai-eg-model
-              value: review
-            # **どのクライアントがこの階層を使ってよいか。** 認証（Gateway 単位の
-            # SecurityPolicy）が付ける x-llm-client を見る。呼ぶ側は偽装できない
-            # （認証成功時に必ず上書きされる）。ここに無いクライアントは**どのルールにも
-            # 当たらず route-not-found → 404**。鍵が無ければその手前で 401。
-            # 新しい handler を足すときはここにも足す。
-            - type: RegularExpression
-              name: x-llm-client
-              value: "^(adjudicator|alert-investigate|claude-code-agent|claude-code-generic|implement|implement-verify|pluto-check|pr-review|task-executor|task-executor-write|taskflow-review|wf-creator|wf-improver|llm-gateway-smoke)$"
-      modelsOwnedBy: Envoy AI Gateway
-      backendRefs:
-        - name: claude-max
-          modelNameOverride: claude-sonnet-5
-          weight: 1
-          priority: 0
-      # 応答を受け切るまでの上限。thinking を含む 1 応答が数分かかるので短いと途中で切れ、
-      # クライアントは retry を繰り返して何も進まない。
-      timeouts:
-        request: 600s
-    # 障害調査系（alert-investigate 等）。将来ここだけ従量課金の
-    # Anthropic API キーへフォールバックする案が #942 にある。
-    - matches:
-        - headers:
-            - type: Exact
-              name: x-ai-eg-model
-              value: investigate
-            # **どのクライアントがこの階層を使ってよいか。** 認証（Gateway 単位の
-            # SecurityPolicy）が付ける x-llm-client を見る。呼ぶ側は偽装できない
-            # （認証成功時に必ず上書きされる）。ここに無いクライアントは**どのルールにも
-            # 当たらず route-not-found → 404**。鍵が無ければその手前で 401。
-            # 新しい handler を足すときはここにも足す。
-            - type: RegularExpression
-              name: x-llm-client
-              value: "^(adjudicator|alert-investigate|claude-code-agent|claude-code-generic|implement|implement-verify|pluto-check|pr-review|task-executor|task-executor-write|taskflow-investigate|wf-creator|wf-improver|llm-gateway-smoke)$"
-      modelsOwnedBy: Envoy AI Gateway
-      backendRefs:
-        - name: claude-max
-          modelNameOverride: claude-sonnet-5
-          weight: 1
-          priority: 0
-      # 応答を受け切るまでの上限。thinking を含む 1 応答が数分かかるので短いと途中で切れ、
-      # クライアントは retry を繰り返して何も進まない。
-      timeouts:
-        request: 600s
-    # implement flow の Claude 版（TaskFlow implement-claude）の実装と修正。Muse 版と比べるための枠。
-    # **untrusted input を実行する Pod が Max に届く口**（#942 はこれを切り離した）なので、
-    # 許可は taskflow-implement-claude だけに絞り、review / investigate には入れない。
-    # Muse 版の taskflow-implement をここに足さないこと。
-    # review / investigate（claude-sonnet-5）と違い claude-sonnet-5-5 を指定しているのは、implement flow で Muse と比べるために選んだモデルだから。
-    - matches:
-        - headers:
-            - type: Exact
-              name: x-ai-eg-model
-              value: implement-claude
-            - type: RegularExpression
-              name: x-llm-client
-              value: "^(taskflow-implement-claude|llm-gateway-smoke)$"
-      modelsOwnedBy: Envoy AI Gateway
-      backendRefs:
-        - name: claude-max
-          modelNameOverride: claude-sonnet-5-5
-          weight: 1
-          priority: 0
-      timeouts:
-        request: 600s
     # モデル名そのままのルート（手元の claude 用）。handler 用の alias と違い、名前が
     # 上流のモデル ID と一致するので、何に投げているかが読めて Claude Code もモデルを認識する。
     - matches:
@@ -127,6 +50,218 @@ spec:
           priority: 0
       timeouts:
         request: 600s
+---
+# handler 用の alias。API クレジット（claude-api）を先に使い、断られたら Max（claude-max）へ
+# 落とす。切り替えは下の BackendTrafficPolicy の再試行が起こす。priority だけでは、上流が
+# 応答している限り claude-api に送り続ける。
+#
+# handler ごとに alias を切るのは、`x-ai-eg-model` がそのまま帰属の単位になるため。
+# review と investigate は今同じモデル・同じバックエンドに解決されるが、分けておくと
+# 「どの handler がどの枠を食っているか」がログで分かれる。
+apiVersion: aigateway.envoyproxy.io/v1beta1
+kind: AIGatewayRoute
+metadata:
+  name: claude-fallback
+  namespace: llm-gateway
+spec:
+  parentRefs:
+    - name: llm-gateway
+      kind: Gateway
+      group: gateway.networking.k8s.io
+  llmRequestCosts:
+    - metadataKey: llm_input_token
+      type: InputToken
+    - metadataKey: llm_output_token
+      type: OutputToken
+    - metadataKey: llm_total_token
+      type: TotalToken
+  # modelNameOverride は**固定 ID** で、WFT が使ってきた `sonnet`（浮動 alias）とは追随しない。
+  # 次の Sonnet が出た日に、gateway は旧モデルを配り続ける。**沈黙して乖離する**ので、
+  # モデルを上げるときはここを人が上げる。
+  #
+  # **1 つのルールの 2 つの backendRef で揃えること。** 片方だけ上げると、フォールバックした
+  # ときだけ別のモデルが応える。
+  rules:
+    # レビュー系（pr-review / adjudicator 等）。WFT は --model review、taskflow-review の handler は LLM_ALIAS（既定 review）で入る。
+    - matches:
+        - headers:
+            - type: Exact
+              name: x-ai-eg-model
+              value: review
+            # **どのクライアントがこの階層を使ってよいか。** 認証（Gateway 単位の
+            # SecurityPolicy）が付ける x-llm-client を見る。呼ぶ側は偽装できない
+            # （認証成功時に必ず上書きされる）。ここに無いクライアントは**どのルールにも
+            # 当たらず route-not-found → 404**。鍵が無ければその手前で 401。
+            # 新しい handler を足すときはここにも足す。
+            - type: RegularExpression
+              name: x-llm-client
+              value: "^(adjudicator|alert-investigate|claude-code-agent|claude-code-generic|implement|implement-verify|pluto-check|pr-review|task-executor|task-executor-write|taskflow-review|wf-creator|wf-improver|llm-gateway-smoke)$"
+      modelsOwnedBy: Envoy AI Gateway
+      backendRefs:
+        - name: claude-api
+          modelNameOverride: claude-sonnet-5
+          weight: 1
+          priority: 0
+        - name: claude-max
+          modelNameOverride: claude-sonnet-5
+          weight: 1
+          priority: 1
+      # 応答を受け切るまでの上限。thinking を含む 1 応答が数分かかるので短いと途中で切れ、
+      # クライアントは retry を繰り返して何も進まない。
+      timeouts:
+        request: 600s
+    # 障害調査系（alert-investigate 等）。
+    - matches:
+        - headers:
+            - type: Exact
+              name: x-ai-eg-model
+              value: investigate
+            # **どのクライアントがこの階層を使ってよいか。** 認証（Gateway 単位の
+            # SecurityPolicy）が付ける x-llm-client を見る。呼ぶ側は偽装できない
+            # （認証成功時に必ず上書きされる）。ここに無いクライアントは**どのルールにも
+            # 当たらず route-not-found → 404**。鍵が無ければその手前で 401。
+            # 新しい handler を足すときはここにも足す。
+            - type: RegularExpression
+              name: x-llm-client
+              value: "^(adjudicator|alert-investigate|claude-code-agent|claude-code-generic|implement|implement-verify|pluto-check|pr-review|task-executor|task-executor-write|taskflow-investigate|wf-creator|wf-improver|llm-gateway-smoke)$"
+      modelsOwnedBy: Envoy AI Gateway
+      backendRefs:
+        - name: claude-api
+          modelNameOverride: claude-sonnet-5
+          weight: 1
+          priority: 0
+        - name: claude-max
+          modelNameOverride: claude-sonnet-5
+          weight: 1
+          priority: 1
+      # 応答を受け切るまでの上限。thinking を含む 1 応答が数分かかるので短いと途中で切れ、
+      # クライアントは retry を繰り返して何も進まない。
+      timeouts:
+        request: 600s
+    # implement flow の Claude 版（TaskFlow implement-claude）の実装と修正。Muse 版と比べるための枠。
+    # **untrusted input を実行する Pod が Max に届く口**（#942 はこれを切り離した）なので、
+    # 許可は taskflow-implement-claude だけに絞り、review / investigate には入れない。
+    # Muse 版の taskflow-implement をここに足さないこと。
+    # review / investigate（claude-sonnet-5）と違い claude-sonnet-5-5 を指定しているのは、implement flow で Muse と比べるために選んだモデルだから。
+    - matches:
+        - headers:
+            - type: Exact
+              name: x-ai-eg-model
+              value: implement-claude
+            - type: RegularExpression
+              name: x-llm-client
+              value: "^(taskflow-implement-claude|llm-gateway-smoke)$"
+      modelsOwnedBy: Envoy AI Gateway
+      backendRefs:
+        - name: claude-api
+          modelNameOverride: claude-sonnet-5-5
+          weight: 1
+          priority: 0
+        - name: claude-max
+          modelNameOverride: claude-sonnet-5-5
+          weight: 1
+          priority: 1
+      timeouts:
+        request: 600s
+---
+# claude-fallback の再試行。numAttemptsPerPriority: 1 で、再試行が次の priority（claude-max）へ
+# 回る。numRetries: 1 なので、Max 側の失敗はそのまま返る。
+#
+# - 400: クレジット切れ（credit balance too low）、workspace の spend limit 超過
+# - 401: claude-api-token の期限切れ（refresher の停止）
+# - 429 / 529: rate limit、過負荷
+# 応答が流れ始めた後のエラー（ストリーム途中の overloaded 等）は拾えない。
+#
+# perRetry.timeout を付けないこと。thinking を含む 1 応答は数分かかり、短いと応答の途中で
+# 切って Max へ投げ直す。上限はルールの timeouts.request が持つ。
+# Gateway に付いた BackendTrafficPolicy（レート制限）を上書きしないよう StrategicMerge で重ねる。
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: claude-fallback
+  namespace: llm-gateway
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      # AIGatewayRoute が同名の HTTPRoute を生成する。
+      name: claude-fallback
+  mergeType: StrategicMerge
+  retry:
+    numRetries: 1
+    numAttemptsPerPriority: 1
+    perRetry:
+      backOff:
+        baseInterval: 100ms
+        maxInterval: 1s
+    retryOn:
+      triggers:
+        - connect-failure
+        - retriable-status-codes
+      httpStatusCodes: [400, 401, 429, 500, 502, 503, 529]
+---
+apiVersion: aigateway.envoyproxy.io/v1beta1
+kind: AIServiceBackend
+metadata:
+  name: claude-api
+  namespace: llm-gateway
+spec:
+  schema:
+    name: Anthropic
+  backendRef:
+    # claude-max と宛先は同じでも Backend を共有しないこと。AIGatewayRoute は backendRef を
+    # そのまま HTTPRoute に写すので、同じ Backend が 1 つのルールに 2 つ並び、priority で
+    # 分けられる保証が無い。
+    name: claude-api
+    kind: Backend
+    group: gateway.envoyproxy.io
+---
+# 鍵は claude-api-refresher（Workload Identity Federation）が 20 分ごとに書く 1 時間の
+# 短命トークン（sk-ant-oat01-）。`Authorization: Bearer` で送るので汎用の APIKey 型。
+# この Secret は GitOps 管理外。git にプレースホルダを置くと selfHeal が refresher の書き込みを
+# 巻き戻す。
+apiVersion: aigateway.envoyproxy.io/v1beta1
+kind: BackendSecurityPolicy
+metadata:
+  name: claude-api
+  namespace: llm-gateway
+spec:
+  targetRefs:
+    - group: aigateway.envoyproxy.io
+      kind: AIServiceBackend
+      name: claude-api
+  type: APIKey
+  apiKey:
+    secretRef:
+      group: ""
+      kind: Secret
+      name: claude-api-token
+      namespace: llm-gateway
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: Backend
+metadata:
+  name: claude-api
+  namespace: llm-gateway
+spec:
+  endpoints:
+    - fqdn:
+        hostname: api.anthropic.com
+        port: 443
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: BackendTLSPolicy
+metadata:
+  name: claude-api
+  namespace: llm-gateway
+spec:
+  targetRefs:
+    - group: gateway.envoyproxy.io
+      kind: Backend
+      name: claude-api
+  validation:
+    wellKnownCACertificates: System
+    hostname: api.anthropic.com
 ---
 apiVersion: aigateway.envoyproxy.io/v1beta1
 kind: AIServiceBackend

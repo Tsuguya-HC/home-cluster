@@ -1,0 +1,128 @@
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+patches:
+  - target:
+      kind: TaskHandler
+      labelSelector: taskflow-role=review
+    patch: |-
+      - op: remove
+        path: /spec/jobTemplate/template/spec/runtimeClassName
+      # root で起動し、エージェントは 65533 に降ろす（ランナーが setpriv で降りる）。
+      - op: replace
+        path: /spec/jobTemplate/template/spec/securityContext
+        value:
+          runAsUser: 0
+          seccompProfile:
+            type: RuntimeDefault
+      - op: add
+        path: /spec/jobTemplate/template/spec/imagePullSecrets
+        value:
+          - name: harbor-agents-pull
+      - op: test
+        path: /spec/jobTemplate/template/spec/volumes/2/name
+        value: scripts
+      - op: remove
+        path: /spec/jobTemplate/template/spec/volumes/2
+      - op: test
+        path: /spec/jobTemplate/template/spec/volumes/1/name
+        value: parts
+      - op: replace
+        path: /spec/jobTemplate/template/spec/volumes/1
+        value:
+          name: scratch
+          # ノードのディスクを使うので上限を付ける。
+          emptyDir: {sizeLimit: 10Gi}
+      - op: add
+        path: /spec/jobTemplate/template/spec/volumes/-
+        value:
+          name: github-token
+          emptyDir: {}
+      # PR の取り込みはランナーが鍵を持って自分でやる。鍵は init が emptyDir に写し、ランナーが
+      # 読んだ後に消す。
+      - op: replace
+        path: /spec/jobTemplate/template/spec/initContainers
+        value:
+          - name: github-key
+            image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:c7880af8bbff8d5ae87387d19da26eacd4221d9faf215f545c173f0cadd6f49f
+            command: [sh, -c]
+            args: ['cp /github-gateway-key/key /github-token/token']
+            securityContext:
+              runAsUser: 65532
+              runAsNonRoot: true
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities: {drop: [ALL]}
+            volumeMounts:
+              - {name: github-gateway-key, mountPath: /github-gateway-key, readOnly: true}
+              - {name: github-token, mountPath: /github-token}
+            resources:
+              requests: {cpu: 10m, memory: 16Mi}
+              limits: {memory: 64Mi}
+      - op: test
+        path: /spec/jobTemplate/template/spec/containers/0/name
+        value: agent
+      # private プロジェクトのタグは Kyverno が digest に解決できず（401）Job ごと拒否されるので、
+      # digest で固定する。ランナーを上げるときはこの digest を上げる。
+      - op: replace
+        path: /spec/jobTemplate/template/spec/containers/0/image
+        value: registry.infra.tgy.io/agents/runner:latest@sha256:36273b95201cee781bc0383a3c2a03ec6bf6187b628b6535868af9c609c10127
+      - op: replace
+        path: /spec/jobTemplate/template/spec/containers/0/command
+        value: [bash, -c]
+      - op: replace
+        path: /spec/jobTemplate/template/spec/containers/0/args
+        value:
+          - |
+            set -u
+            give_up() {
+              mkdir -p /workspace/escalate
+              printf '%s\n' "$1" > /workspace/escalate/report.md
+              sync; exit 0
+            }
+            chown 65533:65533 /scratch \
+              || give_up "/scratch の所有者変更に失敗した。レビューは行っていない。"
+            export AGENT_MODEL="anthropic/${LLM_ALIAS}"
+            if [ "$AGENT_HARNESS" = pi ]; then
+              AGENT_MODELS_JSON=$(jq -cn --arg url "$ANTHROPIC_BASE_URL" --arg id "$LLM_ALIAS" '
+                {providers: {anthropic: {baseUrl: $url, headers: {},
+                  models: [{id: $id, api: "anthropic-messages", reasoning: true,
+                            contextWindow: 1048576, maxTokens: 131072}]}}}') \
+                || give_up "ランナーのモデル設定を組めなかった。レビューは行っていない。"
+              export AGENT_MODELS_JSON
+            fi
+            exec node /opt/runner/dist/main.js run review
+      - op: replace
+        path: /spec/jobTemplate/template/spec/containers/0/securityContext
+        value:
+          runAsUser: 0
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: [ALL]
+            add: [SETUID, SETGID, CHOWN, DAC_OVERRIDE, FOWNER, SETPCAP]
+      # ランナーは /run の下に root 専用の作業場所を作る。/run にボリュームを被せないこと。
+      - op: test
+        path: /spec/jobTemplate/template/spec/containers/0/volumeMounts/3/mountPath
+        value: /parts
+      - op: replace
+        path: /spec/jobTemplate/template/spec/containers/0/volumeMounts/3
+        value: {name: scratch, mountPath: /scratch}
+      - op: add
+        path: /spec/jobTemplate/template/spec/containers/0/volumeMounts/-
+        value: {name: github-token, mountPath: /github-token}
+      # 過去の全 run の棚（taskflow ADR-0003）。PR の URL と前の仕分けを読む。
+      - op: add
+        path: /spec/jobTemplate/template/spec/containers/0/volumeMounts/-
+        value: {name: flow-workspace, mountPath: /results, subPath: results, readOnly: true}
+      - op: add
+        path: /spec/jobTemplate/template/spec/containers/0/env/-
+        value: {name: AGENT_CONFINE, value: setpriv}
+      - op: add
+        path: /spec/jobTemplate/template/spec/containers/0/env/-
+        value: {name: REPO_OWNER, value: Tsuguya-HC}
+      - op: add
+        path: /spec/jobTemplate/template/spec/containers/0/env/-
+        value: {name: GITHUB_GATEWAY_HOST, value: gh-ro.infra.tgy.io}
+      # Job の timeout より短く。
+      - op: add
+        path: /spec/jobTemplate/template/spec/containers/0/env/-
+        value: {name: PHASE_BUDGET_MS, value: "1500000"}

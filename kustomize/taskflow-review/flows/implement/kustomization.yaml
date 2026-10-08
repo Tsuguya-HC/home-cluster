@@ -5,6 +5,7 @@ resources:
 components:
   - ../../runtime/runc
   - ../../harness/runner
+  - ../../harness/runner-review
   - ../../models/work/muse
   - ../../models/review/claude
   - ../../models/judge/claude

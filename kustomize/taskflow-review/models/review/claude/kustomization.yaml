@@ -5,6 +5,7 @@ configMapGenerator:
     literals:
       - alias=review
       - key=taskflow-review
+      - harness=claude
     options:
       disableNameSuffixHash: true
       annotations:

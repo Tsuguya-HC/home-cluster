@@ -233,6 +233,9 @@ spec:
               # gateway の alias。ANTHROPIC_AUTH_TOKEN の鍵に許可された alias でないと 404 になる。
               - name: LLM_ALIAS
                 value: review
+              # ランナーで動かすときのハーネス（claude | pi）。alias のモデルに合わせ、models/review が替える。
+              - name: AGENT_HARNESS
+                value: claude
               # テストは実行しない前提だが、go が依存を取りに行くと許可の無い宛先で
               # タイムアウトまでハングする。
               - name: GOPROXY

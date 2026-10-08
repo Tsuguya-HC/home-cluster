@@ -6,9 +6,6 @@ patches:
       labelSelector: taskflow-step=writer
     patch: |-
       - op: test
-        path: /spec/jobTemplate/template/spec/runtimeClassName
-        value: kata
-      - op: test
         path: /spec/jobTemplate/template/spec/volumes/6/name
         value: scripts
       - op: remove
@@ -34,7 +31,7 @@ patches:
       # digest で固定する。ランナーを上げるときはこの digest を上げる。
       - op: replace
         path: /spec/jobTemplate/template/spec/containers/0/image
-        value: registry.infra.tgy.io/agents/runner:latest@sha256:12420e4e07a8bdb66ba7bd9af5b0baf385f5c1c79e1e6607c89e2bb40f4ae733
+        value: registry.infra.tgy.io/agents/runner:latest@sha256:754b991b08cd7a1c4570b0de14c449875041146a2b844c6b401c9e18993582af
       - op: replace
         path: /spec/jobTemplate/template/spec/containers/0/command
         value: [bash, -c]
@@ -54,6 +51,8 @@ patches:
               mkdir -p /scratch && mount -o noatime /dev/scratch /scratch \
                 || give_up "Block スクラッチの mount に失敗した。実装は行っていない。"
             fi
+            chown 65533:65533 /scratch \
+              || give_up "/scratch の所有者変更に失敗した。実装は行っていない。"
             AGENT_MODEL="anthropic/${LLM_ALIAS}"
             AGENT_MODELS_JSON=$(jq -cn --arg url "$ANTHROPIC_BASE_URL" --arg id "$LLM_ALIAS" --arg h "$ANTHROPIC_CUSTOM_HEADERS" '
               {providers: {anthropic: {
@@ -82,6 +81,14 @@ patches:
         value: /inputs
       - op: remove
         path: /spec/jobTemplate/template/spec/containers/0/volumeMounts/2
+      # ランナーは降りるときに bounding set も空にする（CAP_SETPCAP が要る）。SYS_ADMIN は付けないので、
+      # 自前の PID namespace は作らせず setpriv で降りるだけにする。
+      - op: add
+        path: /spec/jobTemplate/template/spec/containers/0/securityContext/capabilities/add/-
+        value: SETPCAP
+      - op: add
+        path: /spec/jobTemplate/template/spec/containers/0/env/-
+        value: {name: AGENT_CONFINE, value: setpriv}
       - op: add
         path: /spec/jobTemplate/template/spec/containers/0/env/-
         value: {name: REPO_OWNER, value: Tsuguya-HC}

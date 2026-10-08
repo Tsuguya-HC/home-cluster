@@ -3,6 +3,7 @@ kind: Kustomization
 resources:
   - ../../flow
 components:
+  - ../../runtime/runc
   - ../../harness/runner
   - ../../models/work/muse
   - ../../models/review/claude

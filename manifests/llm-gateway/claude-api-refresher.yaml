@@ -1,0 +1,195 @@
+# Console の Workload Identity Federation で、この SA の projected token を
+# Anthropic API の短命トークン（sk-ant-oat01-）に交換し、claude-api の
+# BackendSecurityPolicy が読む Secret に書き戻す。静的な API キーは作らない。
+#
+# **SA の名前と namespace を変えるとき**: Console のフェデレーションルールが
+# `system:serviceaccount:llm-gateway:claude-api-refresher` を完全一致で見ている。
+# こちらだけ変えると交換が 401 になる。
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: claude-api-refresher
+  namespace: llm-gateway
+---
+# get を与えていない。毎回交換して上書きするだけで現在値を読む必要が無く、外すと
+# llm-gateway の他の Secret（上流のキー、クライアントキー一覧）へ手が届かないことが
+# RBAC で言い切れる。create に resourceNames が効かないのは K8s の仕様で、
+# この namespace に任意名の Secret を新規作成できる残余が残る（既存は読めず改変もできない）。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: claude-api-refresher
+  namespace: llm-gateway
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [create]
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [claude-api-token]
+    verbs: [patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: claude-api-refresher
+  namespace: llm-gateway
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: claude-api-refresher
+subjects:
+  - kind: ServiceAccount
+    name: claude-api-refresher
+    namespace: llm-gateway
+---
+# 20 分間隔なのは、Console のルールで交換後のトークン寿命を 1 時間にしているため。
+# Secret の更新が extproc に届くまで kubelet の反映分（1〜2 分）遅れるので、どの瞬間に
+# 掴んだトークンにも 30 分以上残る間隔にする。ルール側の寿命を縮めるなら、ここも縮める。
+#
+# **`claude-api-token` は GitOps 管理外。** 実行時に直接書くだけなので、この機能を
+# revert しても消えない。手動で消すなら `kubectl delete secret -n llm-gateway claude-api-token`。
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: claude-api-refresher
+  namespace: llm-gateway
+spec:
+  schedule: "*/20 * * * *"
+  # 未設定だと、開始の取りこぼしが 100 回続いた時点でスケジューリング自体を諦める。
+  startingDeadlineSeconds: 300
+  # 並走すると 2 つのトークンが順不同で同じ Secret を上書きする。
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      # 再試行は Pod ごと作り直すので、projected token も新しくなる。ルール側の JTI
+      # リプレイ保護で、同じ JWT は 2 回交換できない。
+      backoffLimit: 2
+      activeDeadlineSeconds: 300
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: claude-api-refresher
+        spec:
+          serviceAccountName: claude-api-refresher
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            fsGroup: 65532
+            seccompProfile:
+              type: RuntimeDefault
+          volumes:
+            - name: anthropic-token
+              projected:
+                sources:
+                  - serviceAccountToken:
+                      # Console のルールの想定オーディエンスと一致させる。
+                      audience: https://api.anthropic.com
+                      # 交換後の寿命は min(ルールの寿命, この JWT の残り × 2)。
+                      # ルールの 1 時間を出し切るには 30 分以上残っている必要がある。
+                      expirationSeconds: 3600
+                      path: token
+            - name: tmp
+              emptyDir: {}
+          containers:
+            - name: refresh
+              image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:c7880af8bbff8d5ae87387d19da26eacd4221d9faf215f545c173f0cadd6f49f
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: [ALL]
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 64Mi
+                limits:
+                  memory: 256Mi
+              env:
+                - name: ANTHROPIC_ORGANIZATION_ID
+                  value: "7c51ebeb-4544-4340-aa4d-430b8aefa92f"
+                - name: ANTHROPIC_FEDERATION_RULE_ID
+                  value: "fdrl_01Thds2qD4XzomV9xxfMeR1i"
+                - name: ANTHROPIC_SERVICE_ACCOUNT_ID
+                  value: "svac_01G9v8jPhY7kTyvGakpKxjWW"
+                - name: ANTHROPIC_WORKSPACE_ID
+                  value: "wrkspc_01JJRT6pdmBC4WhSe5LS5gNR"
+              volumeMounts:
+                - name: anthropic-token
+                  mountPath: /var/run/secrets/anthropic.com
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+              command: [sh, -c]
+              # JWT もトークンも argv に載せない（ファイル経由で渡す）。Tetragon が
+              # process_exec を引数込みで Loki へ export しているので、argv に載せると
+              # Grafana 読者全員に見える。
+              args:
+                - |
+                  set -eu
+                  umask 077
+                  jq -n --rawfile jwt /var/run/secrets/anthropic.com/token '{
+                    grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+                    assertion: ($jwt | rtrimstr("\n")),
+                    federation_rule_id: env.ANTHROPIC_FEDERATION_RULE_ID,
+                    organization_id: env.ANTHROPIC_ORGANIZATION_ID,
+                    service_account_id: env.ANTHROPIC_SERVICE_ACCOUNT_ID,
+                    workspace_id: env.ANTHROPIC_WORKSPACE_ID
+                  }' > /tmp/request.json
+                  code=$(curl -sS --max-time 30 -o /tmp/response.json -w '%{http_code}' \
+                    -H 'content-type: application/json' \
+                    --data @/tmp/request.json \
+                    https://api.anthropic.com/v1/oauth/token)
+                  rm -f /tmp/request.json
+                  if [ "$code" != 200 ]; then
+                    echo "exchange failed: HTTP ${code}" >&2
+                    jq -c '.error // .' /tmp/response.json >&2 || true
+                    exit 1
+                  fi
+                  # -j で末尾改行を入れない。値はそのまま Bearer の後ろに付くので、改行が
+                  # 混じると全リクエストが 401 になり「鍵が違う」と区別が付かない。
+                  jq -j '.access_token // empty' /tmp/response.json > /tmp/apiKey
+                  echo "exchanged: expires_in=$(jq -r '.expires_in' /tmp/response.json)"
+                  rm -f /tmp/response.json
+                  # 空や別物を書くと、症状が「交換に失敗した」ではなく gateway の 401 に化ける。
+                  case "$(cut -c1-13 /tmp/apiKey)" in
+                    sk-ant-oat01-) ;;
+                    *) echo "unexpected token shape" >&2; exit 1 ;;
+                  esac
+                  # --server-side なのは、client-side apply が last-applied-configuration に
+                  # 同じトークンをもう 1 部書き込むため。
+                  kubectl create secret generic claude-api-token \
+                    --namespace llm-gateway \
+                    --from-file=apiKey=/tmp/apiKey \
+                    --dry-run=client -o yaml \
+                    | kubectl apply --server-side --force-conflicts -f -
+                  rm -f /tmp/apiKey
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: claude-api-refresher
+  namespace: llm-gateway
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: claude-api-refresher
+  egress:
+    # Secret の書き戻し。kube-proxy replacement なので CP の実 IP に出る。
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "6443"
+              protocol: TCP
+    # JWT → 短命トークンの交換。
+    - toFQDNs:
+        - matchName: "api.anthropic.com"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP

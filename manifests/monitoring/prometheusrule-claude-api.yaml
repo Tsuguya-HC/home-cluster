@@ -1,0 +1,39 @@
+# claude-api-refresher が止まっても、claude-max へのフォールバックで handler は
+# 動き続ける。気づかないまま Max の週次枠を食い続けるので、成功の途絶を鳴らす。
+#
+# 閾値 45m: schedule は 20 分間隔・トークン寿命は 1 時間。1 回の取りこぼしでは
+# 鳴らさず、2 回続いたら for を含めて最後のトークンが切れる 10 分前に鳴らす。
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: claude-api
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: claude-api
+      rules:
+        - alert: ClaudeApiRefresherStale
+          expr: |
+            time() - max by (cronjob) (
+              kube_cronjob_status_last_successful_time{namespace="llm-gateway", cronjob="claude-api-refresher"}
+            ) > 45 * 60
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "claude-api-refresher が 45 分成功していない"
+            description: "llm-gateway/claude-api-refresher の最後の成功から {{ $value | humanizeDuration }} 経過。トークンが切れると claude-api への全リクエストが claude-max（Max の週次枠）へ落ちる。"
+
+        - alert: ClaudeApiRefresherNeverSucceeded
+          # kube-state-metrics は status.lastSuccessfulTime が未設定の間、
+          # シリーズごと出さない。`== 0` では発火しないので absent() で見る。
+          expr: |
+            absent(kube_cronjob_status_last_successful_time{namespace="llm-gateway", cronjob="claude-api-refresher"})
+          for: 45m
+          labels:
+            severity: warning
+          annotations:
+            summary: "claude-api-refresher に成功実行の記録が無い"
+            description: "llm-gateway/claude-api-refresher に成功実行の記録が無い。追加直後か、初回から失敗し続けている。"

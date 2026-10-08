@@ -1,0 +1,467 @@
+# llm-gateway の経路別（API クレジット / Max / OpenRouter）の利用と、Max の枠の使用率。
+# 経路は access log の gen_ai.provider.name（AIServiceBackend 名）から、Max の使用率は
+# 応答ヘッダ anthropic-ratelimit-unified-* を出した欄から取る（manifests/llm-gateway/gateway.yaml）。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-llm-gateway
+  labels:
+    grafana_dashboard: "1"
+data:
+  llm-gateway.json: |
+    {
+      "annotations": {
+        "list": []
+      },
+      "editable": true,
+      "graphTooltip": 1,
+      "links": [],
+      "panels": [
+        {
+          "id": 1,
+          "type": "timeseries",
+          "title": "Max の枠の使用率（Max で応答したときだけ点が打たれる）",
+          "description": "Max の応答ヘッダ anthropic-ratelimit-unified-*。アカウント全体（対話セッション込み）の使用率。gateway を Max の応答が通ったときだけ記録されるので点はまばら。",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 0,
+            "w": 24,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "lineWidth": 1,
+                "showPoints": "always",
+                "spanNulls": true,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                }
+              },
+              "unit": "percentunit",
+              "min": 0,
+              "max": 1
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "max(max_over_time({namespace=\"llm-gateway\", container=\"envoy\"} |= \"unified.7d_utilization\" | json u=\"[\\\"anthropic.ratelimit.unified.7d_utilization\\\"]\" | u != \"\" | unwrap u [$__auto]))",
+              "legendFormat": "週次 (7d)",
+              "queryType": "range",
+              "datasource": {
+                "type": "loki",
+                "uid": "loki"
+              }
+            },
+            {
+              "refId": "B",
+              "expr": "max(max_over_time({namespace=\"llm-gateway\", container=\"envoy\"} |= \"unified.5h_utilization\" | json u=\"[\\\"anthropic.ratelimit.unified.5h_utilization\\\"]\" | u != \"\" | unwrap u [$__auto]))",
+              "legendFormat": "5 時間",
+              "queryType": "range",
+              "datasource": {
+                "type": "loki",
+                "uid": "loki"
+              }
+            }
+          ]
+        },
+        {
+          "id": 2,
+          "type": "timeseries",
+          "title": "リクエスト数（応答した経路別）",
+          "description": "",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 8,
+            "w": 12,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "bars",
+                "fillOpacity": 50,
+                "lineWidth": 1,
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "normal"
+                }
+              },
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (backend) (count_over_time({namespace=\"llm-gateway\", container=\"envoy\"} |= \"gen_ai.provider.name\" | json backend=\"[\\\"gen_ai.provider.name\\\"]\", client=\"[\\\"llm.client\\\"]\" | backend != \"\" | label_format backend=`{{ regexReplaceAll \"^[^/]+/([^/]+)/.*\" .backend \"${1}\" }}` [$__auto]))",
+              "legendFormat": "{{backend}}",
+              "queryType": "range",
+              "datasource": {
+                "type": "loki",
+                "uid": "loki"
+              }
+            }
+          ]
+        },
+        {
+          "id": 3,
+          "type": "timeseries",
+          "title": "Max へのフォールバック（claude-fallback の再試行）",
+          "description": "",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 8,
+            "w": 12,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "bars",
+                "fillOpacity": 50,
+                "lineWidth": 1,
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "normal"
+                }
+              },
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (envoy_cluster_name) (increase(envoy_cluster_upstream_rq_retry{namespace=\"llm-gateway\", envoy_cluster_name=~\"httproute/llm-gateway/claude-fallback/.*\"}[$__rate_interval]))",
+              "legendFormat": "{{envoy_cluster_name}}",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              }
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "type": "timeseries",
+          "title": "入力トークン（キャッシュ読み書き込みの合計、経路別）",
+          "description": "",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 16,
+            "w": 12,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "bars",
+                "fillOpacity": 50,
+                "lineWidth": 1,
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "normal"
+                }
+              },
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (backend) (sum_over_time({namespace=\"llm-gateway\", container=\"envoy\"} |= \"gen_ai.usage\" | json backend=\"[\\\"gen_ai.provider.name\\\"]\", client=\"[\\\"llm.client\\\"]\" | backend != \"\" | label_format backend=`{{ regexReplaceAll \"^[^/]+/([^/]+)/.*\" .backend \"${1}\" }}` | json v=\"[\\\"gen_ai.usage.input_tokens\\\"]\" | v != \"\" | unwrap v [$__auto]))",
+              "legendFormat": "{{backend}}",
+              "queryType": "range",
+              "datasource": {
+                "type": "loki",
+                "uid": "loki"
+              }
+            }
+          ]
+        },
+        {
+          "id": 5,
+          "type": "timeseries",
+          "title": "キャッシュ読み / 書き（経路別）",
+          "description": "",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 16,
+            "w": 12,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "bars",
+                "fillOpacity": 50,
+                "lineWidth": 1,
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                }
+              },
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (backend) (sum_over_time({namespace=\"llm-gateway\", container=\"envoy\"} |= \"gen_ai.usage\" | json backend=\"[\\\"gen_ai.provider.name\\\"]\", client=\"[\\\"llm.client\\\"]\" | backend != \"\" | label_format backend=`{{ regexReplaceAll \"^[^/]+/([^/]+)/.*\" .backend \"${1}\" }}` | json v=\"[\\\"gen_ai.usage.cache_read.input_tokens\\\"]\" | v != \"\" | unwrap v [$__auto]))",
+              "legendFormat": "読み {{backend}}",
+              "queryType": "range",
+              "datasource": {
+                "type": "loki",
+                "uid": "loki"
+              }
+            },
+            {
+              "refId": "B",
+              "expr": "sum by (backend) (sum_over_time({namespace=\"llm-gateway\", container=\"envoy\"} |= \"gen_ai.usage\" | json backend=\"[\\\"gen_ai.provider.name\\\"]\", client=\"[\\\"llm.client\\\"]\" | backend != \"\" | label_format backend=`{{ regexReplaceAll \"^[^/]+/([^/]+)/.*\" .backend \"${1}\" }}` | json v=\"[\\\"gen_ai.usage.cache_creation.input_tokens\\\"]\" | v != \"\" | unwrap v [$__auto]))",
+              "legendFormat": "書き {{backend}}",
+              "queryType": "range",
+              "datasource": {
+                "type": "loki",
+                "uid": "loki"
+              }
+            }
+          ]
+        },
+        {
+          "id": 6,
+          "type": "timeseries",
+          "title": "出力トークン（経路別）",
+          "description": "",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 24,
+            "w": 12,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "bars",
+                "fillOpacity": 50,
+                "lineWidth": 1,
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "normal"
+                }
+              },
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (backend) (sum_over_time({namespace=\"llm-gateway\", container=\"envoy\"} |= \"gen_ai.usage\" | json backend=\"[\\\"gen_ai.provider.name\\\"]\", client=\"[\\\"llm.client\\\"]\" | backend != \"\" | label_format backend=`{{ regexReplaceAll \"^[^/]+/([^/]+)/.*\" .backend \"${1}\" }}` | json v=\"[\\\"gen_ai.usage.output_tokens\\\"]\" | v != \"\" | unwrap v [$__auto]))",
+              "legendFormat": "{{backend}}",
+              "queryType": "range",
+              "datasource": {
+                "type": "loki",
+                "uid": "loki"
+              }
+            }
+          ]
+        },
+        {
+          "id": 7,
+          "type": "table",
+          "title": "クライアント × 経路（表示期間の合計リクエスト数）",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 24,
+            "w": 12,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": []
+          },
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "footer": {
+              "show": false,
+              "reducer": [
+                "sum"
+              ],
+              "countRows": false,
+              "fields": ""
+            }
+          },
+          "transformations": [
+            {
+              "id": "labelsToFields",
+              "options": {
+                "mode": "columns"
+              }
+            },
+            {
+              "id": "merge",
+              "options": {}
+            }
+          ],
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "loki",
+                "uid": "loki"
+              },
+              "queryType": "instant",
+              "expr": "sum by (client, backend) (count_over_time({namespace=\"llm-gateway\", container=\"envoy\"} |= \"gen_ai.provider.name\" | json backend=\"[\\\"gen_ai.provider.name\\\"]\", client=\"[\\\"llm.client\\\"]\" | backend != \"\" | label_format backend=`{{ regexReplaceAll \"^[^/]+/([^/]+)/.*\" .backend \"${1}\" }}` [$__range]))"
+            }
+          ]
+        }
+      ],
+      "refresh": "5m",
+      "schemaVersion": 39,
+      "tags": [
+        "llm-gateway"
+      ],
+      "templating": {
+        "list": []
+      },
+      "time": {
+        "from": "now-24h",
+        "to": "now"
+      },
+      "timepicker": {},
+      "timezone": "",
+      "title": "LLM Gateway",
+      "uid": "llm-gateway",
+      "version": 1
+    }

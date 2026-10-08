@@ -24,6 +24,10 @@ spec:
       type: OutputToken
     - metadataKey: llm_total_token
       type: TotalToken
+    - metadataKey: llm_cached_input_token
+      type: CachedInputToken
+    - metadataKey: llm_cache_creation_input_token
+      type: CacheCreationInputToken
   rules:
     - matches:
         - headers:
@@ -74,6 +78,10 @@ spec:
       type: OutputToken
     - metadataKey: llm_total_token
       type: TotalToken
+    - metadataKey: llm_cached_input_token
+      type: CachedInputToken
+    - metadataKey: llm_cache_creation_input_token
+      type: CacheCreationInputToken
   rules:
     - matches:
         - headers:
@@ -122,6 +130,10 @@ spec:
       type: OutputToken
     - metadataKey: llm_total_token
       type: TotalToken
+    - metadataKey: llm_cached_input_token
+      type: CachedInputToken
+    - metadataKey: llm_cache_creation_input_token
+      type: CacheCreationInputToken
   rules:
     - matches:
         - headers:

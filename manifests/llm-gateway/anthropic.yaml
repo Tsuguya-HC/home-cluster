@@ -17,6 +17,10 @@ spec:
       type: OutputToken
     - metadataKey: llm_total_token
       type: TotalToken
+    - metadataKey: llm_cached_input_token
+      type: CachedInputToken
+    - metadataKey: llm_cache_creation_input_token
+      type: CacheCreationInputToken
   rules:
     # モデル名そのままのルート（手元の claude 用）。handler 用の alias と違い、名前が
     # 上流のモデル ID と一致するので、何に投げているかが読めて Claude Code もモデルを認識する。
@@ -75,6 +79,10 @@ spec:
       type: OutputToken
     - metadataKey: llm_total_token
       type: TotalToken
+    - metadataKey: llm_cached_input_token
+      type: CachedInputToken
+    - metadataKey: llm_cache_creation_input_token
+      type: CacheCreationInputToken
   # modelNameOverride は**固定 ID** で、WFT が使ってきた `sonnet`（浮動 alias）とは追随しない。
   # 次の Sonnet が出た日に、gateway は旧モデルを配り続ける。**沈黙して乖離する**ので、
   # モデルを上げるときはここを人が上げる。

@@ -159,6 +159,11 @@ spec:
               gen_ai.usage.input_tokens: "%DYNAMIC_METADATA(io.envoy.ai_gateway:llm_input_token)%"
               gen_ai.usage.output_tokens: "%DYNAMIC_METADATA(io.envoy.ai_gateway:llm_output_token)%"
               gen_ai.usage.total_tokens: "%DYNAMIC_METADATA(io.envoy.ai_gateway:llm_total_token)%"
+              gen_ai.usage.cache_read.input_tokens: "%DYNAMIC_METADATA(io.envoy.ai_gateway:llm_cached_input_token)%"
+              gen_ai.usage.cache_creation.input_tokens: "%DYNAMIC_METADATA(io.envoy.ai_gateway:llm_cache_creation_input_token)%"
+              # 上流が返したリクエスト ID（Anthropic は request-id ヘッダで返す）。Console の
+              # リクエストログと 1 件ずつ突き合わせるための鍵。
+              upstream_request_id: "%RESP(REQUEST-ID)%"
               start_time: "%START_TIME%"
               method: "%REQ(:METHOD)%"
               x-envoy-origin-path: "%REQ(X-ENVOY-ORIGINAL-PATH?:PATH)%"

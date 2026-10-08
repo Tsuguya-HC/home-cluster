@@ -1,0 +1,41 @@
+# handler 用の alias（claude-fallback）が API クレジット側で断られて Max へ落ちている状態。
+# 落ちてもリクエストは成功するので、handler からは何も見えず、Max の週次枠を黙って食う。
+#
+# 割合で見るのは、429 のような一時的な再試行で鳴らさないため。件数の下限は、深夜のように
+# 数件しか無い時間帯で 1 件の再試行を 100% と読まないため。
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: llm-gateway-fallback
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: llm-gateway-fallback
+      rules:
+        - alert: ClaudeApiFallingBackToMax
+          # upstream_rq_total は再試行も 1 回と数える（上流への試行数）。元のリクエスト数は
+          # total - retry。total をそのまま分母にすると、全部が落ちても 0.5 にしかならない。
+          expr: |
+            (
+              sum(increase(envoy_cluster_upstream_rq_retry{namespace="llm-gateway", envoy_cluster_name=~"httproute/llm-gateway/claude-fallback/.*"}[1h]))
+                /
+              (
+                sum(increase(envoy_cluster_upstream_rq_total{namespace="llm-gateway", envoy_cluster_name=~"httproute/llm-gateway/claude-fallback/.*"}[1h]))
+                  -
+                sum(increase(envoy_cluster_upstream_rq_retry{namespace="llm-gateway", envoy_cluster_name=~"httproute/llm-gateway/claude-fallback/.*"}[1h]))
+              )
+            ) > 0.5
+              and
+            (
+              sum(increase(envoy_cluster_upstream_rq_total{namespace="llm-gateway", envoy_cluster_name=~"httproute/llm-gateway/claude-fallback/.*"}[1h]))
+                -
+              sum(increase(envoy_cluster_upstream_rq_retry{namespace="llm-gateway", envoy_cluster_name=~"httproute/llm-gateway/claude-fallback/.*"}[1h]))
+            ) >= 10
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "handler の Claude 呼び出しの半分以上が Max へ落ちている"
+            description: "直近 1 時間、claude-fallback のリクエストのうち Max へ落ちた割合が {{ $value | humanizePercentage }}。API クレジット切れ・spend limit 超過・claude-api-token の失効のどれか。claude-api-refresher のログと Console の残高を見る。"

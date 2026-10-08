@@ -41,9 +41,20 @@ spec:
         - ports:
             - port: "10080"
               protocol: TCP
+    # Prometheus の scrape（podmonitor.yaml）。:19001 は Envoy の stats、:1064 は extproc の
+    # admin（/metrics）。対向の egress は monitoring/netpol-prometheus.yaml。
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: prometheus
+            io.kubernetes.pod.namespace: monitoring
+      toPorts:
+        - ports:
+            - port: "19001"
+              protocol: TCP
+            - port: "1064"
+              protocol: TCP
     # kubelet の probe。Envoy Gateway の readiness は :19003/ready で、:19001 は
-    # stats（Prometheus 用、今は誰も引いていない）。混同すると probe が落ちて
-    # Pod が永久に Ready にならない。
+    # stats。混同すると probe が落ちて Pod が永久に Ready にならない。
     - fromEntities:
         - host
         - remote-node

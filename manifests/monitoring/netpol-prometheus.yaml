@@ -140,6 +140,19 @@ spec:
         - ports:
             - port: "9090"
               protocol: TCP
+    # llm-gateway の Envoy データプレーン（Envoy の stats :19001 と extproc の :1064）。
+    # gateway-name まで見るのは、同じ namespace の github-mcp の Envoy を含めないため。
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/managed-by: envoy-gateway
+            gateway.networking.k8s.io/gateway-name: llm-gateway
+            io.kubernetes.pod.namespace: llm-gateway
+      toPorts:
+        - ports:
+            - port: "19001"
+              protocol: TCP
+            - port: "1064"
+              protocol: TCP
     # ai-gateway-controller（Agent Router）。kubebuilder の authn/authz フィルタが無く
     # 素の HTTP :8080（#948）。
     - toEndpoints:

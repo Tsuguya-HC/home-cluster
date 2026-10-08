@@ -43,7 +43,9 @@ Application が Unknown のまま止まる形で出る。
 ## Anthropic（Max の alias）
 
 - **用途**: `llm-gateway` の `review` / `investigate` / `implement-claude`（implement flow の Claude 版）alias と、local-dev 用の `claude-opus-5-5` / `claude-sonnet-5`、ほかのリポジトリで定義する利用者向けのルート（Max の OAuth トークンで Anthropic 直）
-- **引く側**: Envoy データプレーン（`manifests/llm-gateway/netpol.yaml`）**だけ**。
+- **引く側**: Envoy データプレーン（`manifests/llm-gateway/netpol.yaml`）と、Workload Identity
+  Federation の交換（`POST /v1/oauth/token`）をする `claude-api-refresher`
+  （`manifests/llm-gateway/claude-api-refresher.yaml`）**だけ**。推論を投げるのは Envoy だけ。
   `claude-code` の handler も `argo` の `pluto-check` も gateway 経由で、直接は出ない。
   どれも CNP 側で直行を塞いであるので env 取り違えは drop で検出できる。ただし正しく設定して
   いても直行しうるため、handler 側で env 3 本を入れて止めている

@@ -5,7 +5,10 @@ metadata:
 handler: kata
 overhead:
   podFixed:
-    memory: "130Mi"
+    # ゲストのメモリはコンテナの limit の合計に Kata の default_memory を足した大きさで、
+    # ホストではその全部が Pod の memory cgroup に載る。default_memory 分をここで足さないと、
+    # ゲストがメモリを使い切ったときに cgroup が VM ごと OOM kill する（全コンテナ exit 255）。
+    memory: "2178Mi"
     cpu: "250m"
 scheduling:
   nodeSelector:

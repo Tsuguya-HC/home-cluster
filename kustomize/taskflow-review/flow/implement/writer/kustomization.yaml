@@ -3,7 +3,3 @@ kind: Kustomization
 resources:
   - ../base
 nameSuffix: -writer
-# 実装の回だけを選ぶ印（harness/ の component が使う）。
-labels:
-  - pairs:
-      taskflow-step: writer

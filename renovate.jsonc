@@ -141,6 +141,16 @@
       "autoReplaceStringTemplate": "name: SIDECAR_IMAGE\n                    value: {{{depName}}}:{{{newValue}}}{{#if newDigest}}@{{{newDigest}}}{{/if}}"
     },
     {
+      // The agents runner image lives in a JSON-patch value inside a kustomize
+      // Component, which the kubernetes manager does not parse.
+      "customType": "regex",
+      "managerFilePatterns": ["/kustomize/taskflow-review/harness/[^/]+/kustomization\\.yaml$/"],
+      "matchStrings": [
+        "value: (?<depName>registry\\.infra\\.tgy\\.io/agents/runner):(?<currentValue>[^@\\s]+)@(?<currentDigest>sha256:[a-f0-9]{64})"
+      ],
+      "datasourceTemplate": "docker"
+    },
+    {
       // Generic `# renovate:` annotation over a shell-style assignment, for versions
       // that live in env vars and args rather than image tags.
       "customType": "regex",
@@ -307,6 +317,17 @@
       "matchPackageNames": ["registry.suse.com/suse/kubectl"],
       "schedule": ["before 6am on monday"],
       "updateNotScheduled": false
+    },
+    {
+      "description": [
+        "The agents runner (implement flow's writer, fixer and review handlers). A",
+        "running Task keeps the handler specs it copied at start, so a new digest",
+        "reaches only Tasks created after it lands."
+      ],
+      "matchDepNames": ["registry.infra.tgy.io/agents/runner"],
+      "matchUpdateTypes": ["digest"],
+      "groupName": "agents runner",
+      "automerge": true
     },
     {
       "description": "Do not automerge critical infrastructure",

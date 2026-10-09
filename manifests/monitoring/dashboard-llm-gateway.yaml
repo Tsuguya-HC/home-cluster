@@ -1,6 +1,7 @@
 # llm-gateway の経路別（API クレジット / Max / OpenRouter）の利用と、Max の枠の使用率。
 # 経路は access log の gen_ai.provider.name（AIServiceBackend 名）から、Max の使用率は
 # 応答ヘッダ anthropic-ratelimit-unified-* を出した欄から取る（manifests/llm-gateway/gateway.yaml）。
+# count_tokens は推論ではない（無料）のに入力トークンが付くので、パスで外す。
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -137,7 +138,7 @@ data:
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (backend) (count_over_time({namespace=\"llm-gateway\", container=\"envoy\"} |= \"gen_ai.provider.name\" | json backend=\"[\\\"gen_ai.provider.name\\\"]\", client=\"[\\\"llm.client\\\"]\" | backend != \"\" | label_format backend=`{{ regexReplaceAll \"^[^/]+/([^/]+)/.*\" .backend \"${1}\" }}` [$__auto]))",
+              "expr": "sum by (backend) (count_over_time({namespace=\"llm-gateway\", container=\"envoy\"} |= \"gen_ai.provider.name\" | json backend=\"[\\\"gen_ai.provider.name\\\"]\", client=\"[\\\"llm.client\\\"]\", path=\"[\\\"x-envoy-origin-path\\\"]\" | backend != \"\" | path !~ \".*/count_tokens\" | label_format backend=`{{ regexReplaceAll \"^[^/]+/([^/]+)/.*\" .backend \"${1}\" }}` [$__auto]))",
               "legendFormat": "{{backend}}",
               "queryType": "range",
               "datasource": {
@@ -254,7 +255,7 @@ data:
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (backend) (sum_over_time({namespace=\"llm-gateway\", container=\"envoy\"} |= \"gen_ai.usage\" | json backend=\"[\\\"gen_ai.provider.name\\\"]\", client=\"[\\\"llm.client\\\"]\" | backend != \"\" | label_format backend=`{{ regexReplaceAll \"^[^/]+/([^/]+)/.*\" .backend \"${1}\" }}` | json v=\"[\\\"gen_ai.usage.input_tokens\\\"]\" | v != \"\" | unwrap v [$__auto]))",
+              "expr": "sum by (backend) (sum_over_time({namespace=\"llm-gateway\", container=\"envoy\"} |= \"gen_ai.usage\" | json backend=\"[\\\"gen_ai.provider.name\\\"]\", client=\"[\\\"llm.client\\\"]\", path=\"[\\\"x-envoy-origin-path\\\"]\" | backend != \"\" | path !~ \".*/count_tokens\" | label_format backend=`{{ regexReplaceAll \"^[^/]+/([^/]+)/.*\" .backend \"${1}\" }}` | json v=\"[\\\"gen_ai.usage.input_tokens\\\"]\" | v != \"\" | unwrap v [$__auto]))",
               "legendFormat": "{{backend}}",
               "queryType": "range",
               "datasource": {
@@ -313,7 +314,7 @@ data:
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (backend) (sum_over_time({namespace=\"llm-gateway\", container=\"envoy\"} |= \"gen_ai.usage\" | json backend=\"[\\\"gen_ai.provider.name\\\"]\", client=\"[\\\"llm.client\\\"]\" | backend != \"\" | label_format backend=`{{ regexReplaceAll \"^[^/]+/([^/]+)/.*\" .backend \"${1}\" }}` | json v=\"[\\\"gen_ai.usage.cache_read.input_tokens\\\"]\" | v != \"\" | unwrap v [$__auto]))",
+              "expr": "sum by (backend) (sum_over_time({namespace=\"llm-gateway\", container=\"envoy\"} |= \"gen_ai.usage\" | json backend=\"[\\\"gen_ai.provider.name\\\"]\", client=\"[\\\"llm.client\\\"]\", path=\"[\\\"x-envoy-origin-path\\\"]\" | backend != \"\" | path !~ \".*/count_tokens\" | label_format backend=`{{ regexReplaceAll \"^[^/]+/([^/]+)/.*\" .backend \"${1}\" }}` | json v=\"[\\\"gen_ai.usage.cache_read.input_tokens\\\"]\" | v != \"\" | unwrap v [$__auto]))",
               "legendFormat": "読み {{backend}}",
               "queryType": "range",
               "datasource": {
@@ -323,7 +324,7 @@ data:
             },
             {
               "refId": "B",
-              "expr": "sum by (backend) (sum_over_time({namespace=\"llm-gateway\", container=\"envoy\"} |= \"gen_ai.usage\" | json backend=\"[\\\"gen_ai.provider.name\\\"]\", client=\"[\\\"llm.client\\\"]\" | backend != \"\" | label_format backend=`{{ regexReplaceAll \"^[^/]+/([^/]+)/.*\" .backend \"${1}\" }}` | json v=\"[\\\"gen_ai.usage.cache_creation.input_tokens\\\"]\" | v != \"\" | unwrap v [$__auto]))",
+              "expr": "sum by (backend) (sum_over_time({namespace=\"llm-gateway\", container=\"envoy\"} |= \"gen_ai.usage\" | json backend=\"[\\\"gen_ai.provider.name\\\"]\", client=\"[\\\"llm.client\\\"]\", path=\"[\\\"x-envoy-origin-path\\\"]\" | backend != \"\" | path !~ \".*/count_tokens\" | label_format backend=`{{ regexReplaceAll \"^[^/]+/([^/]+)/.*\" .backend \"${1}\" }}` | json v=\"[\\\"gen_ai.usage.cache_creation.input_tokens\\\"]\" | v != \"\" | unwrap v [$__auto]))",
               "legendFormat": "書き {{backend}}",
               "queryType": "range",
               "datasource": {
@@ -382,7 +383,7 @@ data:
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (backend) (sum_over_time({namespace=\"llm-gateway\", container=\"envoy\"} |= \"gen_ai.usage\" | json backend=\"[\\\"gen_ai.provider.name\\\"]\", client=\"[\\\"llm.client\\\"]\" | backend != \"\" | label_format backend=`{{ regexReplaceAll \"^[^/]+/([^/]+)/.*\" .backend \"${1}\" }}` | json v=\"[\\\"gen_ai.usage.output_tokens\\\"]\" | v != \"\" | unwrap v [$__auto]))",
+              "expr": "sum by (backend) (sum_over_time({namespace=\"llm-gateway\", container=\"envoy\"} |= \"gen_ai.usage\" | json backend=\"[\\\"gen_ai.provider.name\\\"]\", client=\"[\\\"llm.client\\\"]\", path=\"[\\\"x-envoy-origin-path\\\"]\" | backend != \"\" | path !~ \".*/count_tokens\" | label_format backend=`{{ regexReplaceAll \"^[^/]+/([^/]+)/.*\" .backend \"${1}\" }}` | json v=\"[\\\"gen_ai.usage.output_tokens\\\"]\" | v != \"\" | unwrap v [$__auto]))",
               "legendFormat": "{{backend}}",
               "queryType": "range",
               "datasource": {
@@ -442,7 +443,7 @@ data:
                 "uid": "loki"
               },
               "queryType": "instant",
-              "expr": "sum by (client, backend) (count_over_time({namespace=\"llm-gateway\", container=\"envoy\"} |= \"gen_ai.provider.name\" | json backend=\"[\\\"gen_ai.provider.name\\\"]\", client=\"[\\\"llm.client\\\"]\" | backend != \"\" | label_format backend=`{{ regexReplaceAll \"^[^/]+/([^/]+)/.*\" .backend \"${1}\" }}` [$__range]))"
+              "expr": "sum by (client, backend) (count_over_time({namespace=\"llm-gateway\", container=\"envoy\"} |= \"gen_ai.provider.name\" | json backend=\"[\\\"gen_ai.provider.name\\\"]\", client=\"[\\\"llm.client\\\"]\", path=\"[\\\"x-envoy-origin-path\\\"]\" | backend != \"\" | path !~ \".*/count_tokens\" | label_format backend=`{{ regexReplaceAll \"^[^/]+/([^/]+)/.*\" .backend \"${1}\" }}` [$__range]))"
             }
           ]
         }

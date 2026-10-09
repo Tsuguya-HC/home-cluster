@@ -49,7 +49,7 @@ resources:
 images:
   - name: controller
     newName: registry.infra.tgy.io/tools/taskflow
-    newTag: latest@sha256:6caa3237d04017fea9569ac3d65d7fc00ed593a46b0f06d5ba4ca3e41e1447d7
+    newTag: latest@sha256:80a30f2c2991cc39259c8e750e4bceb39dc351318ef5ab75dfdd024a68cfe1a6
 
 patches:
   # 全 namespace restricted 運用に合わせる（config/default の Namespace にはラベルが無い）
@@ -88,7 +88,7 @@ patches:
               - name: manager
                 env:
                   - name: SIDECAR_IMAGE
-                    value: registry.infra.tgy.io/tools/agent-sidecar:latest@sha256:d1de4239ebe7ce01e50dcd455c1adb8b217bdaec6d38ecabcc2125f0a25c8305
+                    value: registry.infra.tgy.io/tools/agent-sidecar:latest@sha256:19f91614dd9ad7e4c7011136be9e7170807520456e14f3472b1bae0dff9dd687
 
   # TaskFlow の構造検査 webhook（taskflow #17 / ADR-0006）。taskflow 側は caBundle を
   # 持たない ValidatingWebhookConfiguration を配るだけなので、埋めるのはこちら —

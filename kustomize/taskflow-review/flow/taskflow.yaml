@@ -36,6 +36,10 @@ spec:
   profile: investigate
   start: 調査
   workspace: {}
+  # 完了した Task の棚と workspace は Task と一緒に消える。後から PR の経緯や
+  # 提出の記録を調べられるよう、完了も 1 日は残す。
+  ttl:
+    succeeded: 24h
   bindings:
     # 症状が見つからない・要求が定まらないなら実装に進まず人間へ。
     # investigator はこの一式の外にあり、nameSuffix が付かない（全組み合わせで共有）。

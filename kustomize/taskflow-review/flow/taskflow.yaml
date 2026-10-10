@@ -43,12 +43,12 @@ spec:
       handler: investigator
       next:
         実装: located
-        Escalated: escalate
+        TaskFailed: escalate
     実装:
       handler: implement-writer
       next:
         観点出し: done
-        Escalated: escalate
+        TaskFailed: escalate
     # Jev が選んだ観点と、毎回の general を起動する（#1081）。general は always に置かない —
     # 分岐元が 1 つも書かないと always があっても NoAnswer なので（ADR-0013 決定1）、
     # 観点出しが必ず書ける行き先として残す。
@@ -62,19 +62,19 @@ spec:
         states: states
         precedent: precedent
         ui: ui
-        Escalated: escalate
+        TaskFailed: escalate
       join:
         phase: 仕分け
         always: [documented, tests]
-    general: {handler: review-general, next: {仕分け: reviewed, Escalated: escalate}}
-    failpath: {handler: review-failpath, next: {仕分け: reviewed, Escalated: escalate}}
-    boundary: {handler: review-boundary, next: {仕分け: reviewed, Escalated: escalate}}
-    runtime: {handler: review-runtime, next: {仕分け: reviewed, Escalated: escalate}}
-    states: {handler: review-states, next: {仕分け: reviewed, Escalated: escalate}}
-    precedent: {handler: review-precedent, next: {仕分け: reviewed, Escalated: escalate}}
-    ui: {handler: review-ui, next: {仕分け: reviewed, Escalated: escalate}}
-    documented: {handler: review-documented, next: {仕分け: reviewed, Escalated: escalate}}
-    tests: {handler: review-tests, next: {仕分け: reviewed, Escalated: escalate}}
+    general: {handler: review-general, next: {仕分け: reviewed, TaskFailed: escalate}}
+    failpath: {handler: review-failpath, next: {仕分け: reviewed, TaskFailed: escalate}}
+    boundary: {handler: review-boundary, next: {仕分け: reviewed, TaskFailed: escalate}}
+    runtime: {handler: review-runtime, next: {仕分け: reviewed, TaskFailed: escalate}}
+    states: {handler: review-states, next: {仕分け: reviewed, TaskFailed: escalate}}
+    precedent: {handler: review-precedent, next: {仕分け: reviewed, TaskFailed: escalate}}
+    ui: {handler: review-ui, next: {仕分け: reviewed, TaskFailed: escalate}}
+    documented: {handler: review-documented, next: {仕分け: reviewed, TaskFailed: escalate}}
+    tests: {handler: review-tests, next: {仕分け: reviewed, TaskFailed: escalate}}
     # 仕分けは止まらず、この PR で直さないものは起票の候補に残す。escalate は仕分けそのものが
     # 成り立たないときだけ。
     仕分け:
@@ -82,17 +82,17 @@ spec:
       next:
         完了: clean
         修正: fix
-        Escalated: escalate
+        TaskFailed: escalate
     # 最新の仕分けが採用した指摘を直す。検証から戻されたときも同じ（まだ直っていない点を読む）。
     修正:
       handler: implement-fixer
       next:
         検証: done
-        Escalated: escalate
+        TaskFailed: escalate
     # 採用した指摘が直ったかだけを確かめ、新しい欠陥は探さない（周回を閉じるため）。直った
     # ときの行き先は handler のスクリプトが仕分けの採用の重さで決める: MEDIUM 以上を直したなら
     # rereview（もう一度レビュー）、LOW 以下だけなら verified。escalate は持たない。
-    # 周回は maxRunsPerPhase で止まる（上限に当たると RunLimitReached → Escalated）。
+    # 周回は maxRunsPerPhase で止まる（上限に当たると RunLimitReached → TaskFailed）。
     検証:
       handler: review-verify
       next:

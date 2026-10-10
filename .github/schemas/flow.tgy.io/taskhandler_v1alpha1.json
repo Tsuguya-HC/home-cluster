@@ -7142,7 +7142,7 @@
      "type": "integer"
     },
     "phase": {
-     "description": "Phase this handler can fill — a status name from the flow's own\nvocabulary. The framework owns only two names and refuses those; every\nother string is the author's to choose.",
+     "description": "Phase this handler can fill — a status name from the flow's own\nvocabulary. The framework owns only one name and refuses it; every\nother string is the author's to choose.",
      "minLength": 1,
      "type": "string"
     },

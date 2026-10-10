@@ -39,7 +39,7 @@ spec:
   phase: 承認
   runner:
     type: State
-  # スモークなので人が答えるのを待てる長さ。超えれば NoAnswer → Escalated。
+  # スモークなので人が答えるのを待てる長さ。超えれば NoAnswer → TaskFailed。
   timeout: 30m
 ---
 # 直前の State run の棚を読む。手元の run（work/<runID>）とは別に、results/ を読み取り専用で見る。
@@ -148,7 +148,7 @@ spec:
         確認: ok
         # 語彙を 2 つにしておく: 置き場の注釈 choices が宣言から生成されることが
         # 1 つだけだと確かめられない。こちらを書けば人手に渡って止まる。
-        Escalated: hold
+        TaskFailed: hold
     確認:
       handler: smoke-state-checker
       next:

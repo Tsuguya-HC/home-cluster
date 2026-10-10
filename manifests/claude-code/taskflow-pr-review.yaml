@@ -19,10 +19,10 @@
 # Warning Event（reason HandlerFailed）と Ready=False と metric が出る。Step 0 の cnp-check は
 # 通知サイドカーが判定を自前でやり直していたが、それは利用側が毎回書き直す羽目になる
 # （design.md §5）。metric から Discord への配線は
-# manifests/monitoring/prometheusrule-taskflow.yaml（Escalated も含めてこの Pod の外で完結する）。
+# manifests/monitoring/prometheusrule-taskflow.yaml（TaskFailed も含めてこの Pod の外で完結する）。
 #
 # レビュアーが読む diff と PR 本文は**攻撃者が書ける入力**（設計 §8「信頼できない入力を読む
-# handler の制約」）。この flow はまさにそのケース — 束縛の無い終端（完了・要修正・Escalated）へ
+# handler の制約」）。この flow はまさにそのケース — 束縛の無い終端（完了・要修正・TaskFailed）へ
 # 直行する辺しか持たない。
 #
 # §8 が求める 2 つのうち、**ネットワーク隔離は満たしている**: claude-code=true の共有 CNP には
@@ -113,7 +113,7 @@ spec:
   # `workspace: {}`）。自前の emptyDir は Kata では使えない — Kata は emptyDir を VM 内の
   # ローカル領域に作りホストと共有せず、subPath も未対応なので、prepare が敷いた
   # work/<runID>/{ok,findings,escalate} と agent の subPath マウントが別物になり、判定を
-  # 書く先が消えて NoAnswer → Escalated になる（2026-09-12 実測 2 回: fsGroup 有り #869 と
+  # 書く先が消えて NoAnswer → TaskFailed になる（2026-09-12 実測 2 回: fsGroup 有り #869 と
   # 無し #870 で同じ症状、つまり fsGroup は無関係。Kata の docs/Limitations.md、
   # kata-containers #1728）。smoke-workspace と同じ形。
   workspace:
@@ -381,7 +381,7 @@ spec:
         要修正: findings
         # 「材料が足りず判定できない」を書いて表明する出口（taskflow #63）。
         # 何も書かなければ NoAnswer で、途中で死んだのと区別が付かない。
-        Escalated: escalate
+        TaskFailed: escalate
   # 終端の意味は flow が言う（taskflow #64）。framework は 要修正 が悪い知らせだと知らない。
   # 宣言しない終端は metric 上 Undeclared のままで、Event も条件も出ない。
   terminals:

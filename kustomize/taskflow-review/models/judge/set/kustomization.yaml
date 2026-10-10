@@ -1,6 +1,8 @@
 apiVersion: kustomize.config.k8s.io/v1alpha1
 kind: Component
 # 鍵と alias は揃えて替える — 鍵が入れない alias は gateway のルートに当たらず 404。
+# ハーネスも alias のモデルに揃える — Claude 以外を claude ハーネスで動かすと Claude Code の
+# 版上げで壊れうる。
 replacements:
   - source: {kind: ConfigMap, name: model-judge, fieldPath: data.alias}
     targets:
@@ -12,3 +14,8 @@ replacements:
       - select: {kind: TaskHandler, labelSelector: taskflow-role=judge}
         fieldPaths:
           - spec.jobTemplate.template.spec.containers.[name=agent].env.[name=ANTHROPIC_AUTH_TOKEN].valueFrom.secretKeyRef.key
+  - source: {kind: ConfigMap, name: model-judge, fieldPath: data.harness}
+    targets:
+      - select: {kind: TaskHandler, labelSelector: taskflow-role=judge}
+        fieldPaths:
+          - spec.jobTemplate.template.spec.containers.[name=agent].env.[name=AGENT_HARNESS].value

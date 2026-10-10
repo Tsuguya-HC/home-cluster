@@ -103,7 +103,7 @@ spec:
                 # pr-review と同じく**形を確かめてからしか使わない**（未知の alias は gateway 側で
                 # 404 になるだけだが、それを「モデルが答えなかった」と読み違えないため）。
                 # siblings は give_up() という名前だが、ここは next の
-                # `Escalated: escalate` が選ぶ終端と名前を合わせている。
+                # `TaskFailed: escalate` が選ぶ終端と名前を合わせている。
                 escalate() {
                   mkdir -p /workspace/escalate
                   printf '%s\n' "$1" > /workspace/escalate/report.md
@@ -295,7 +295,7 @@ spec:
       handler: llm-gateway-smoke
       next:
         完了: ok
-        Escalated: escalate
+        TaskFailed: escalate
   terminals:
     完了: Success
   maxRunsPerPhase: 1

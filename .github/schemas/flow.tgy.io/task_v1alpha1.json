@@ -111,7 +111,7 @@
         "type": "string"
        },
        "phase": {
-        "description": "Phase is a status name. It is a free string chosen by whoever writes the\nflow: this framework does not know what the work is, so it has no business\nnaming its stages. \"調査\" and \"Planning\" are equally valid.\n\nThree names are the framework's rather than the author's. Two of them are\nanswers it decides — see ReservedPhases — and the third is PhaseFinally,\nwhich is not an answer at all but the name a cleanup run is recorded under.",
+        "description": "Phase is a status name. It is a free string chosen by whoever writes the\nflow: this framework does not know what the work is, so it has no business\nnaming its stages. \"調査\" and \"Planning\" are equally valid.\n\nOne name is the framework's rather than the author's: TaskFailed, the\nanswer it decides — see ReservedPhases. PhaseFinally is not an answer at\nall but the name a cleanup run is recorded under.",
         "type": "string"
        },
        "runID": {
@@ -137,7 +137,7 @@
      "type": "array"
     },
     "expiresAt": {
-     "description": "ExpiresAt is when the controller deletes this task, set once it stops.\nThe moment is fixed here rather than derived from the flow's ttl each\ntime, so a task at Escalated keeps its date even after the flow that\nset it is edited or gone — the same reason the reserved phases need no\nflow to be terminal.",
+     "description": "ExpiresAt is when the controller deletes this task, set once it stops.\nThe moment is fixed here rather than derived from the flow's ttl each\ntime, so a task at TaskFailed keeps its date even after the flow that\nset it is edited or gone — the same reason the reserved phases need no\nflow to be terminal.",
      "format": "date-time",
      "type": "string"
     },
@@ -157,7 +157,7 @@
         "type": "string"
        },
        "phase": {
-        "description": "Phase is a status name. It is a free string chosen by whoever writes the\nflow: this framework does not know what the work is, so it has no business\nnaming its stages. \"調査\" and \"Planning\" are equally valid.\n\nThree names are the framework's rather than the author's. Two of them are\nanswers it decides — see ReservedPhases — and the third is PhaseFinally,\nwhich is not an answer at all but the name a cleanup run is recorded under.",
+        "description": "Phase is a status name. It is a free string chosen by whoever writes the\nflow: this framework does not know what the work is, so it has no business\nnaming its stages. \"調査\" and \"Planning\" are equally valid.\n\nOne name is the framework's rather than the author's: TaskFailed, the\nanswer it decides — see ReservedPhases. PhaseFinally is not an answer at\nall but the name a cleanup run is recorded under.",
         "type": "string"
        },
        "reason": {
@@ -189,7 +189,7 @@
      "type": "array"
     },
     "phase": {
-     "description": "Phase is a status name. It is a free string chosen by whoever writes the\nflow: this framework does not know what the work is, so it has no business\nnaming its stages. \"調査\" and \"Planning\" are equally valid.\n\nThree names are the framework's rather than the author's. Two of them are\nanswers it decides — see ReservedPhases — and the third is PhaseFinally,\nwhich is not an answer at all but the name a cleanup run is recorded under.",
+     "description": "Phase is a status name. It is a free string chosen by whoever writes the\nflow: this framework does not know what the work is, so it has no business\nnaming its stages. \"調査\" and \"Planning\" are equally valid.\n\nOne name is the framework's rather than the author's: TaskFailed, the\nanswer it decides — see ReservedPhases. PhaseFinally is not an answer at\nall but the name a cleanup run is recorded under.",
      "type": "string"
     },
     "runID": {

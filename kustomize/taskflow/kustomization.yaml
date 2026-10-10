@@ -39,7 +39,7 @@ kind: Kustomization
 # 実測していない。この不確実性に賭けず、renovate.jsonc の packageRules で明示的に
 # enabled: false にして止めている。
 resources:
-  - https://github.com/Tsuguya-HC/taskflow//config/default?ref=9470ebbab52783772105380779bceefa6fa7fb81
+  - https://github.com/Tsuguya-HC/taskflow//config/default?ref=d301ea463bc96a2ce8ffbbd1408604d0c5c17b04
 
 # newTag と digest を分けて併記すると、Renovate の kustomize manager が
 # invalid-dependency-specification で抽出を捨て、digest が自動更新されなくなる
@@ -49,7 +49,7 @@ resources:
 images:
   - name: controller
     newName: registry.infra.tgy.io/tools/taskflow
-    newTag: latest@sha256:80a30f2c2991cc39259c8e750e4bceb39dc351318ef5ab75dfdd024a68cfe1a6
+    newTag: latest@sha256:115d491c25a57bf9db0088a2583fd4e02979db0351e639017e6e3cb01d450006
 
 patches:
   # 全 namespace restricted 運用に合わせる（config/default の Namespace にはラベルが無い）
@@ -88,7 +88,7 @@ patches:
               - name: manager
                 env:
                   - name: SIDECAR_IMAGE
-                    value: registry.infra.tgy.io/tools/agent-sidecar:latest@sha256:19f91614dd9ad7e4c7011136be9e7170807520456e14f3472b1bae0dff9dd687
+                    value: registry.infra.tgy.io/tools/agent-sidecar:latest@sha256:29f9f3c3af2492d2b2e423085781fef20d449015c4974569d69914924553bd6f
 
   # TaskFlow の構造検査 webhook（taskflow #17 / ADR-0006）。taskflow 側は caBundle を
   # 持たない ValidatingWebhookConfiguration を配るだけなので、埋めるのはこちら —

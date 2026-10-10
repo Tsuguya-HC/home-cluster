@@ -181,7 +181,7 @@ spec:
         完了: ok
         # 届かなかった / モデルが答えられなかったことを書いて表明する出口。何も書かなければ
         # NoAnswer になり、途中で死んだのと区別が付かない。
-        Escalated: escalate
+        TaskFailed: escalate
   terminals:
     完了: Success
   maxRunsPerPhase: 1

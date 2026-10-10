@@ -140,7 +140,7 @@ spec:
                 echo "FLOW_ENDING_OUTCOME=${FLOW_ENDING_OUTCOME:-}"
                 echo "FLOW_DIRECTORIES=$FLOW_DIRECTORIES"
                 # 終端の意味とフェーズ名は必ず来る。outcome だけは空があり得る
-                # （run が一度も決着せずに Failed に着いた場合。この flow では来ない）。
+                # （run が一度も決着せずに TaskFailed に着いた場合。この flow では来ない）。
                 if [ -z "${FLOW_ENDING:-}" ] || [ -z "${FLOW_ENDING_PHASE:-}" ]; then
                   echo "the cleanup run was not told which ending it follows"; exit 1
                 fi

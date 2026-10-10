@@ -17,7 +17,7 @@
 # **agent に Bash を渡さない** — 書く手段を MCP の道具に限るため。
 #
 # 投稿先のリポと件数は gateway では縛れない（トークンは org の全リポに効く）ので、agent の後に
-# この App が作った issue を数え、外れていれば Escalated にする。
+# この App が作った issue を数え、外れていれば filed/ を空にして FinallyFailed にする。
 apiVersion: flow.tgy.io/v1alpha1
 kind: TaskHandler
 metadata:

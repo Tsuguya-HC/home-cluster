@@ -6,6 +6,7 @@ components:
   - ../../runtime/runc
   - ../../harness/runner
   - ../../harness/runner-review
+  - ../../harness/runner-judge
   - ../../models/work/muse
   - ../../models/review/claude
   - ../../models/judge/claude

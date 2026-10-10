@@ -6,6 +6,8 @@
 #
 # **agent コンテナに GitHub の鍵を渡さないこと。** clone と PR・issue の取得は fetch init が済ませ、
 # agent はそれを Block スクラッチへ写して使う。作業ツリーの変更は PR に載らない（push しない）。
+# これはこの base（fetch init）の形。harness/runner-judge を入れた flow では fetch init を外し、
+# runner が root で取得して agent へ渡す。鍵は agent に渡らない点は同じ。
 apiVersion: flow.tgy.io/v1alpha1
 kind: TaskHandler
 metadata:
@@ -376,6 +378,9 @@ spec:
               # gateway の alias。ANTHROPIC_AUTH_TOKEN の鍵に許可された alias でないと 404 になる。
               - name: LLM_ALIAS
                 value: review
+              # ランナーで動かすときのハーネス（claude | pi）。alias のモデルに合わせ、models/judge が替える。
+              - name: AGENT_HARNESS
+                value: claude
               # direct を付けない。proxy に無いモジュールを VCS から直接取りに行くと、
               # 許可していない宛先でハングする。proxy で取れなければその場で失敗させる。
               - name: GOPROXY

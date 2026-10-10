@@ -322,12 +322,16 @@
       "description": [
         "The agents runner (implement flow's writer, fixer and review handlers). A",
         "running Task keeps the handler specs it copied at start, so a new digest",
-        "reaches only Tasks created after it lands."
+        "reaches only Tasks created after it lands.",
+        "Exempt from the PR limits: the concurrent limit counts open PRs that wait",
+        "for a human, and while they sit there the runner digest is never proposed."
       ],
       "matchDepNames": ["registry.infra.tgy.io/agents/runner"],
       "matchUpdateTypes": ["digest"],
       "groupName": "agents runner",
-      "automerge": true
+      "automerge": true,
+      "prConcurrentLimit": 0,
+      "prHourlyLimit": 0
     },
     {
       "description": "Do not automerge critical infrastructure",

@@ -25,7 +25,7 @@ registries:
 
 packages:
   - name: yannh/kubeconform@v0.8.0
-  - name: mikefarah/yq@v4.53.6
+  - name: mikefarah/yq@v4.54.1
   # provides `crane`
   - name: google/go-containerregistry@v0.22.1
   # The registry entry verifies the tarball against get.helm.sh's published

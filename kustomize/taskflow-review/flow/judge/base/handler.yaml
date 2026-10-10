@@ -86,7 +86,7 @@ spec:
                   path: key
         initContainers:
           - name: parts
-            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:16578b8dea85c40e4039d3ef9fd9e40565b74ab516ed0ba712a6d600bb8e9410
+            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:1f61ae36cab5537ccac1e9cc8c30e8dd13dfc95ef0839927e0d8d2d51dae9476
             command: [sh, -c]
             args:
               - |
@@ -122,7 +122,7 @@ spec:
               # 伝わらない。
               limits: {cpu: 500m, memory: 256Mi}
           - name: fetch
-            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:16578b8dea85c40e4039d3ef9fd9e40565b74ab516ed0ba712a6d600bb8e9410
+            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:1f61ae36cab5537ccac1e9cc8c30e8dd13dfc95ef0839927e0d8d2d51dae9476
             command: [sh, -c]
             args:
               - |
@@ -193,7 +193,7 @@ spec:
               limits: {cpu: "1", memory: 512Mi}
         containers:
           - name: agent
-            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:16578b8dea85c40e4039d3ef9fd9e40565b74ab516ed0ba712a6d600bb8e9410
+            image: registry.infra.tgy.io/tools/claude-code:latest@sha256:1f61ae36cab5537ccac1e9cc8c30e8dd13dfc95ef0839927e0d8d2d51dae9476
             workingDir: /workspace
             securityContext:
               # VM の中の特権。ホストには及ばない（containerd が

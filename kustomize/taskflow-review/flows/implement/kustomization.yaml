@@ -11,3 +11,16 @@ components:
   - ../../models/review/claude
   - ../../models/judge/claude
   - ../../models/filer/claude
+# 仕分け・検証が runner のこの flow では、再レビューは直しの差分だけを見るので 1 周が軽い。
+# 収束しない issue でも費用が際限なく増えない上限として 5 にする。
+patches:
+  - target:
+      kind: TaskFlow
+      name: implement
+    patch: |-
+      - op: test
+        path: /spec/maxRunsPerPhase
+        value: 3
+      - op: replace
+        path: /spec/maxRunsPerPhase
+        value: 5

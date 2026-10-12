@@ -18,7 +18,7 @@ controller:
   # **alias を handler 数だけ増やさないための仕掛け。** alias を分けても帰属は取れるが、
   # 同じモデルを指す alias が 11 本できて、モデルを上げるたびに 11 箇所直すことになる。
   # モデルの管理点は alias（3 本）に集約したまま、帰属だけヘッダで細かくする。
-  requestHeaderAttributes: "x-tf-handler:tf.handler"
+  requestHeaderAttributes: "x-tf-handler:tf.handler,x-llm-alias:llm.alias"
   # cache の DefaultNamespaces になる（cmd/controller/main.go の setupCache）。
   # **RBAC を RoleBinding に絞った前提そのもの** — ここが空だとコントローラは
   # Secret / Pod / Gateway をクラスタ全域で LIST しようとして 403 で回らなくなる。

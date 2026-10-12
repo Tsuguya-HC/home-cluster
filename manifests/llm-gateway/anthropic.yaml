@@ -59,9 +59,16 @@ spec:
 # 落とす。切り替えは下の BackendTrafficPolicy の再試行が起こす。priority だけでは、上流が
 # 応答している限り claude-api に送り続ける。
 #
-# handler ごとに alias を切るのは、`x-ai-eg-model` がそのまま帰属の単位になるため。
+# handler ごとに alias を切るのは、alias がそのまま帰属の単位になるため。
 # review と investigate は今同じモデル・同じバックエンドに解決されるが、分けておくと
 # 「どの handler がどの枠を食っているか」がログで分かれる。
+#
+# alias の渡し方は 2 通りで、各ルールに match が 1 つずつある:
+#   - model に alias を書く（`x-ai-eg-model: review`）
+#   - model に本物のモデル ID を書き、alias を `x-llm-alias` ヘッダで送る
+# 後者は x-ai-eg-model を `^claude-` の正規表現で受ける。alias 名を `claude-` で始めないこと。
+# 始めると、その alias を model に書いた要求が `^claude-` にも当たり、x-llm-alias で
+# 指した別 alias のルールへ入れてしまう。
 apiVersion: aigateway.envoyproxy.io/v1beta1
 kind: AIGatewayRoute
 metadata:
@@ -103,7 +110,22 @@ spec:
             # 新しい handler を足すときはここにも足す。
             - type: RegularExpression
               name: x-llm-client
-              value: "^(adjudicator|alert-investigate|claude-code-agent|claude-code-generic|implement|implement-verify|pluto-check|pr-review|task-executor|task-executor-write|taskflow-review|wf-creator|wf-improver|llm-gateway-smoke)$"
+              value: &review-clients "^(adjudicator|alert-investigate|claude-code-agent|claude-code-generic|implement|implement-verify|pluto-check|pr-review|task-executor|task-executor-write|taskflow-review|wf-creator|wf-improver|llm-gateway-smoke)$"
+        # 本物のモデル ID + x-llm-alias で入る形。上流へ送るモデルは modelNameOverride で
+        # 決まり、呼ぶ側の書いた ID は使われない。
+        # ここに入れたクライアントを、本物のモデル ID で当たる他のルート（手元用など）に
+        # 入れないこと。両方に当たると、どちらが勝つかはヘッダ条件の数で決まり、
+        # 上書きも fallback も無いルートへ落ちうる。
+        - headers:
+            - type: Exact
+              name: x-llm-alias
+              value: review
+            - type: RegularExpression
+              name: x-ai-eg-model
+              value: "^claude-[a-z0-9.-]+$"
+            - type: RegularExpression
+              name: x-llm-client
+              value: *review-clients
       modelsOwnedBy: Envoy AI Gateway
       backendRefs:
         - name: claude-api
@@ -131,7 +153,17 @@ spec:
             # 新しい handler を足すときはここにも足す。
             - type: RegularExpression
               name: x-llm-client
-              value: "^(adjudicator|alert-investigate|claude-code-agent|claude-code-generic|implement|implement-verify|pluto-check|pr-review|task-executor|task-executor-write|taskflow-investigate|wf-creator|wf-improver|llm-gateway-smoke)$"
+              value: &investigate-clients "^(adjudicator|alert-investigate|claude-code-agent|claude-code-generic|implement|implement-verify|pluto-check|pr-review|task-executor|task-executor-write|taskflow-investigate|wf-creator|wf-improver|llm-gateway-smoke)$"
+        - headers:
+            - type: Exact
+              name: x-llm-alias
+              value: investigate
+            - type: RegularExpression
+              name: x-ai-eg-model
+              value: "^claude-[a-z0-9.-]+$"
+            - type: RegularExpression
+              name: x-llm-client
+              value: *investigate-clients
       modelsOwnedBy: Envoy AI Gateway
       backendRefs:
         - name: claude-api
@@ -158,7 +190,17 @@ spec:
               value: implement-claude
             - type: RegularExpression
               name: x-llm-client
-              value: "^(taskflow-implement-claude|llm-gateway-smoke)$"
+              value: &implement-claude-clients "^(taskflow-implement-claude|llm-gateway-smoke)$"
+        - headers:
+            - type: Exact
+              name: x-llm-alias
+              value: implement-claude
+            - type: RegularExpression
+              name: x-ai-eg-model
+              value: "^claude-[a-z0-9.-]+$"
+            - type: RegularExpression
+              name: x-llm-client
+              value: *implement-claude-clients
       modelsOwnedBy: Envoy AI Gateway
       backendRefs:
         - name: claude-api

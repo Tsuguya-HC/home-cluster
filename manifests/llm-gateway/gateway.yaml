@@ -154,6 +154,10 @@ spec:
               # 黙って通る。taskflow-llm-gateway-smoke が否定側の 1 往復で見張っている。
               llm.client: "%REQ(X-LLM-CLIENT)%"
               gen_ai.request.model: "%REQ(X-AI-EG-MODEL)%"
+              # 本物のモデル ID で呼んだときの alias。**呼ぶ側の自称**で、x-llm-alias を見ない
+              # match（model に alias を書く形）で通った行にも任意の値が載りうる。
+              # alias 単位の集計は gen_ai.request.model と合わせて読む。
+              llm.alias: "%REQ(X-LLM-ALIAS)%"
               gen_ai.response.model: "%DYNAMIC_METADATA(io.envoy.ai_gateway:response_model)%"
               gen_ai.provider.name: "%DYNAMIC_METADATA(io.envoy.ai_gateway:backend_name)%"
               gen_ai.usage.input_tokens: "%DYNAMIC_METADATA(io.envoy.ai_gateway:llm_input_token)%"

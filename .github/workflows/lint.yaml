@@ -132,7 +132,10 @@ jobs:
               - 'manifests/**'
               - 'kustomize/**'
               - 'scripts/lint-configmap-scripts.py'
+              - 'scripts/inline-scripts-allow.txt'
               - '.github/workflows/_configmap-scripts.yml'
+              - 'aqua.yaml'
+              - 'aqua-checksums.json'
             workflows:
               - '.github/workflows/**'
               - '.github/zizmor.yml'

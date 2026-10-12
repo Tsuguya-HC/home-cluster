@@ -19,6 +19,14 @@ resources:
 # TaskHandler は CRD なので、kustomize は中の ConfigMap 参照を書き換えない。
 # ハッシュを付けると参照が切れる。
 configMapGenerator:
+  # claude ハーネスのランナーが Claude Code に渡す本物のモデル ID（alias → ID）。claude ハーネスで
+  # 動かす alias はすべてここに要り、無いと handler は起動時に止まる。ID は Claude Code が知っている
+  # `claude-` の ID であること。
+  - name: llm-alias-models
+    files:
+      - harness/llm-alias-models.json
+    options:
+      disableNameSuffixHash: true
   - name: review-planner
     files:
       - flow/planner/plan.py

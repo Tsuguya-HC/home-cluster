@@ -118,6 +118,11 @@ patches:
         value: {name: AGENT_CONFINE, value: setpriv}
       - op: add
         path: /spec/jobTemplate/template/spec/containers/0/env/-
+        value:
+          name: AGENT_MODEL_MAP
+          valueFrom: {configMapKeyRef: {name: llm-alias-models, key: llm-alias-models.json}}
+      - op: add
+        path: /spec/jobTemplate/template/spec/containers/0/env/-
         value: {name: REPO_OWNER, value: Tsuguya-HC}
       - op: add
         path: /spec/jobTemplate/template/spec/containers/0/env/-

@@ -34,3 +34,6 @@ packages:
   # `kubectl kustomize` renders kustomize/. kustomize alone has no --enable-helm
   # equivalent for the helmCharts field agent-router uses.
   - name: kubernetes/kubernetes/kubectl@v1.37.1
+  # 指摘の出方はバージョンで変わり、許可リストはその出方に合わせてある。runner
+  # 同梱のものは runner image の更新で黙って変わる。
+  - name: koalaman/shellcheck@v0.11.0

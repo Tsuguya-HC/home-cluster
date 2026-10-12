@@ -1,0 +1,105 @@
+# scripts/lint-configmap-scripts.py がコンテナの `sh -c` / Argo の script.source に
+# 直書きされたシェルに出した shellcheck の指摘のうち、通しているもの。
+# 形式は <file>::SC<code>::<指摘された行の本文（前後の空白を除く）>。同じ行が
+# 複数回指摘されるときは同じ数だけ並べる。
+#
+# 下の既存分は #959 で検査を入れた時点で main にあったもの。manifests/ と kustomize/ は
+# push で即クラスタに反映されるので、CI だけを変える PR では直さずここに載せた。
+# 直したらその行を消す（再現しない行が残っていると検査は失敗する）。
+#
+# 新しく足すのは、直さない理由を書ける指摘だけ。
+
+# 構文エラー。wf-creator-wft.yaml の PROMPT="..." の中のバッククォートがコマンド置換として
+# 解釈される（dash の `sh -n` も構文エラーで落ちる）。shellcheck はここで解析を打ち切るので、
+# このスクリプトの残りは検査できていない。
+manifests/claude-code/wf-creator-wft.yaml::SC1009::`secretKey: <handler 名>` / `property: <handler 名>` を追加
+manifests/claude-code/wf-creator-wft.yaml::SC1009::`secretKey: <handler 名>` / `property: <handler 名>` を追加
+manifests/claude-code/wf-creator-wft.yaml::SC1072::`secretKey: <handler 名>` / `property: <handler 名>` を追加
+manifests/claude-code/wf-creator-wft.yaml::SC1072::`secretKey: <handler 名>` / `property: <handler 名>` を追加
+manifests/claude-code/wf-creator-wft.yaml::SC1073::`secretKey: <handler 名>` / `property: <handler 名>` を追加
+manifests/claude-code/wf-creator-wft.yaml::SC1073::`secretKey: <handler 名>` / `property: <handler 名>` を追加
+manifests/claude-code/wf-creator-wft.yaml::SC2006::1. 1Password の item `llm-gateway-client-keys`（vault home-cluster）に、
+
+# trap の文字列の中で代入している `i` を、shellcheck は代入として辿らない。誤検知。
+kustomize/taskflow-review/flow/filer/handler.yaml::SC2154::trap 'kill -TERM $pid 2>/dev/null || true
+kustomize/taskflow-review/flow/implement/base/handler.yaml::SC2154::trap 'kill -TERM -$pid 2>/dev/null || true
+kustomize/taskflow-review/flow/judge/base/handler.yaml::SC2154::trap 'kill -TERM $pid 2>/dev/null || true
+kustomize/taskflow-review/flow/review/base/handler.yaml::SC2154::trap 'kill -TERM $pid 2>/dev/null || true
+manifests/claude-code-build/taskflow-investigate.yaml::SC2154::trap 'kill -TERM $pid 2>/dev/null || true
+manifests/claude-code/taskflow-llm-gateway-smoke.yaml::SC2154::trap 'kill -TERM $pid 2>/dev/null || true
+manifests/claude-code/taskflow-openrouter-smoke.yaml::SC2154::trap 'kill -TERM $pid 2>/dev/null || true
+manifests/claude-code/taskflow-pr-review.yaml::SC2154::trap 'kill -TERM $pid 2>/dev/null || true
+
+# 単引用符の中の `$` / バッククォート。printf のフォーマットに書いた Markdown のコード表記と、
+# 呼び出し先のシェルで展開させるために渡している `sh -c '...'` / `bash -c "$..."`。誤検知。
+kustomize/taskflow-review/flow/implement/base/handler.yaml::SC2016::TEST_RUN='bash -c "$REPO_TEST_BODY" scripts/test.sh'
+kustomize/taskflow-review/flow/implement/base/handler.yaml::SC2016::as_agent sh -c 'cd /scratch/src && idx=$(mktemp) && cp .git/index "$idx" && GIT_INDEX_FILE="$idx" git add -A && GIT_INDEX_FILE="$idx" git write-tree; rc=$?; rm -f "$idx"; exit $rc'
+kustomize/taskflow-review/flow/judge/base/handler.yaml::SC2016::printf '\n仕分けが見た PR の head: `%s`\n' "$HEAD_SHA" >> /workspace/fix/report.md \
+manifests/claude-code/weekly-inventory-cwf.yaml::SC2016::printf 'ArgoCD Synced: `%s`\n' "$APPS"
+manifests/claude-code/weekly-inventory-cwf.yaml::SC2016::printf 'CNP を持つ namespace: `%s/%s`\n' "$CNP_NS" "$ALL_NS")
+manifests/claude-code/weekly-inventory-cwf.yaml::SC2016::printf 'Node Ready: `%s`\n' "$NODES"
+manifests/claude-code/weekly-inventory-cwf.yaml::SC2016::printf 'Pod: `%s`\n' "$PODS"
+manifests/claude-code/weekly-inventory-cwf.yaml::SC2016::printf 'Prometheus targets: up `%s` / down `%s`\n' "$TGT_UP" "$TGT_DOWN"
+manifests/claude-code/weekly-inventory-cwf.yaml::SC2016::printf 'Running だが Ready でない Pod: `%s`\n' "$NOTREADY"
+manifests/claude-code/weekly-inventory-cwf.yaml::SC2016::printf 'alloy: `%s` 行\n' "$ALLOY"
+manifests/claude-code/weekly-inventory-cwf.yaml::SC2016::printf 'argo: `%s` 行\n' "$ARGO_LOG"
+manifests/claude-code/weekly-inventory-cwf.yaml::SC2016::printf 'hubble: `%s` 行\n' "$HUBBLE"
+manifests/claude-code/weekly-inventory-cwf.yaml::SC2016::printf 'policy 発火（export 経由）: `%s` 件\n' "$T_POLICY"
+manifests/claude-code/weekly-inventory-cwf.yaml::SC2016::printf 'tetragon export: `%s` 行\n' "$T_EXPORT"
+
+# `cd` が失敗しても次に進む。直すべきもの。
+manifests/claude-code/claude-code-generic-wft.yaml::SC2164::cd /workspace
+manifests/claude-code/claude-code-generic-wft.yaml::SC2164::cd /workspace
+manifests/claude-code/implement-wft.yaml::SC2164::cd /workspace
+manifests/claude-code/task-executor-write-wft.yaml::SC2164::cd /workspace
+manifests/claude-code/wf-creator-wft.yaml::SC2164::cd /workspace
+manifests/claude-code/wf-creator-wft.yaml::SC2164::cd /workspace
+manifests/claude-code/wf-improver-wft.yaml::SC2164::cd /workspace
+manifests/claude-code/wf-improver-wft.yaml::SC2164::cd /workspace
+manifests/claude-code/workflowtemplate.yaml::SC2164::cd /workspace
+manifests/claude-code/workflowtemplate.yaml::SC2164::cd /workspace
+manifests/image-build/workflowtemplate.yaml::SC2164::cd /tmp
+manifests/image-build/workflowtemplate.yaml::SC2164::cd repo
+
+# `A && B || C`。C が A の失敗と B の失敗を区別しない。個別には未精査。
+kustomize/taskflow-review/flow/filer/handler.yaml::SC2015::&& chown 65533:65533 /tmp/mcp.json \
+kustomize/taskflow-review/flow/filer/handler.yaml::SC2015::PR_COMMENT=$(mktemp) && cat "$FILED/report.md" > "$PR_COMMENT" \
+kustomize/taskflow-review/flow/filer/handler.yaml::SC2015::printf '%s\n' "$ENDING" > /tmp/ending && chmod 0644 /tmp/ending \
+kustomize/taskflow-review/flow/implement/base/handler.yaml::SC2015::[ "$DIFFCOV_RC" -eq 1 ] && grep -q "$(printf '\t')untested$" /tmp/diffcov.txt || break
+kustomize/taskflow-review/flow/implement/base/handler.yaml::SC2015::cp "$TRIAGE" /tmp/triage.md && chmod 0644 /tmp/triage.md \
+kustomize/taskflow-review/flow/implement/base/handler.yaml::SC2015::cp /inputs/検証/report.md /tmp/verify.md && chmod 0644 /tmp/verify.md \
+kustomize/taskflow-review/flow/implement/base/handler.yaml::SC2015::cp /workspace/done/report.md /tmp/previous-report.md 2>/dev/null && chmod 0644 /tmp/previous-report.md \
+kustomize/taskflow-review/flow/implement/base/handler.yaml::SC2015::grep "$(printf '\t')untested$" /tmp/diffcov.txt > /tmp/uncovered.md && chmod 0644 /tmp/uncovered.md \
+kustomize/taskflow-review/flow/implement/base/handler.yaml::SC2015::tail -80 /tmp/green.log > /tmp/green-failure.md && chmod 0644 /tmp/green-failure.md \
+kustomize/taskflow-review/flow/judge/base/handler.yaml::SC2015::&& chown -R 65533:65533 /scratch \
+kustomize/taskflow-review/flow/judge/base/handler.yaml::SC2015::mkdir -p /scratch && mount -o noatime /dev/scratch /scratch \
+
+# ls の出力を解析している。対象は数字やファイル固定の名前で、実害は未確認。
+kustomize/taskflow-review/flow/implement/base/handler.yaml::SC2012::INVESTIGATION=$(ls /results/*/located/report.md 2>/dev/null | tail -1 || true)
+kustomize/taskflow-review/flow/implement/base/handler.yaml::SC2012::for f in $(ls -d /results/*/done/pr-url 2>/dev/null | sort -t/ -k3,3n); do
+kustomize/taskflow-review/flow/implement/base/handler.yaml::SC2012::for f in $(ls -d /results/*/fix/report.md 2>/dev/null | sort -t/ -k3,3n); do
+kustomize/taskflow-review/flow/judge/base/handler.yaml::SC2012::for f in $(ls /tmp/previous-triage/*.md 2>/dev/null | sort -t/ -k4,4n); do
+manifests/claude-code/taskflow-smoke-state.yaml::SC2012::echo "shelf: $(ls /shelf | tr '\n' ' ')"
+manifests/claude-code/taskflow-smoke-workspace.yaml::SC2012::echo "shelf: $(ls /shelf | tr '\n' ' ') -> latest=$latest"
+manifests/claude-code/taskflow-smoke-workspace.yaml::SC2012::latest=$(ls /shelf | sort -n | tail -1)
+
+# その他。個別には未精査。
+kustomize/taskflow-review/flow/judge/base/handler.yaml::SC2034::検証) SKILL=review-verify; ANTHROPIC_CUSTOM_HEADERS="x-tf-handler: taskflow-review-verify" ;;
+manifests/argo/image-digest-audit.yaml::SC2254::$p)
+manifests/argo/image-digest-audit.yaml::SC2254::case "$ref" in $p) skipped=1 ;; esac
+manifests/argo/node-shutdown-wft.yaml::SC3037::echo -n "$EXEC_ROLE" > /tmp/exec-role
+manifests/argo/node-shutdown-wft.yaml::SC3037::echo -n "$IPS" > /tmp/ips
+manifests/argo/pluto-check.yaml::SC2129::cat /tmp/pluto-cluster.txt >> /tmp/pr-body.txt
+manifests/argo/pluto-check.yaml::SC2129::cat /tmp/pluto-cluster.txt >> /tmp/prompt.txt
+manifests/argo/renovate.yaml::SC2046::export RENOVATE_HOST_RULES=$(node -e "console.log(JSON.stringify([{matchHost:'registry.infra.tgy.io',username:process.env.HARBOR_USER,password:process.env.HARBOR_PASS,hostType:'docker'}]))")
+manifests/argo/renovate.yaml::SC2046::export RENOVATE_TOKEN=$(cat /github-token/token)
+manifests/argo/renovate.yaml::SC2155::export RENOVATE_HOST_RULES=$(node -e "console.log(JSON.stringify([{matchHost:'registry.infra.tgy.io',username:process.env.HARBOR_USER,password:process.env.HARBOR_PASS,hostType:'docker'}]))")
+manifests/argo/renovate.yaml::SC2155::export RENOVATE_TOKEN=$(cat /github-token/token)
+manifests/argo/upgrade-k8s.yaml::SC2034::TALOS_VER="{{inputs.parameters.talos-version}}"
+manifests/argo/upgrade-k8s.yaml::SC2034::TALOS_VER="{{inputs.parameters.talos-version}}"
+manifests/argo/upgrade-k8s.yaml::SC2034::TALOS_VER="{{inputs.parameters.talos-version}}"
+manifests/claude-code/cluster-observe-cwf.yaml::SC2059::BODY=$(printf "$ISSUES")
+manifests/claude-code/cluster-observe-cwf.yaml::SC3043::local title="$1" body="$2" priority="${3:-normal}"
+manifests/kanidm/statefulset.yaml::SC3028::ORDINAL=${HOSTNAME##*-}
+manifests/kanidm/statefulset.yaml::SC3028::origin = "repl://${HOSTNAME}.kanidm-headless.kanidm.svc.cluster.local:8444"
+manifests/seaweedfs/filer-deployment.yaml::SC2086::-ip=${POD_IP} \

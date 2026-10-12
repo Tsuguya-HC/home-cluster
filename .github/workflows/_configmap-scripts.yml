@@ -15,18 +15,25 @@ jobs:
   # インタプリタを呼び、どちらも実 Pod の失敗で初めて分かった。スクリプトを
   # ConfigMap のキーとして持てば、ここで検査できる。
   #
+  # コンテナの `command: [sh, -c]` の args や Argo の script.source に直書きされた
+  # シェルも shellcheck にかける。こちらは scripts/inline-scripts-allow.txt に無い
+  # 指摘だけで落ちる。
+  #
   # シェルは `sh -n` ではなく shellcheck をかける。文法だけ見ても
   # `cd dir` が失敗して次に進む型の穴は通ってしまう（実際に通っていた）。
   configmap-scripts:
     name: configmap scripts
-    # shellcheck と node が要る。どちらも ubuntu-latest には入っているが、
-    # ubuntu-slim には無い。
+    # node が要る。ubuntu-latest には入っているが、ubuntu-slim には無い。
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - uses: aquaproj/aqua-installer@96a9bc20066c5bf5e275b41019cfc165b25f4e2e # v4.0.5
+        with:
+          aqua_version: v2.63.0
 
       - name: Install PyYAML
         run: pip install --quiet pyyaml
@@ -35,5 +42,5 @@ jobs:
       - name: shellcheck version
         run: shellcheck --version
 
-      - name: Check scripts embedded in ConfigMaps
+      - name: Check scripts embedded in ConfigMaps and container args
         run: python3 scripts/lint-configmap-scripts.py

@@ -114,9 +114,16 @@ jobs:
             done
           done
 
-          # Phase 3: include raw manifests/
+          # Phase 3: include raw manifests/ and rendered kustomize/
           find manifests -name '*.yaml' -exec cat {} + >> "$all_yaml" 2>/dev/null
-          find kustomize -name '*.yaml' -exec cat {} + >> "$all_yaml" 2>/dev/null
+          # Render rather than cat: images from helmCharts, a remote base, or an
+          # `images:` override only exist in the build output. Depth 1 only — a
+          # nested kustomization.yaml is consumed by its parent.
+          for dir in kustomize/*/; do
+            [ -f "${dir}kustomization.yaml" ] || continue
+            kubectl kustomize --enable-helm "$dir" >> "$all_yaml"
+            echo "---" >> "$all_yaml"
+          done
 
           # Phase 4: extract unique images and verify with crane
           # Skip internal Harbor: requires auth from external CI runner.

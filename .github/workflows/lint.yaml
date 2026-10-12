@@ -96,6 +96,8 @@ jobs:
               - 'apps/**'
               - 'kustomize/**'
               - '.github/schemas/**'
+              - 'scripts/kustomize-rbac.py'
+              - 'scripts/kustomize-rbac-allow.txt'
               - '.github/workflows/_kubeconform.yml'
               - 'aqua.yaml'
               - 'aqua-checksums.json'
@@ -108,6 +110,8 @@ jobs:
             unread:
               - 'apps/**'
               - 'helm-values/**'
+              # helmCharts の valuesFile と、チャートのバージョンを持つ kustomization.yaml
+              - 'kustomize/**'
               - 'scripts/unread-values.py'
               - '.github/workflows/_unread-values.yml'
               - 'aqua.yaml'

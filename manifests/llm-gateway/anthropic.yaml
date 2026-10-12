@@ -110,7 +110,7 @@ spec:
             # 新しい handler を足すときはここにも足す。
             - type: RegularExpression
               name: x-llm-client
-              value: &review-clients "^(adjudicator|alert-investigate|claude-code-agent|claude-code-generic|implement|implement-verify|pluto-check|pr-review|task-executor|task-executor-write|taskflow-review|wf-creator|wf-improver|llm-gateway-smoke)$"
+              value: &review-clients "^(adjudicator|alert-investigate|claude-code-agent|claude-code-generic|implement|implement-verify|pluto-check|pr-review|task-executor|task-executor-write|taskflow-review|wf-improver|llm-gateway-smoke)$"
         # 本物のモデル ID + x-llm-alias で入る形。上流へ送るモデルは modelNameOverride で
         # 決まり、呼ぶ側の書いた ID は使われない。
         # ここに入れたクライアントを、本物のモデル ID で当たる他のルート（手元用など）に
@@ -153,7 +153,7 @@ spec:
             # 新しい handler を足すときはここにも足す。
             - type: RegularExpression
               name: x-llm-client
-              value: &investigate-clients "^(adjudicator|alert-investigate|claude-code-agent|claude-code-generic|implement|implement-verify|pluto-check|pr-review|task-executor|task-executor-write|taskflow-investigate|wf-creator|wf-improver|llm-gateway-smoke)$"
+              value: &investigate-clients "^(adjudicator|alert-investigate|claude-code-agent|claude-code-generic|implement|implement-verify|pluto-check|pr-review|task-executor|task-executor-write|taskflow-investigate|wf-improver|llm-gateway-smoke)$"
         - headers:
             - type: Exact
               name: x-llm-alias

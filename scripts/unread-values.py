@@ -49,6 +49,7 @@ confined to those lines.
 
 import argparse
 import copy
+import glob
 import os
 import subprocess
 import sys
@@ -107,6 +108,34 @@ def sources():
                     "release": helm.get("releaseName", doc["metadata"]["name"]),
                     "files": files,
                 }
+    yield from kustomize_sources()
+
+
+def kustomize_sources():
+    """kustomization.yaml の helmCharts。Application から見ると chart の無い source になる。"""
+    pattern = os.path.join(ROOT, "kustomize", "**", "kustomization.yaml")
+    for kfile in sorted(glob.glob(pattern, recursive=True)):
+        with open(kfile) as fh:
+            kdoc = yaml.safe_load(fh) or {}
+        kdir = os.path.relpath(os.path.dirname(kfile), ROOT)
+        for chart in kdoc.get("helmCharts") or []:
+            if not chart.get("valuesFile"):
+                continue
+            # valuesInline は valuesFile の上に重なる。ここで描画に足さないと、その分だけ
+            # 実際と違う出力を比べることになる
+            if chart.get("valuesInline"):
+                raise RuntimeError(f"{kdir}: helmCharts[].valuesInline is not supported")
+            yield {
+                "app": f"{kdir}/{chart['name']}",
+                "app_file": os.path.relpath(kfile, ROOT),
+                "chart": chart["name"],
+                # pull() は OCI を scheme 無しで受け取る（Application の repoURL と同じ形）
+                "repo": chart["repo"].removeprefix("oci://"),
+                "version": str(chart.get("version", "")),
+                "namespace": chart.get("namespace") or kdoc.get("namespace") or "default",
+                "release": chart.get("releaseName", chart["name"]),
+                "files": [os.path.join(kdir, chart["valuesFile"])],
+            }
 
 
 def pull(src):

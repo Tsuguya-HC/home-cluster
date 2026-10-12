@@ -1,0 +1,27 @@
+# scripts/kustomize-rbac.py が kustomize/ の描画結果に許す RBAC の束ね方と集約。
+# 形式:
+#   <dir>::ClusterRoleBinding::<name>::<roleRef kind>/<roleRef name>::<subjects>
+#   <dir>::RoleBinding::<namespace>/<name>::<roleRef kind>/<roleRef name>::<subjects>
+#   <dir>::ClusterRole::<name>::<aggregate-to-* ラベル | aggregationRule>
+# subjects は <kind>:<namespace>/<name> をソートしてカンマで繋いだもの。
+#
+# 行を足すのは、誰に何をどこで与えるのかを理由に書けるときだけ。描画結果から
+# 消えた行は検査が落とすので、そのときに消す。
+
+# チャートの ClusterRole を 2 namespace の RoleBinding に束ね直したもの。チャート自身の
+# ClusterRoleBinding は patch で消している。
+kustomize/agent-router::RoleBinding::envoy-ai-gateway-system/ai-gateway-controller::ClusterRole/ai-gateway-controller:envoy-ai-gateway-system::ServiceAccount:envoy-ai-gateway-system/ai-gateway-controller
+kustomize/agent-router::RoleBinding::llm-gateway/ai-gateway-controller::ClusterRole/ai-gateway-controller:envoy-ai-gateway-system::ServiceAccount:envoy-ai-gateway-system/ai-gateway-controller
+# envoy-gateway-system で Pod / Deployment / DaemonSet を list するだけの自前 Role。
+kustomize/agent-router::RoleBinding::envoy-gateway-system/ai-gateway-controller-infra-reader::Role/ai-gateway-controller-infra-reader::ServiceAccount:envoy-ai-gateway-system/ai-gateway-controller
+# cluster-scoped が要る分だけを持つ自前の ClusterRole。
+kustomize/agent-router::ClusterRoleBinding::ai-gateway-controller-cluster-scoped::ClusterRole/ai-gateway-controller-cluster-scoped::ServiceAccount:envoy-ai-gateway-system/ai-gateway-controller
+
+# upstream の Trident operator 本体。
+kustomize/qnap-csi::ClusterRoleBinding::trident-operator::ClusterRole/trident-operator::ServiceAccount:trident/trident-operator
+
+# taskflow の config/default。全 namespace の Task / TaskFlow を reconcile するコントローラと、
+# その metrics endpoint の認可。
+kustomize/taskflow::ClusterRoleBinding::taskflow-manager-rolebinding::ClusterRole/taskflow-manager-role::ServiceAccount:taskflow-system/taskflow-controller-manager
+kustomize/taskflow::ClusterRoleBinding::taskflow-metrics-auth-rolebinding::ClusterRole/taskflow-metrics-auth-role::ServiceAccount:taskflow-system/taskflow-controller-manager
+kustomize/taskflow::RoleBinding::taskflow-system/taskflow-leader-election-rolebinding::Role/taskflow-leader-election-role::ServiceAccount:taskflow-system/taskflow-controller-manager

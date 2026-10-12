@@ -65,3 +65,11 @@ jobs:
             echo "::error::no kustomization.yaml found directly under kustomize/; the discovery above is broken"
             exit 1
           fi
+
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
+
+      # kubeconform は形しか見ない。`$patch: delete` が何にもマッチしなくなって
+      # チャートの ClusterRoleBinding が戻ってきても、上の step は緑のまま通る。
+      - name: Check RBAC bindings in kustomize renders
+        run: python3 scripts/kustomize-rbac.py

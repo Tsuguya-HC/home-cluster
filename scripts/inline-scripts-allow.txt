@@ -9,17 +9,6 @@
 #
 # 新しく足すのは、直さない理由を書ける指摘だけ。
 
-# 構文エラー。wf-creator-wft.yaml の PROMPT="..." の中のバッククォートがコマンド置換として
-# 解釈される（dash の `sh -n` も構文エラーで落ちる）。shellcheck はここで解析を打ち切るので、
-# このスクリプトの残りは検査できていない。
-manifests/claude-code/wf-creator-wft.yaml::SC1009::`secretKey: <handler 名>` / `property: <handler 名>` を追加
-manifests/claude-code/wf-creator-wft.yaml::SC1009::`secretKey: <handler 名>` / `property: <handler 名>` を追加
-manifests/claude-code/wf-creator-wft.yaml::SC1072::`secretKey: <handler 名>` / `property: <handler 名>` を追加
-manifests/claude-code/wf-creator-wft.yaml::SC1072::`secretKey: <handler 名>` / `property: <handler 名>` を追加
-manifests/claude-code/wf-creator-wft.yaml::SC1073::`secretKey: <handler 名>` / `property: <handler 名>` を追加
-manifests/claude-code/wf-creator-wft.yaml::SC1073::`secretKey: <handler 名>` / `property: <handler 名>` を追加
-manifests/claude-code/wf-creator-wft.yaml::SC2006::1. 1Password の item `llm-gateway-client-keys`（vault home-cluster）に、
-
 # trap の文字列の中で代入している `i` を、shellcheck は代入として辿らない。誤検知。
 kustomize/taskflow-review/flow/filer/handler.yaml::SC2154::trap 'kill -TERM $pid 2>/dev/null || true
 kustomize/taskflow-review/flow/implement/base/handler.yaml::SC2154::trap 'kill -TERM -$pid 2>/dev/null || true
@@ -52,8 +41,6 @@ manifests/claude-code/claude-code-generic-wft.yaml::SC2164::cd /workspace
 manifests/claude-code/claude-code-generic-wft.yaml::SC2164::cd /workspace
 manifests/claude-code/implement-wft.yaml::SC2164::cd /workspace
 manifests/claude-code/task-executor-write-wft.yaml::SC2164::cd /workspace
-manifests/claude-code/wf-creator-wft.yaml::SC2164::cd /workspace
-manifests/claude-code/wf-creator-wft.yaml::SC2164::cd /workspace
 manifests/claude-code/wf-improver-wft.yaml::SC2164::cd /workspace
 manifests/claude-code/wf-improver-wft.yaml::SC2164::cd /workspace
 manifests/claude-code/workflowtemplate.yaml::SC2164::cd /workspace

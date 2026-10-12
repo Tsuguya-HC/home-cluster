@@ -26,7 +26,6 @@ data:
     implement rw claude-code/github-gateway-client-keys/implement
     task-executor-write rw claude-code/github-gateway-client-keys/task-executor-write
     pluto-check rw argo/github-gateway-client-keys/pluto-check
-    wf-creator rw claude-code/github-gateway-client-keys/wf-creator
     wf-improver rw claude-code/github-gateway-client-keys/wf-improver
     claude-code-generic rw claude-code/github-gateway-client-keys/claude-code-generic
     horenso-verify ro claude-code/github-gateway-client-keys/horenso-verify

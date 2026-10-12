@@ -25,6 +25,10 @@
 #     input: {alias: review}
 #   EOF
 #
+# `input: {alias: review, via: header}` にすると、model に本物のモデル ID を書き、alias を
+# `x-llm-alias` ヘッダで送る経路を通す（Claude 系の alias だけ）。既定（via: model）は
+# model に alias を書く経路。
+#
 # alias を Task の input から取るのは、上流ごとに flow を複製しないため。CNP は gateway しか
 # 開けていないので、どの alias を指定しても**出口は変わらない**（上流の選択は gateway 側の仕事）。
 ---
@@ -126,7 +130,29 @@ spec:
                   # 違反値そのものは返さない（taskflow-pr-review と同じ idiom）。
                   *) escalate "spec.input.alias が未知の値（implement / implement-claude / review / review-muse / investigate のみ）。gateway 経路は一切確かめていない。" ;;
                 esac
-                echo "alias=$ALIAS"
+
+                # alias と同じ理由で、知らないキー（`vai` のような typo）は既定に落とさず止める。
+                VIA=model
+                if [ -n "${FLOW_INPUT:-}" ]; then
+                  printf '%s' "$FLOW_INPUT" | jq -e '(keys - ["alias", "via"]) == []' >/dev/null 2>&1 \
+                    || escalate "spec.input に alias / via 以外のキーがある。指定の取り違えを既定で握り潰さないため止めた。gateway 経路は一切確かめていない。"
+                  VIA=$(printf '%s' "$FLOW_INPUT" | jq -r '.via // "model"' 2>/dev/null || true)
+                fi
+                case "$VIA" in
+                  model) MODEL="$ALIAS" ;;
+                  header)
+                    # ヘッダで alias を受けるのは Claude 系のルールだけ。
+                    case "$ALIAS" in
+                      implement-claude|review|investigate) ;;
+                      *) escalate "via: header は implement-claude / review / investigate のみ。gateway 経路は一切確かめていない。" ;;
+                    esac
+                    MODEL="$LLM_HEADER_MODEL"
+                    ANTHROPIC_CUSTOM_HEADERS=$(printf '%s\nx-llm-alias: %s' "$ANTHROPIC_CUSTOM_HEADERS" "$ALIAS")
+                    export ANTHROPIC_CUSTOM_HEADERS
+                    ;;
+                  *) escalate "spec.input.via が未知の値（model / header のみ）。gateway 経路は一切確かめていない。" ;;
+                esac
+                echo "alias=$ALIAS via=$VIA model=$MODEL"
 
                 # 鍵が空のまま走ると 401 になり、claude は 10 回リトライしてから
                 # 「認証に失敗」で落ちる（約 3 分、2026-09-18 実測）。ここで止めた方が速いし、
@@ -166,22 +192,34 @@ spec:
                 # 条件が外れている状態）はそれでは検出できない。
                 # tier-probe は従量課金ルートにだけ許可してあるクライアントなので、
                 # これで Max の alias を要求して 404 になることを確かめる。review と、
-                # untrusted input を実行する handler 向けの implement-claude の両方を見る。
+                # untrusted input を実行する handler 向けの implement-claude の両方を、
+                # model に alias を書く形と x-llm-alias ヘッダの形の両方で見る（ルールの
+                # match ごとにクライアント条件があるので、片方だけ外れうる）。
                 # ルートに当たらない＝上流に行かないのでトークンは消費しない。
                 for MAX_ALIAS in review implement-claude; do
-                  TIER=$(curl -s --max-time 10 -o /dev/null -w '%{http_code}' \
-                    -X POST \
-                    -H "Authorization: Bearer $LLM_KEY_TIER_PROBE" \
-                    -H 'content-type: application/json' \
-                    -H 'anthropic-version: 2023-06-01' \
-                    --data '{"model":"'"$MAX_ALIAS"'","max_tokens":1,"messages":[{"role":"user","content":"x"}]}' \
-                    "${ANTHROPIC_BASE_URL}/v1/messages" || true)
-                  case "$TIER" in
-                    404) echo "階層分離 OK: 従量課金のクライアントは Max ルート（$MAX_ALIAS）に入れない（404）" ;;
-                    401) escalate "tier-probe の鍵が認証を通らない（401）。llm-gateway 側の llm-gateway-client-keys Secret に tier-probe があるか確認すること。階層分離は確かめられていない。" ;;
-                    000|"") escalate "gateway に接続できない（階層分離の確認が届かなかった）。alias=$MAX_ALIAS の確認はしていない。" ;;
-                    *) escalate "**階層分離が効いていない** — 従量課金だけ許可したクライアントが Max ルート（$MAX_ALIAS）に HTTP $TIER で入れた。AIGatewayRoute の x-llm-client 条件が外れている疑い（manifests/llm-gateway/anthropic.yaml）。" ;;
-                  esac
+                  for PROBE_VIA in model header; do
+                    if [ "$PROBE_VIA" = header ]; then
+                      set -- -H "x-llm-alias: $MAX_ALIAS"
+                      PROBE_MODEL="$LLM_HEADER_MODEL"
+                    else
+                      set --
+                      PROBE_MODEL="$MAX_ALIAS"
+                    fi
+                    TIER=$(curl -s --max-time 10 -o /dev/null -w '%{http_code}' \
+                      -X POST \
+                      -H "Authorization: Bearer $LLM_KEY_TIER_PROBE" \
+                      -H 'content-type: application/json' \
+                      -H 'anthropic-version: 2023-06-01' \
+                      "$@" \
+                      --data '{"model":"'"$PROBE_MODEL"'","max_tokens":1,"messages":[{"role":"user","content":"x"}]}' \
+                      "${ANTHROPIC_BASE_URL}/v1/messages" || true)
+                    case "$TIER" in
+                      404) echo "階層分離 OK: 従量課金のクライアントは Max ルート（$MAX_ALIAS, via=$PROBE_VIA）に入れない（404）" ;;
+                      401) escalate "tier-probe の鍵が認証を通らない（401）。llm-gateway 側の llm-gateway-client-keys Secret に tier-probe があるか確認すること。階層分離は確かめられていない。" ;;
+                      000|"") escalate "gateway に接続できない（階層分離の確認が届かなかった）。alias=$MAX_ALIAS via=$PROBE_VIA の確認はしていない。" ;;
+                      *) escalate "**階層分離が効いていない** — 従量課金だけ許可したクライアントが Max ルート（$MAX_ALIAS, via=$PROBE_VIA）に HTTP $TIER で入れた。AIGatewayRoute の x-llm-client 条件が外れている疑い（manifests/llm-gateway/anthropic.yaml）。" ;;
+                    esac
+                  done
                 done
 
                 # activeDeadlineSeconds の TERM は PID1 に飛ぶ。前面で待つと POSIX sh は
@@ -191,7 +229,7 @@ spec:
                   --output-format stream-json \
                   --dangerously-skip-permissions \
                   --allowedTools "Write" \
-                  --model "$ALIAS" \
+                  --model "$MODEL" \
                   --max-turns 5 < /dev/null &
                 pid=$!
                 # `|| true` は省けない。このスクリプトは `set -e` で走り、trap の中も同じなので、
@@ -247,6 +285,10 @@ spec:
               # spec.input.alias が無いときの既定。
               - name: LLM_ALIAS_DEFAULT
                 value: implement
+              # via: header で model に書く本物のモデル ID。`^claude-[a-z0-9.-]+$` の形で、
+              # claude が知っている ID であること。
+              - name: LLM_HEADER_MODEL
+                value: claude-sonnet-5
               # サブエージェントは親のモデルを継がない。固定しないと既定（sonnet）に落ち、
               # gateway にマッチするルートが無くなる。
               #

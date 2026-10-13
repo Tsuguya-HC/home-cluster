@@ -7,6 +7,7 @@ components:
   - ../../harness/runner
   - ../../harness/runner-review
   - ../../harness/runner-judge
+  - ../../harness/executor
   - ../../models/work/muse
   - ../../models/review/claude
   - ../../models/judge/claude

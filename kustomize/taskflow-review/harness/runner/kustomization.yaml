@@ -31,7 +31,7 @@ patches:
       # digest で固定する。
       - op: replace
         path: /spec/jobTemplate/template/spec/containers/0/image
-        value: registry.infra.tgy.io/agents/runner:latest@sha256:bf962553d54a038ed9f5fa8554f2bbbe79f03bb09fa41a37afc68b3474155cd7
+        value: registry.infra.tgy.io/agents/runner:latest@sha256:1d7aaec3c1fedabe9960f1e08230c2b09dff4de9976fbd6dd805e4c4998c0e78
       - op: replace
         path: /spec/jobTemplate/template/spec/containers/0/command
         value: [bash, -c]
@@ -77,13 +77,13 @@ patches:
       - op: remove
         path: /spec/jobTemplate/template/spec/containers/0/volumeMounts/4
       # ランナーは降りるときに bounding set も空にする（CAP_SETPCAP が要る）。SYS_ADMIN は付けないので、
-      # 自前の PID namespace は作らせず setpriv で降りるだけにする。
+      # エージェント本体は setpriv で降りるだけで自前の PID namespace は作らせない。ツールは executor コンテナが 65533 に降ろして動かす。
       - op: add
         path: /spec/jobTemplate/template/spec/containers/0/securityContext/capabilities/add/-
         value: SETPCAP
       - op: add
         path: /spec/jobTemplate/template/spec/containers/0/env/-
-        value: {name: AGENT_CONFINE, value: setpriv}
+        value: {name: AGENT_CONFINE, value: executor}
       - op: add
         path: /spec/jobTemplate/template/spec/containers/0/env/-
         value: {name: REPO_OWNER, value: Tsuguya-HC}

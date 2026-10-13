@@ -9,7 +9,7 @@
 #
 # `TaskFailed` は 2 つの別の事態を 1 つの終端名で表す。どちらかは `outcome` label が言う:
 # 作業が結論に届かなかった（`NoAnswer` = 0 個/2 個以上/時間切れ/宣言に無いディレクトリ、
-# `Declined` = escalate/ 等の宣言された辺で降りた、`RunLimitReached` = maxRunsPerPhase）と、
+# `Declined` = `fail/` ディレクトリ等の宣言された辺で降りた、`RunLimitReached` = maxRunsPerPhase）と、
 # 定義が壊れている（`Structural`）。直す場所が違う（前者は対象・handler、後者は git の
 # TaskFlow / TaskHandler）ので alert を分ける。前者は `outcome!="Structural"` で取り、
 # 将来 outcome の値が増えても黙らずに作業側の alert に落ちるようにしてある。
@@ -75,7 +75,7 @@ spec:
             severity: warning
           annotations:
             summary: "taskflow: {{ $labels.flow }} が TaskFailed（{{ $labels.outcome }}）"
-            description: "{{ $labels.flow }} の Task が TaskFailed に着いた（outcome {{ $labels.outcome }}: 作業が結論に届かなかった）。NoAnswer は 0 個/2 個以上の宣言ディレクトリ・時間切れ・宣言に無いディレクトリのいずれかで、途中で死んだか時間切れの疑いが濃い。Declined は handler が escalate/ 等に理由を書いて降りた。RunLimitReached は maxRunsPerPhase に当たった。対象は `kubectl get task -A` で Ready=False のものを探す。理由は対象 Task の Ready 条件（reason は outcome と同じ）の message で分かる。"
+            description: "{{ $labels.flow }} の Task が TaskFailed に着いた（outcome {{ $labels.outcome }}: 作業が結論に届かなかった）。NoAnswer は 0 個/2 個以上の宣言ディレクトリ・時間切れ・宣言に無いディレクトリのいずれかで、途中で死んだか時間切れの疑いが濃い。Declined は handler が `fail/` ディレクトリ等に理由を書いて降りた。RunLimitReached は maxRunsPerPhase に当たった。対象は `kubectl get task -A` で Ready=False のものを探す。理由は対象 Task の Ready 条件（reason は outcome と同じ）の message で分かる。"
         - alert: TaskFlowDefinitionBroken
           expr: |
             increase(taskflow_task_outcomes_total{severity="TaskFailed", outcome="Structural"}[5m]) > 0

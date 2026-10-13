@@ -13,7 +13,7 @@ spec:
   # 検証・テストの合計に掛かる。
   timeout: 180m
   maxInfraRetries: 1
-  # 判定（done / escalate）の置き場。Block スクラッチには置けない — FS がゲスト内にあるので
+  # 判定（done / fail）の置き場。Block スクラッチには置けない — FS がゲスト内にあるので
   # publish サイドカーから読めない（docs/kata-storage.md）。重い作業は Block、渡すものは workspace。
   workspace:
     volume: flow-workspace
@@ -233,11 +233,11 @@ spec:
               - |
                 set -eu
                 JOB_START=$(date +%s)
-                ESCALATE=/workspace/escalate
-                # done と escalate の両方が非空だと判定不能（NoAnswer）になる。implement skill が
-                # 自分で done/report.md を書いた後にこの handler が escalate に倒れることがあるので、
-                # escalate する側が先に done を空にして「答えは 1 つ」に保つ。ただし中身は捨てず、
-                # escalate の報告に畳み込む（緑失敗時に実装報告が消えて手がかりが無くなるのを防ぐ）。
+                FAIL=/workspace/fail
+                # done と fail の両方が非空だと判定不能（NoAnswer）になる。implement skill が
+                # 自分で done/report.md を書いた後にこの handler が fail に倒れることがあるので、
+                # fail に書く側が先に done を空にして「答えは 1 つ」に保つ。ただし中身は捨てず、
+                # fail の報告に畳み込む（緑失敗時に実装報告が消えて手がかりが無くなるのを防ぐ）。
                 # rm -f report.md だけだと、report.md 以外の置き土産が残ってディレクトリが空に
                 # ならず結局 NoAnswer に落ちるので、中身ごと空にする。
                 give_up() {
@@ -247,7 +247,7 @@ spec:
                     if [ -n "$DONE" ]; then
                       printf '\n## 実装 handler がここまでに書いていたこと\n\n%s\n' "$DONE"
                     fi
-                  } > "$ESCALATE/report.md"
+                  } > "$FAIL/report.md"
                   sync; exit 0
                 }
                 # 複数行を書くときは stdin から。YAML のリテラルブロックの中では、行頭に戻る
@@ -255,7 +255,7 @@ spec:
                 # **パイプラインの右側はサブシェルで走る。** 関数をパイプの右に置くと、
                 # 中の `exit 0` はサブシェルを抜けるだけで、呼び出し元のスクリプトは
                 # そのまま次の行へ進む。2026-09-15 の初回実投入で、緑の確認が失敗して
-                # escalate を書いたのに PR 作成まで走り、「PR は作っていない」と書かれた PR が
+                # fail を書いたのに PR 作成まで走り、「PR は作っていない」と書かれた PR が
                 # 出た（Task は done/ だけが残って 完了 になった）。
                 # 呼び出し側はファイルに書いてから give_up_file を呼ぶ形にして、
                 # 関数を現在のシェルで実行する。
@@ -328,7 +328,7 @@ spec:
                     if [ -n "$DONE" ]; then
                       printf '\n## 実装 handler がここまでに書いていたこと\n\n%s\n' "$DONE"
                     fi
-                  } > "$ESCALATE/report.md"
+                  } > "$FAIL/report.md"
                   sync; exit 0
                 }
 
@@ -743,10 +743,10 @@ spec:
                   || give_up "llm-gateway に接続できない。実装は行っていない。llm-gateway namespace の Envoy と、claude-code-build 側／llm-gateway 側の CNP を確認すること。"
                 # set -eu の下では、if/&&/|| に囲まれていない単純コマンドが非ゼロで
                 # 終わった瞬間にスクリプトごと落ちる。次の行で $? を読む形は、その1行に
-                # 到達すること自体がない（done も escalate も書かれず NoAnswer になる）。
+                # 到達すること自体がない（done も fail も書かれず NoAnswer になる）。
                 # || で括って set -e の対象から外す。
                 CLAUDE_RC=0
-                printf '%s\n' /scratch/out/tests-report.md /scratch/out/untestable.md /workspace/escalate/report.md > /tmp/stop-expect
+                printf '%s\n' /scratch/out/tests-report.md /scratch/out/untestable.md /workspace/fail/report.md > /tmp/stop-expect
                 run_agent /tmp/claude-tests.log \
                   --settings /tmp/claude-stop-settings.json \
                   -p "$TESTS_PROMPT" \
@@ -773,13 +773,13 @@ spec:
                   give_up_file /tmp/giveup.txt
                 fi
 
-                # skill が「テストは書かない」と判断して escalate/report.md に理由を書いて
+                # skill が「テストは書かない」と判断して fail/report.md に理由を書いて
                 # 降りていることがある（この場合 git status は空のまま）。この後の
                 # give_up が同じファイルを上書きすると skill の書いた理由が消えるので、
                 # ここで先に拾って終わる。done/ は書かれていないのでそのまま空。
-                if [ -s /workspace/escalate/report.md ]; then
+                if [ -s /workspace/fail/report.md ]; then
                   if [ -s /tmp/tests-turn-note.md ]; then
-                    { cat /workspace/escalate/report.md; cat /tmp/tests-turn-note.md; } > /tmp/giveup.txt
+                    { cat /workspace/fail/report.md; cat /tmp/tests-turn-note.md; } > /tmp/giveup.txt
                     give_up_file /tmp/giveup.txt
                   fi
                   sync; exit 0
@@ -967,11 +967,11 @@ spec:
                 RESTORE_AFTER=7800
                 restore_green() {
                   [ -s /tmp/green-report.md ] || return 1
-                  cp /workspace/escalate/report.md /tmp/restored-escalate.md 2>/dev/null || : > /tmp/restored-escalate.md
+                  cp /workspace/fail/report.md /tmp/restored-fail.md 2>/dev/null || : > /tmp/restored-fail.md
                   restore_tree "$GREEN_TREE" \
                     && find /workspace/done -mindepth 1 -delete \
                     && cp /tmp/green-report.md /workspace/done/report.md \
-                    && find /workspace/escalate -mindepth 1 -delete \
+                    && find /workspace/fail -mindepth 1 -delete \
                     && rm -f /tmp/impl-turn-note.md \
                     && cp /tmp/diffcov-green.txt /tmp/diffcov.txt \
                     && DIFFCOV_RC=$DIFFCOV_RC_GREEN
@@ -993,7 +993,7 @@ spec:
                   CLAUDE_RC=0
                   # Agent は修正フェーズだけに要る（直した後に検証役のサブエージェントを呼ぶ）。
                   # 実装（/implement）は使わず、信頼できない入力（issue 本文）を読む回でもある。
-                  printf '%s\n' /workspace/done/report.md /workspace/escalate/report.md > /tmp/stop-expect
+                  printf '%s\n' /workspace/done/report.md /workspace/fail/report.md > /tmp/stop-expect
                   run_agent "/tmp/claude-implement-${attempt}-${cover_attempt}.log" \
                     --settings /tmp/claude-stop-settings.json \
                     -p "$prompt" \
@@ -1008,7 +1008,7 @@ spec:
                   # 多いリポでも、1 つの要求の実装が収まる値にする。
                   # 実モデルの特定（後段）はこのファイルを読む。
                   cp "/tmp/claude-implement-${attempt}-${cover_attempt}.log" /tmp/claude-implement.log || true
-                  # done の報告があればそこへ、escalate だけなら done/ を作らない（NoAnswer になる）ので一時ファイルへ。
+                  # done の報告があればそこへ、fail だけなら done/ を作らない（NoAnswer になる）ので一時ファイルへ。
                   if [ -s /workspace/done/report.md ]; then TURN_NOTE=/workspace/done/report.md; else TURN_NOTE=/tmp/impl-turn-note.md; fi
                   if [ "$CLAUDE_RC" -eq 1 ] && claude_accept_turn_limit /tmp/claude-implement.log "$TURN_NOTE" "実装の回" "${NOT_PUSHED}" "修正の回では検証役の結果の反映が済んでいない可能性がある。"; then
                     CLAUDE_RC=0
@@ -1060,32 +1060,32 @@ spec:
                         || rm -f /tmp/previous-report.md
                     fi
                     find /workspace/done -mindepth 1 -delete 2>/dev/null || true
-                    # 前の回の escalate も控えへ移す。残すと、次の回が書き直した報告の横に古い主張が並ぶ。
-                    if [ -s /workspace/escalate/report.md ]; then
-                      { echo; echo "## 前の回が escalate に書いていたこと"; echo; cat /workspace/escalate/report.md; } >> /tmp/previous-report.md
+                    # 前の回の fail も控えへ移す。残すと、次の回が書き直した報告の横に古い主張が並ぶ。
+                    if [ -s /workspace/fail/report.md ]; then
+                      { echo; echo "## 前の回が fail に書いていたこと"; echo; cat /workspace/fail/report.md; } >> /tmp/previous-report.md
                       chmod 0644 /tmp/previous-report.md
                     fi
-                    find /workspace/escalate -mindepth 1 -delete 2>/dev/null || true
+                    find /workspace/fail -mindepth 1 -delete 2>/dev/null || true
                     prev_note=
                     if [ -f /tmp/previous-report.md ]; then prev_note="前の回の報告は /tmp/previous-report.md にある。"; fi
                     prompt="${IMPL_PROMPT}。テストは通ったが、この回の変更行のうちどのテストも通らない行が /tmp/uncovered.md にある。${prev_note}作業ツリーには前の回の変更が残っている"
                     cover_attempt=$((cover_attempt + 1))
                     continue
                   fi
-                  # 緑だった実装は、一覧を渡した回の赤で捨てない。直す回が尽きた・escalate された・
+                  # 緑だった実装は、一覧を渡した回の赤で捨てない。直す回が尽きた・fail に降りた・
                   # 時間が尽きたときは、渡す前の緑に戻して終える。戻せなければ従来どおり降りる。
                   if [ -n "$GREEN_TREE" ]; then
                     RED_LATE=
                     if [ $(( $(date +%s) - JOB_START )) -gt "$RESTORE_AFTER" ]; then RED_LATE=1; fi
-                    if { [ -s /workspace/escalate/report.md ] || [ "$attempt" -ge "$IMPL_ATTEMPTS" ] || [ -n "$RED_LATE" ]; } \
+                    if { [ -s /workspace/fail/report.md ] || [ "$attempt" -ge "$IMPL_ATTEMPTS" ] || [ -n "$RED_LATE" ]; } \
                       && restore_green; then
                       GREEN_RESTORED=1
                       break
                     fi
                   fi
-                  # skill が「テストのほうが誤り」として escalate に理由を書いたなら、やり直さない。
-                  if [ -s /workspace/escalate/report.md ]; then
-                    { cat /workspace/escalate/report.md
+                  # skill が「テストのほうが誤り」として fail に理由を書いたなら、やり直さない。
+                  if [ -s /workspace/fail/report.md ]; then
+                    { cat /workspace/fail/report.md
                       if [ -s /tmp/impl-turn-note.md ]; then cat /tmp/impl-turn-note.md; fi
                       echo
                       echo "## $TEST_CMD の結果（${attempt} 回目の後）"
@@ -1164,12 +1164,12 @@ spec:
                   } > /tmp/coverage.md
                   { echo; cat /tmp/coverage.md
                     # エージェントが書いた文は、機械の計測のファイル（coverage.md）には入れない。
-                    if [ -n "$GREEN_RESTORED" ] && [ -s /tmp/restored-escalate.md ]; then
+                    if [ -n "$GREEN_RESTORED" ] && [ -s /tmp/restored-fail.md ]; then
                       echo
-                      echo "差し戻しの回が escalate に書いていたこと:"
+                      echo "差し戻しの回が fail に書いていたこと:"
                       echo
                       echo '~~~~'
-                      tr -d '~' < /tmp/restored-escalate.md
+                      tr -d '~' < /tmp/restored-fail.md
                       echo '~~~~'
                     fi
                   } >> /tmp/red-note.md
@@ -1201,11 +1201,11 @@ spec:
                   } >> /tmp/red-note.md
                 fi
 
-                # 実モデルの特定と escalate の拾い上げは、PR 作成と修正モードの両方で使う。
-                # implement skill が「テストは間違っている」と判断して escalate/ に理由を
+                # 実モデルの特定と fail の拾い上げは、PR 作成と修正モードの両方で使う。
+                # implement skill が「テストは間違っている」と判断して fail/ に理由を
                 # 書いて降りた後でも、緑判定が通れば先へ進んでしまう。捨てずに本文へ
-                # 畳み込む（下で escalate ディレクトリを空にする前に読む）。
-                ESCALATE_NOTE=$({ cat /workspace/escalate/report.md 2>/dev/null; cat /tmp/impl-turn-note.md 2>/dev/null; } || true)
+                # 畳み込む（下で fail ディレクトリを空にする前に読む）。
+                FAIL_NOTE=$({ cat /workspace/fail/report.md 2>/dev/null; cat /tmp/impl-turn-note.md 2>/dev/null; } || true)
                 # gateway 経由になったので、この Pod が知っているのは alias だけ（実モデルは
                 # gateway 側で決まる）。「どのモデルが書いたか」は PR を読む人が要る情報なので、
                 # stream-json の応答が名乗った実モデルを拾う。拾えなければ拾えないと書く —
@@ -1229,11 +1229,11 @@ spec:
                     else
                       echo "テストの回もその後の回も作業ツリーに差分を残さなかった。署名コミットは呼んでいない。${NOT_PUSHED}"
                     fi
-                    if [ -n "$ESCALATE_NOTE" ]; then
+                    if [ -n "$FAIL_NOTE" ]; then
                       echo
-                      echo "## エージェントが escalate に書いていたこと"
+                      echo "## エージェントが fail に書いていたこと"
                       echo
-                      printf '%s\n' "$ESCALATE_NOTE"
+                      printf '%s\n' "$FAIL_NOTE"
                     fi
                   } > /tmp/giveup.txt
                   give_up_file /tmp/giveup.txt
@@ -1248,14 +1248,14 @@ spec:
                   # コメントに失敗してもコミットは積まれているので、Task は止めず報告に書く。
                   printf '## 差し戻しの直し\n\n実装 handler（%s）が、レビューの仕分けが採用した指摘を直した。\n\n## 仕分け\n\n%s\n\n## テストの回\n\n%s\n\n%s\n\n## 直しの回\n\n%s\n' \
                     "$MODEL_NOTE" "$(cat /tmp/triage.md)" "$(cat /tmp/tests-report.md)" "$(cat /tmp/red-note.md)" "$(cat /workspace/done/report.md 2>/dev/null || echo '(報告なし)')" > /tmp/fix-comment.md
-                  if [ -n "$ESCALATE_NOTE" ]; then
-                    printf '\n## エージェントが escalate に書いていたこと（テストは緑だったため直しは積んだ）\n\n%s\n' "$ESCALATE_NOTE" >> /tmp/fix-comment.md
+                  if [ -n "$FAIL_NOTE" ]; then
+                    printf '\n## エージェントが fail に書いていたこと（テストは緑だったため直しは積んだ）\n\n%s\n' "$FAIL_NOTE" >> /tmp/fix-comment.md
                   fi
                   COMMENT_NOTE=
                   jq -Rs '{body: .}' < /tmp/fix-comment.md \
                     | ghgw gh api "repos/${REPO}/issues/${PR}/comments" --input - >/dev/null 2>&1 \
                     || COMMENT_NOTE="（PR へのコメントに失敗した。直しはブランチに積んである）"
-                  find /workspace/escalate -mindepth 1 -delete 2>/dev/null || true
+                  find /workspace/fail -mindepth 1 -delete 2>/dev/null || true
                   # done/report.md に赤の観測を足す。
                   append_red_note
                   printf '%s%s\n' "$PR_URL" "$COMMENT_NOTE" >> /workspace/done/report.md
@@ -1267,7 +1267,7 @@ spec:
                 # BRANCH は FLOW_TASK_UID から決定論的に決まるので、同じ Task の infra retry
                 # では前回と同じ名前になる。前回がここまで来ていたかをまず確かめる —
                 # 確かめずに ref 作成へ進むと、前回がコミットや PR まで到達していた場合に
-                # ただの 422 になり、実際に進んでいた分の状況が escalate から消える。
+                # ただの 422 になり、実際に進んでいた分の状況が fail から消える。
                 if ghgw gh api "repos/${REPO}/git/refs/heads/${BRANCH}" >/dev/null 2>&1; then
                   give_up "ブランチ ${BRANCH} は前回の試行（infra retry）で既に作成済み。コミットや PR 作成まで進んでいたかはここからは分からない。人が repos/${REPO}/git/refs/heads/${BRANCH} と既存 PR を確認すること。"
                 fi
@@ -1285,19 +1285,19 @@ spec:
 
                 PR_BODY=$(printf 'closes #%s\n\n実装 handler（%s）が TDD で書いた。テストの回が要求ごとに赤の示し方を選び、示せる赤は観測してから実装している。\n\n## 調査\n\n%s\n\n## テストの回\n\n%s\n\n%s\n\n## 実装の回\n\n%s\n' \
                     "$ISSUE" "$MODEL_NOTE" "$(cat /tmp/investigation.md)" "$(cat /tmp/tests-report.md)" "$(cat /tmp/red-note.md)" "$(cat /workspace/done/report.md 2>/dev/null || echo '(報告なし)')")
-                if [ -n "$ESCALATE_NOTE" ]; then
-                  PR_BODY=$(printf '%s\n\n## エージェントが escalate に書いていたこと（テストは緑だったため PR は作成）\n\n%s\n' "$PR_BODY" "$ESCALATE_NOTE")
+                if [ -n "$FAIL_NOTE" ]; then
+                  PR_BODY=$(printf '%s\n\n## エージェントが fail に書いていたこと（テストは緑だったため PR は作成）\n\n%s\n' "$PR_BODY" "$FAIL_NOTE")
                 fi
                 PR_URL=$(ghgw gh pr create --repo "$REPO" --head "$BRANCH" --base main --draft \
                   --title "Implement #${ISSUE}" \
                   --body "$PR_BODY") \
                   || give_up "PR を作れなかった。実装はブランチ ${BRANCH} として GitHub 側に push 済みで残っている。"
 
-                # done と escalate の両方が非空だと判定不能になる。ここまで来た時点で成功が
-                # 確定するので、implement skill が途中で escalate に倒れていた場合に備えて空に
+                # done と fail の両方が非空だと判定不能になる。ここまで来た時点で成功が
+                # 確定するので、implement skill が途中で fail に倒れていた場合に備えて空に
                 # する（中身は上で PR 本文に畳み込み済み）。rm -f report.md だけだと report.md
                 # 以外の置き土産が残ってディレクトリが空にならないので、中身ごと空にする。
-                find /workspace/escalate -mindepth 1 -delete 2>/dev/null || true
+                find /workspace/fail -mindepth 1 -delete 2>/dev/null || true
                 append_red_note
                 printf '%s\n' "$PR_URL" >> /workspace/done/report.md
                 # 後段（レビューの各フェーズと、差し戻された次の実装）が棚から PR を引く口。

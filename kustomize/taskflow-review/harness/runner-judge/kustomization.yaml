@@ -84,15 +84,15 @@ patches:
       - op: replace
         path: /spec/jobTemplate/template/spec/containers/0/command
         value: [bash, -c]
-      # 検証は escalate を持たない。判定できないときは run の失敗として終わる。
+      # 検証は fail を持たない。判定できないときは run の失敗として終わる。
       - op: replace
         path: /spec/jobTemplate/template/spec/containers/0/args
         value:
           - |
             set -u
             give_up() {
-              if [ -d /workspace/escalate ]; then
-                printf '%s\n' "$1" > /workspace/escalate/report.md
+              if [ -d /workspace/fail ]; then
+                printf '%s\n' "$1" > /workspace/fail/report.md
                 sync; exit 0
               fi
               printf '%s\n' "$1" >&2

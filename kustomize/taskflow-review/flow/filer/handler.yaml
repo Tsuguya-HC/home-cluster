@@ -153,10 +153,10 @@ spec:
                   [ -f "$f" ] || continue
                   PR_URL=$(head -1 "$f")
                 done
-                # 止まった理由。番号が最大の escalate の報告だけを先頭で切って渡す。PR が無ければ元の
+                # 止まった理由。番号が最大の fail の報告だけを先頭で切って渡す。PR が無ければ元の
                 # issue に、あれば PR へのコメントに載せる。
                 STOP=
-                for f in $(printf '%s\n' /results/*/escalate/report.md | sort -t/ -k3,3n); do
+                for f in $(printf '%s\n' /results/*/fail/report.md | sort -t/ -k3,3n); do
                   [ -f "$f" ] || continue
                   STOP=$f
                 done
@@ -173,7 +173,7 @@ spec:
                     stop_failed
                   elif [ "$(wc -l < "$STOP")" -gt 60 ]; then
                     n=${STOP#/results/}; n=${n%%/*}
-                    printf '\n（先頭 60 行。全文は results/%s/escalate/report.md）\n' "$n" >> /tmp/stop-reason.md \
+                    printf '\n（先頭 60 行。全文は results/%s/fail/report.md）\n' "$n" >> /tmp/stop-reason.md \
                       || stop_failed
                   fi
                 fi

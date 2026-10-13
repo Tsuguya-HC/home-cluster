@@ -107,10 +107,10 @@ spec:
                 # pr-review と同じく**形を確かめてからしか使わない**（未知の alias は gateway 側で
                 # 404 になるだけだが、それを「モデルが答えなかった」と読み違えないため）。
                 # siblings は give_up() という名前だが、ここは next の
-                # `TaskFailed: escalate` が選ぶ終端と名前を合わせている。
-                escalate() {
-                  mkdir -p /workspace/escalate
-                  printf '%s\n' "$1" > /workspace/escalate/report.md
+                # `TaskFailed: fail` が選ぶ終端と名前を合わせている。
+                fail() {
+                  mkdir -p /workspace/fail
+                  printf '%s\n' "$1" > /workspace/fail/report.md
                   sync
                   exit 0
                 }
@@ -122,20 +122,20 @@ spec:
                   # **証明済みの alias（implement）で成功して緑になる** — 確かめたいのは
                   # まだ通したことのない経路の方なので、それでは何も証明していない。
                   # kustomize/taskflow-review/flow/implement/base/handler.yaml が同じ形を名指しで拒否しているのと同じ理由。
-                  [ -z "${FLOW_INPUT:-}" ] || escalate "spec.input が JSON として読めないか .alias を持たない（キーの typo・空文字・null も含む）。alias の取り違えを既定で握り潰さないため止めた。gateway 経路は一切確かめていない。"
+                  [ -z "${FLOW_INPUT:-}" ] || fail "spec.input が JSON として読めないか .alias を持たない（キーの typo・空文字・null も含む）。alias の取り違えを既定で握り潰さないため止めた。gateway 経路は一切確かめていない。"
                   ALIAS="$LLM_ALIAS_DEFAULT"
                 fi
                 case "$ALIAS" in
                   implement|implement-claude|review|review-muse|investigate) ;;
                   # 違反値そのものは返さない（taskflow-pr-review と同じ idiom）。
-                  *) escalate "spec.input.alias が未知の値（implement / implement-claude / review / review-muse / investigate のみ）。gateway 経路は一切確かめていない。" ;;
+                  *) fail "spec.input.alias が未知の値（implement / implement-claude / review / review-muse / investigate のみ）。gateway 経路は一切確かめていない。" ;;
                 esac
 
                 # alias と同じ理由で、知らないキー（`vai` のような typo）は既定に落とさず止める。
                 VIA=model
                 if [ -n "${FLOW_INPUT:-}" ]; then
                   printf '%s' "$FLOW_INPUT" | jq -e '(keys - ["alias", "via"]) == []' >/dev/null 2>&1 \
-                    || escalate "spec.input に alias / via 以外のキーがある。指定の取り違えを既定で握り潰さないため止めた。gateway 経路は一切確かめていない。"
+                    || fail "spec.input に alias / via 以外のキーがある。指定の取り違えを既定で握り潰さないため止めた。gateway 経路は一切確かめていない。"
                   VIA=$(printf '%s' "$FLOW_INPUT" | jq -r '.via // "model"' 2>/dev/null || true)
                 fi
                 case "$VIA" in
@@ -144,13 +144,13 @@ spec:
                     # ヘッダで alias を受けるのは Claude 系のルールだけ。
                     case "$ALIAS" in
                       implement-claude|review|investigate) ;;
-                      *) escalate "via: header は implement-claude / review / investigate のみ。gateway 経路は一切確かめていない。" ;;
+                      *) fail "via: header は implement-claude / review / investigate のみ。gateway 経路は一切確かめていない。" ;;
                     esac
                     MODEL="$LLM_HEADER_MODEL"
                     ANTHROPIC_CUSTOM_HEADERS=$(printf '%s\nx-llm-alias: %s' "$ANTHROPIC_CUSTOM_HEADERS" "$ALIAS")
                     export ANTHROPIC_CUSTOM_HEADERS
                     ;;
-                  *) escalate "spec.input.via が未知の値（model / header のみ）。gateway 経路は一切確かめていない。" ;;
+                  *) fail "spec.input.via が未知の値（model / header のみ）。gateway 経路は一切確かめていない。" ;;
                 esac
                 echo "alias=$ALIAS via=$VIA model=$MODEL"
 
@@ -159,7 +159,7 @@ spec:
                 # 「gateway に繋がらない」と区別がつく。
                 # この smoke は alias を入力で変えられる唯一の handler なので、鍵 1 本で
                 # 両階層に入れるよう許可してある（他の handler は alias が固定）。
-                [ -n "$ANTHROPIC_AUTH_TOKEN" ] || escalate "クライアントキーが空。llm-gateway-client-keys Secret を確認すること。gateway 経路は一切確かめていない。"
+                [ -n "$ANTHROPIC_AUTH_TOKEN" ] || fail "クライアントキーが空。llm-gateway-client-keys Secret を確認すること。gateway 経路は一切確かめていない。"
 
                 # --- 否定側の見張り -------------------------------------------------
                 # **SecurityPolicy が外れていても、この下の happy path は緑のまま通る。**
@@ -181,9 +181,9 @@ spec:
                   "${ANTHROPIC_BASE_URL}/v1/messages" || true)
                 case "$BAD" in
                   401) echo "否定側 OK: 無効な鍵は 401（alias=$ALIAS）" ;;
-                  000|"") escalate "gateway に接続できない（否定側の確認が届かなかった）。CNP と Envoy を確認すること。alias=$ALIAS の確認はしていない。" ;;
-                  500) escalate "gateway が 500 を返した。SecurityPolicy の翻訳エラー（Secret の参照ミス・鍵の値の重複・Secret 消失）が疑われる。alias=$ALIAS の確認はしていない。" ;;
-                  *) escalate "無効な鍵が 401 以外（HTTP $BAD）で通った。**呼び出し側の認証が効いていない** — SecurityPolicy の付け忘れ、targetRefs の外れ、2 本目が Conflicted で無視された等。alias=$ALIAS。" ;;
+                  000|"") fail "gateway に接続できない（否定側の確認が届かなかった）。CNP と Envoy を確認すること。alias=$ALIAS の確認はしていない。" ;;
+                  500) fail "gateway が 500 を返した。SecurityPolicy の翻訳エラー（Secret の参照ミス・鍵の値の重複・Secret 消失）が疑われる。alias=$ALIAS の確認はしていない。" ;;
+                  *) fail "無効な鍵が 401 以外（HTTP $BAD）で通った。**呼び出し側の認証が効いていない** — SecurityPolicy の付け忘れ、targetRefs の外れ、2 本目が Conflicted で無視された等。alias=$ALIAS。" ;;
                 esac
 
                 # --- 階層分離の見張り ---------------------------------------------
@@ -215,9 +215,9 @@ spec:
                       "${ANTHROPIC_BASE_URL}/v1/messages" || true)
                     case "$TIER" in
                       404) echo "階層分離 OK: 従量課金のクライアントは Max ルート（$MAX_ALIAS, via=$PROBE_VIA）に入れない（404）" ;;
-                      401) escalate "tier-probe の鍵が認証を通らない（401）。llm-gateway 側の llm-gateway-client-keys Secret に tier-probe があるか確認すること。階層分離は確かめられていない。" ;;
-                      000|"") escalate "gateway に接続できない（階層分離の確認が届かなかった）。alias=$MAX_ALIAS via=$PROBE_VIA の確認はしていない。" ;;
-                      *) escalate "**階層分離が効いていない** — 従量課金だけ許可したクライアントが Max ルート（$MAX_ALIAS, via=$PROBE_VIA）に HTTP $TIER で入れた。AIGatewayRoute の x-llm-client 条件が外れている疑い（manifests/llm-gateway/anthropic.yaml）。" ;;
+                      401) fail "tier-probe の鍵が認証を通らない（401）。llm-gateway 側の llm-gateway-client-keys Secret に tier-probe があるか確認すること。階層分離は確かめられていない。" ;;
+                      000|"") fail "gateway に接続できない（階層分離の確認が届かなかった）。alias=$MAX_ALIAS via=$PROBE_VIA の確認はしていない。" ;;
+                      *) fail "**階層分離が効いていない** — 従量課金だけ許可したクライアントが Max ルート（$MAX_ALIAS, via=$PROBE_VIA）に HTTP $TIER で入れた。AIGatewayRoute の x-llm-client 条件が外れている疑い（manifests/llm-gateway/anthropic.yaml）。" ;;
                     esac
                   done
                 done
@@ -337,7 +337,7 @@ spec:
       handler: llm-gateway-smoke
       next:
         完了: ok
-        TaskFailed: escalate
+        TaskFailed: fail
   terminals:
     完了: Success
   maxRunsPerPhase: 1

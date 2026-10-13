@@ -75,8 +75,8 @@ patches:
           - |
             set -u
             give_up() {
-              mkdir -p /workspace/escalate
-              printf '%s\n' "$1" > /workspace/escalate/report.md
+              mkdir -p /workspace/fail
+              printf '%s\n' "$1" > /workspace/fail/report.md
               sync; exit 0
             }
             chown 65533:65533 /scratch \

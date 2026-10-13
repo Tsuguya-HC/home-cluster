@@ -214,7 +214,7 @@ spec:
             args:
               - |
                 set -eu
-                ESCALATE=/workspace/escalate
+                FAIL=/workspace/fail
                 # gateway のログ帰属ヘッダも phase で切り替える（仕分けと検証が同じ値だと
                 # アクセスログで区別できない）。
                 case "${FLOW_PHASE:-}" in
@@ -224,11 +224,11 @@ spec:
                 esac
                 # sync は Kata + NFS の workspace PVC に要る。書き戻しを残して exit すると
                 # Pod 内の全コンテナが 255 になる。
-                # 検証は escalate を持たない（判定の役で、人に上げる役ではない）。判定できない
+                # 検証は fail を持たない（判定の役で、人に上げる役ではない）。判定できない
                 # ときは run の失敗として終わる。
                 give_up() {
-                  if [ -d "$ESCALATE" ]; then
-                    printf '%s\n' "$1" > "$ESCALATE/report.md"; sync; exit 0
+                  if [ -d "$FAIL" ]; then
+                    printf '%s\n' "$1" > "$FAIL/report.md"; sync; exit 0
                   fi
                   printf '%s\n' "$1" >&2; sync; exit 1
                 }
@@ -314,13 +314,13 @@ spec:
                 rc=0
                 wait $pid || rc=$?
                 echo "claude exited with $rc"
-                # 判定はディレクトリで出る。打ち切り（124/137/143）で escalate 以外が全部空の
+                # 判定はディレクトリで出る。打ち切り（124/137/143）で fail 以外が全部空の
                 # ときだけ、理由を残す。
                 case "$rc" in
                   124 | 137 | 143)
                     wrote=
                     for d in /workspace/*/; do
-                      [ "$d" = "$ESCALATE/" ] && continue
+                      [ "$d" = "$FAIL/" ] && continue
                       [ -n "$(ls -A "$d" 2>/dev/null)" ] && wrote=1
                     done
                     if [ -z "$wrote" ]; then

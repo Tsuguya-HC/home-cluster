@@ -112,7 +112,7 @@ spec:
   # 予約名 flow-workspace = コントローラ提供の per-task PVC（ADR-0002、TaskFlow 側の
   # `workspace: {}`）。自前の emptyDir は Kata では使えない — Kata は emptyDir を VM 内の
   # ローカル領域に作りホストと共有せず、subPath も未対応なので、prepare が敷いた
-  # work/<runID>/{ok,findings,escalate} と agent の subPath マウントが別物になり、判定を
+  # work/<runID>/{ok,findings,fail} と agent の subPath マウントが別物になり、判定を
   # 書く先が消えて NoAnswer → TaskFailed になる（2026-09-12 実測 2 回: fsGroup 有り #869 と
   # 無し #870 で同じ症状、つまり fsGroup は無関係。Kata の docs/Limitations.md、
   # kata-containers #1728）。smoke-workspace と同じ形。
@@ -204,9 +204,9 @@ spec:
 
                 # 取り込みは決定論の側でやる。エージェントに clone させると「どの ref を
                 # 読んだか」が run ごとに変わり、指摘の再現ができなくなる。
-                ESCALATE=/workspace/escalate
+                FAIL=/workspace/fail
                 # sync は Kata + NFS の workspace PVC に要る（下の agent コンテナと同じ理由）。
-                give_up() { printf '%s\n' "$1" > "$ESCALATE/report.md"; sync; exit 0; }
+                give_up() { printf '%s\n' "$1" > "$FAIL/report.md"; sync; exit 0; }
 
                 # repo も Task を作った側が指定できる（既定は taskflow）。org を固定して
                 # 形も確かめてからしか使わない — この値は clone の URL と API の URL、そして
@@ -283,7 +283,7 @@ spec:
                 wait $pid || rc=$?
                 echo "claude exited with $rc"
                 # 判定はディレクトリで出る。終了コードはログに残すだけで判定には使わない —
-                # 既に ok/ に書かれていた場合、ここで escalate/ にも書くと「答えが 2 つ」に
+                # 既に ok/ に書かれていた場合、ここで fail/ にも書くと「答えが 2 つ」に
                 # なって判定不能になる。ここから先は何もしない（回収は publish サイドカー）。
                 #
                 # sync は Kata + NFS の workspace PVC に要る。書き戻しが残ったまま exit すると
@@ -381,7 +381,7 @@ spec:
         要修正: findings
         # 「材料が足りず判定できない」を書いて表明する出口（taskflow #63）。
         # 何も書かなければ NoAnswer で、途中で死んだのと区別が付かない。
-        TaskFailed: escalate
+        TaskFailed: fail
   # 終端の意味は flow が言う（taskflow #64）。framework は 要修正 が悪い知らせだと知らない。
   # 宣言しない終端は metric 上 Undeclared のままで、Event も条件も出ない。
   terminals:

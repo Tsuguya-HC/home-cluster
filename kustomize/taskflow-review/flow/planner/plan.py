@@ -43,8 +43,8 @@ UI_PATH = re.compile(r"(^|/)(ui|web|frontend)/|\.(tsx|jsx|vue|svelte|css|html)$"
 RESPONSE_SHAPE = re.compile(r"Serialize|json!\(")
 
 
-def escalate(msg):
-    (WORKSPACE / "escalate" / "report.md").write_text(msg + "\n")
+def fail(msg):
+    (WORKSPACE / "fail" / "report.md").write_text(msg + "\n")
     sys.exit(0)
 
 
@@ -60,13 +60,13 @@ def read_input():
     try:
         spec = json.loads(os.environ.get("FLOW_INPUT") or "{}")
     except json.JSONDecodeError:
-        escalate("spec.input が JSON として読めない。観点出しは行っていない。")
+        fail("spec.input が JSON として読めない。観点出しは行っていない。")
     repo, issue = str(spec.get("repo", "")), str(spec.get("issue", ""))
     m = re.fullmatch(r"Tsuguya-HC/([A-Za-z0-9._-]+)", repo)
     if not m or m.group(1) in (".", ".."):
-        escalate("spec.input.repo の形が不正か、Tsuguya-HC 配下ではない。観点出しは行っていない。")
+        fail("spec.input.repo の形が不正か、Tsuguya-HC 配下ではない。観点出しは行っていない。")
     if not issue.isdigit():
-        escalate("spec.input.issue が数字ではない。観点出しは行っていない。")
+        fail("spec.input.issue が数字ではない。観点出しは行っていない。")
     return repo, issue
 
 
@@ -75,11 +75,11 @@ def find_pr(repo):
     runs = sorted((p for p in RESULTS.glob("*/done/pr-url") if p.parent.parent.name.isdigit()),
                   key=lambda p: int(p.parent.parent.name))
     if not runs:
-        escalate("レビュー対象の PR が棚（results/*/done/pr-url）に見つからない。観点出しは行っていない。")
+        fail("レビュー対象の PR が棚（results/*/done/pr-url）に見つからない。観点出しは行っていない。")
     url = runs[-1].read_text().strip()
     m = re.fullmatch(rf"https://github\.com/{re.escape(repo)}/pull/(\d+)", url)
     if not m:
-        escalate(f"棚の PR の URL が不正（{url}）。観点出しは行っていない。")
+        fail(f"棚の PR の URL が不正（{url}）。観点出しは行っていない。")
     return url, m.group(1)
 
 
@@ -95,9 +95,9 @@ def fetch(repo, pr, issue, key):
         pr_json = json.loads(run("gh", "api", f"repos/{repo}/pulls/{pr}", env=gh_env, timeout=60))
         issue_json = json.loads(run("gh", "api", f"repos/{repo}/issues/{issue}", env=gh_env, timeout=60))
     except subprocess.TimeoutExpired as e:
-        escalate(f"PR #{pr} の取り込みが時間切れ（{' '.join(e.cmd[:3])}、{e.timeout:.0f}秒）。観点出しは行っていない。")
+        fail(f"PR #{pr} の取り込みが時間切れ（{' '.join(e.cmd[:3])}、{e.timeout:.0f}秒）。観点出しは行っていない。")
     except subprocess.CalledProcessError as e:
-        escalate(f"PR #{pr} の取り込みに失敗した（{' '.join(e.cmd[:3])}）。観点出しは行っていない。\n\n{e.stderr[-1000:]}")
+        fail(f"PR #{pr} の取り込みに失敗した（{' '.join(e.cmd[:3])}）。観点出しは行っていない。\n\n{e.stderr[-1000:]}")
     return base, pr_json, issue_json
 
 
@@ -181,9 +181,9 @@ def main():
     try:
         state, files = build_state(base, pr_json, issue_json)
     except subprocess.TimeoutExpired as e:
-        escalate(f"PR #{pr} の事実の組み立てが時間切れ（{' '.join(e.cmd[:3])}、{e.timeout:.0f}秒）。観点出しは行っていない。")
+        fail(f"PR #{pr} の事実の組み立てが時間切れ（{' '.join(e.cmd[:3])}、{e.timeout:.0f}秒）。観点出しは行っていない。")
     if not files:
-        escalate(f"PR #{pr} の diff が空。観点出しは行っていない。")
+        fail(f"PR #{pr} の diff が空。観点出しは行っていない。")
 
     probs, err, jev_seconds, jev_attempts = ask_jev(state, roles, os.environ["JEV_API_KEY"])
     selected = {}
@@ -201,7 +201,7 @@ def main():
     try:
         ui, ui_reason = pick_ui(files, base)
     except subprocess.TimeoutExpired as e:
-        escalate(f"画面判定が時間切れ（{' '.join(e.cmd[:3])}、{e.timeout:.0f}秒）。観点出しは行っていない。")
+        fail(f"画面判定が時間切れ（{' '.join(e.cmd[:3])}、{e.timeout:.0f}秒）。観点出しは行っていない。")
     if ui:
         selected["ui"] = ui_reason
     lines.append(f"- ui: {'起動' if ui else '見送り'}（{ui_reason}）")
@@ -246,6 +246,6 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        # escalate() 自体は SystemExit で抜けるので、ここでは通り抜けて report.md を残す。
+        # fail() 自体は SystemExit で抜けるので、ここでは通り抜けて report.md を残す。
         # 想定していない例外で何も書かずに落ちるのを防ぐ最後の網。
-        escalate(f"観点出しが予期しない例外で失敗した: {type(e).__name__}: {str(e)[:300]}")
+        fail(f"観点出しが予期しない例外で失敗した: {type(e).__name__}: {str(e)[:300]}")

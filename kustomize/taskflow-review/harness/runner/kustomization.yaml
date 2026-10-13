@@ -31,7 +31,7 @@ patches:
       # digest で固定する。
       - op: replace
         path: /spec/jobTemplate/template/spec/containers/0/image
-        value: registry.infra.tgy.io/agents/runner:latest@sha256:0e828d41a8033e131e715392dc68a7e345797638b075ea00749b4958b76c9a0c
+        value: registry.infra.tgy.io/agents/runner:latest@sha256:c5e84c42363cc2bfbd9eaf618402bed7040fc00788b217ba970c4d7c7c58197d
       - op: replace
         path: /spec/jobTemplate/template/spec/containers/0/command
         value: [bash, -c]
@@ -41,8 +41,8 @@ patches:
           - |
             set -u
             give_up() {
-              mkdir -p /workspace/escalate
-              printf '%s\n' "$1" > /workspace/escalate/report.md
+              mkdir -p /workspace/fail
+              printf '%s\n' "$1" > /workspace/fail/report.md
               sync; exit 0
             }
             if [ -b /dev/scratch ]; then

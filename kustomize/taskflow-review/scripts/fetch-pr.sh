@@ -2,7 +2,7 @@
 # レビューの枝と仕分けの fetch init が共有する、PR の取り込み（#1081）。
 # /tmp に clone・diff・PR と issue の本文を置く。GitHub の鍵はこの init にしか渡らない。
 # 失敗しても exit 0 で /tmp/fetch-error に書くこと。init が落ちると Pod が上がらず、
-# escalate に理由を書く者がいなくなる。
+# fail に理由を書く者がいなくなる。
 set -eu
 fail() { printf '%s\n' "$1" > /tmp/fetch-error; exit 0; }
 

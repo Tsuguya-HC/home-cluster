@@ -140,10 +140,10 @@ spec:
             args:
               - |
                 set -eu
-                ESCALATE=/workspace/escalate
+                FAIL=/workspace/fail
                 # sync は Kata + NFS の workspace PVC に要る。書き戻しを残して exit すると
                 # Pod 内の全コンテナが 255 になる。
-                give_up() { printf '%s\n' "$1" > "$ESCALATE/report.md"; sync; exit 0; }
+                give_up() { printf '%s\n' "$1" > "$FAIL/report.md"; sync; exit 0; }
 
                 if [ -f /tmp/fetch-error ]; then
                   give_up "$(cat /tmp/fetch-error)"
@@ -191,15 +191,15 @@ spec:
                 rc=0
                 wait $pid || rc=$?
                 echo "claude exited with $rc"
-                # 判定はディレクトリで出る。終了コードで escalate に書き足すと、既に答えが
+                # 判定はディレクトリで出る。終了コードで fail に書き足すと、既に答えが
                 # 書かれていた場合に答えが 2 つになる。Job の期限による打ち切りは trap で
                 # 終わり、ここは通らない（理由はコントローラが Task に残す）。ここに来るのは
-                # claude だけが kill されたときで、escalate 以外が全部空のときだけ理由を残す。
+                # claude だけが kill されたときで、fail 以外が全部空のときだけ理由を残す。
                 case "$rc" in
                   137)
                     wrote=
                     for d in /workspace/*/; do
-                      [ "$d" = "$ESCALATE/" ] && continue
+                      [ "$d" = "$FAIL/" ] && continue
                       [ -n "$(ls -A "$d" 2>/dev/null)" ] && wrote=1
                     done
                     if [ -z "$wrote" ]; then

@@ -6,14 +6,14 @@
 #
 # TDD を約束ではなく事実で進める。claude を 2 回呼び、その間でスクリプトがテストを走らせる:
 #
-#   1. baseline  変更前に全部通ることを確認     … 通らなければ前提が壊れている → escalate
+#   1. baseline  変更前に全部通ることを確認     … 通らなければ前提が壊れている → fail
 #   2. claude #1 テストだけ書かせる（/implement-tests）
-#   3. red       新しいテストが落ちることを確認 … 落ちなければ、赤を示せない理由（untestable.md）が無い限り escalate
+#   3. red       新しいテストが落ちることを確認 … 落ちなければ、赤を示せない理由（untestable.md）が無い限り fail
 #                （今のコードで通るのが正しいテストは、claude #1 が置いた変異のパッチを
 #                当てて落ちることで赤とみなす。赤を示せないと claude #1 が理由を書いた
 #                要求は赤を観測せずに進む）
 #   4. claude #2 実装させる（/implement）
-#   5. green     全部通ることを確認             … 通らなければ → escalate
+#   5. green     全部通ることを確認             … 通らなければ → fail
 #                （変異のパッチが落ちるテストと混ざっていたときは、ここで当てて落ちることを確認）
 #   6. PR        ref を作り、署名コミットして draft PR（完了まで進んだら finally が draft を外す）
 #
@@ -47,12 +47,12 @@ spec:
       handler: investigator
       next:
         実装: located
-        TaskFailed: escalate
+        TaskFailed: fail
     実装:
       handler: implement-writer
       next:
         観点出し: done
-        TaskFailed: escalate
+        TaskFailed: fail
     # Jev が選んだ観点と、毎回の general を起動する（#1081）。general は always に置かない —
     # 分岐元が 1 つも書かないと always があっても NoAnswer なので（ADR-0013 決定1）、
     # 観点出しが必ず書ける行き先として残す。
@@ -66,36 +66,36 @@ spec:
         states: states
         precedent: precedent
         ui: ui
-        TaskFailed: escalate
+        TaskFailed: fail
       join:
         phase: 仕分け
         always: [documented, tests]
-    general: {handler: review-general, next: {仕分け: reviewed, TaskFailed: escalate}}
-    failpath: {handler: review-failpath, next: {仕分け: reviewed, TaskFailed: escalate}}
-    boundary: {handler: review-boundary, next: {仕分け: reviewed, TaskFailed: escalate}}
-    runtime: {handler: review-runtime, next: {仕分け: reviewed, TaskFailed: escalate}}
-    states: {handler: review-states, next: {仕分け: reviewed, TaskFailed: escalate}}
-    precedent: {handler: review-precedent, next: {仕分け: reviewed, TaskFailed: escalate}}
-    ui: {handler: review-ui, next: {仕分け: reviewed, TaskFailed: escalate}}
-    documented: {handler: review-documented, next: {仕分け: reviewed, TaskFailed: escalate}}
-    tests: {handler: review-tests, next: {仕分け: reviewed, TaskFailed: escalate}}
-    # 仕分けは止まらず、この PR で直さないものは起票の候補に残す。escalate は仕分けそのものが
+    general: {handler: review-general, next: {仕分け: reviewed, TaskFailed: fail}}
+    failpath: {handler: review-failpath, next: {仕分け: reviewed, TaskFailed: fail}}
+    boundary: {handler: review-boundary, next: {仕分け: reviewed, TaskFailed: fail}}
+    runtime: {handler: review-runtime, next: {仕分け: reviewed, TaskFailed: fail}}
+    states: {handler: review-states, next: {仕分け: reviewed, TaskFailed: fail}}
+    precedent: {handler: review-precedent, next: {仕分け: reviewed, TaskFailed: fail}}
+    ui: {handler: review-ui, next: {仕分け: reviewed, TaskFailed: fail}}
+    documented: {handler: review-documented, next: {仕分け: reviewed, TaskFailed: fail}}
+    tests: {handler: review-tests, next: {仕分け: reviewed, TaskFailed: fail}}
+    # 仕分けは止まらず、この PR で直さないものは起票の候補に残す。fail は仕分けそのものが
     # 成り立たないときだけ。
     仕分け:
       handler: review-triage
       next:
         完了: clean
         修正: fix
-        TaskFailed: escalate
+        TaskFailed: fail
     # 最新の仕分けが採用した指摘を直す。検証から戻されたときも同じ（まだ直っていない点を読む）。
     修正:
       handler: implement-fixer
       next:
         検証: done
-        TaskFailed: escalate
+        TaskFailed: fail
     # 採用した指摘が直ったかだけを確かめ、新しい欠陥は探さない（周回を閉じるため）。直った
     # ときの行き先は handler のスクリプトが仕分けの採用の重さで決める: MEDIUM 以上を直したなら
-    # rereview（もう一度レビュー）、LOW 以下だけなら verified。escalate は持たない。
+    # rereview（もう一度レビュー）、LOW 以下だけなら verified。fail は持たない。
     # 周回は maxRunsPerPhase で止まる（上限に当たると RunLimitReached → TaskFailed）。
     検証:
       handler: review-verify
@@ -106,7 +106,7 @@ spec:
   terminals:
     完了: Success
   # 起票の候補を issue にし、PR に結果を残すのは、終わり方に関係なく 1 回（差し戻しの上限や
-  # escalate で終わっても候補を捨てない）。
+  # fail で終わっても候補を捨てない）。
   finally:
     handler: review-file-issues
     done: filed

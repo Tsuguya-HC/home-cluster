@@ -116,7 +116,7 @@ spec:
               # 伝わらない。
               limits: {cpu: 500m, memory: 256Mi}
           # 失敗しても exit 0 で /tmp/fetch-error に書くこと。init が落ちると Pod が上がらず、
-          # escalate に理由を書く者がいなくなる。
+          # fail に理由を書く者がいなくなる。
           - name: fetch
             image: registry.infra.tgy.io/tools/claude-code:latest@sha256:1f61ae36cab5537ccac1e9cc8c30e8dd13dfc95ef0839927e0d8d2d51dae9476
             command: [sh, -c]
@@ -192,10 +192,10 @@ spec:
             args:
               - |
                 set -eu
-                ESCALATE=/workspace/escalate
+                FAIL=/workspace/fail
                 # sync は Kata + NFS の workspace PVC に要る。書き戻しを残して exit すると
                 # Pod 内の全コンテナが 255 になる。
-                give_up() { printf '%s\n' "$1" > "$ESCALATE/report.md"; sync; exit 0; }
+                give_up() { printf '%s\n' "$1" > "$FAIL/report.md"; sync; exit 0; }
 
                 if [ -f /tmp/fetch-error ]; then
                   give_up "$(cat /tmp/fetch-error)"
@@ -215,7 +215,7 @@ spec:
                   || give_up "llm-gateway に接続できない（HTTP ${code:-なし}）。調査は行っていない。401 はクライアントキー、500 は llm-gateway の SecurityPolicy を確認すること。"
 
                 cd /tmp/src
-                # 15m は Job の timeout（20m）より短くして、打ち切り後に escalate へ理由を書く時間を残す。
+                # 15m は Job の timeout（20m）より短くして、打ち切り後に fail へ理由を書く時間を残す。
                 timeout -k 10 15m claude -p "/investigate ${REPO} の issue #${ISSUE}" \
                   --plugin-dir /parts \
                   --append-system-prompt-file /parts/CLAUDE.md \
@@ -238,9 +238,9 @@ spec:
                 rc=0
                 wait $pid || rc=$?
                 echo "claude exited with $rc"
-                # 判定はディレクトリで出る。終了コードで escalate に書き足すと、既に located/ に
+                # 判定はディレクトリで出る。終了コードで fail に書き足すと、既に located/ に
                 # 書かれていた場合に答えが 2 つになる。timeout による打ち切り（124/137/143）だけは
-                # 例外 — located/ が空なら、報告が一切書かれていないので escalate に理由を残す。
+                # 例外 — located/ が空なら、報告が一切書かれていないので fail に理由を残す。
                 case "$rc" in
                   124 | 137 | 143)
                     if [ -z "$(ls -A /workspace/located 2>/dev/null)" ]; then

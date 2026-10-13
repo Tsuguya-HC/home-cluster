@@ -1,0 +1,139 @@
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+# エージェントが動かすコマンド（テスト・ビルドを含む）を、同じ Pod の別コンテナ executor で動かす。
+# ツールの kill がハーネス（containers[0]）に届かないのは PID 名前空間が別だから。shareProcessNamespace を
+# 付けないこと。
+# executor の image はハーネス（containers[0]）から copy して同じ digest にする。runner 系 Component の後に並べる
+# （initContainers の index と op: test がその適用後を前提にする）。
+# 重い作業は executor で走るので CPU とメモリの大半はこちらに付ける。limits.cpu は付けない — runc では
+# そのままホストの CFS quota になる。
+patches:
+  - target:
+      kind: TaskHandler
+      labelSelector: taskflow-role in (work,review,judge)
+    patch: |-
+      - op: add
+        path: /spec/jobTemplate/template/spec/volumes/-
+        value:
+          name: execd
+          emptyDir: {medium: Memory, sizeLimit: 1Mi}
+      # ランナーが入力を置く /run/<役割名> に被せる。executor には readOnly で入れる（ツールに書き換えさせない）。
+      - op: add
+        path: /spec/jobTemplate/template/spec/volumes/-
+        value:
+          name: private
+          emptyDir: {}
+      - op: add
+        path: /spec/jobTemplate/template/spec/volumes/-
+        value:
+          name: executor-tmp
+          # ノードのディスクを使うので上限を付ける。
+          emptyDir: {sizeLimit: 10Gi}
+      - op: test
+        path: /spec/jobTemplate/template/spec/containers/0/name
+        value: agent
+      - op: add
+        path: /spec/jobTemplate/template/spec/containers/0/volumeMounts/-
+        value: {name: execd, mountPath: /run/execd}
+      # /workspace・/results・/inputs・/github-token は入れない（ツールに判定の置き場と鍵を触らせない）。
+      - op: add
+        path: /spec/jobTemplate/template/spec/initContainers/-
+        value:
+          name: executor
+          restartPolicy: Always
+          command: [/usr/bin/tini, --, node, /opt/runner/dist/main.js, execd, /run/execd]
+          securityContext:
+            runAsUser: 0
+            allowPrivilegeEscalation: false
+            seccompProfile:
+              type: RuntimeDefault
+            capabilities:
+              drop: [ALL]
+              add: [KILL, SETUID, SETGID, SETPCAP]
+          startupProbe:
+            exec:
+              command: [/usr/bin/test, -S, /run/execd/ctl.sock]
+            periodSeconds: 1
+            failureThreshold: 60
+          volumeMounts:
+            - {name: execd, mountPath: /run/execd}
+            - {name: scratch, mountPath: /scratch}
+            - {name: executor-tmp, mountPath: /tmp}
+  - target:
+      kind: TaskHandler
+      labelSelector: taskflow-role=work
+    patch: |-
+      - op: test
+        path: /spec/jobTemplate/template/spec/initContainers/2/name
+        value: executor
+      - op: copy
+        from: /spec/jobTemplate/template/spec/containers/0/image
+        path: /spec/jobTemplate/template/spec/initContainers/2/image
+      - op: add
+        path: /spec/jobTemplate/template/spec/initContainers/2/volumeMounts/-
+        value: {name: private, mountPath: /run/implement, readOnly: true}
+      - op: add
+        path: /spec/jobTemplate/template/spec/initContainers/2/resources
+        value:
+          requests: {cpu: "1", memory: 1Gi}
+          limits: {memory: 6Gi}
+      - op: add
+        path: /spec/jobTemplate/template/spec/containers/0/volumeMounts/-
+        value: {name: private, mountPath: /run/implement}
+      - op: replace
+        path: /spec/jobTemplate/template/spec/containers/0/resources
+        value:
+          requests: {cpu: 250m, memory: 1Gi}
+          limits: {memory: 2Gi}
+  - target:
+      kind: TaskHandler
+      labelSelector: taskflow-role=review
+    patch: |-
+      - op: test
+        path: /spec/jobTemplate/template/spec/initContainers/1/name
+        value: executor
+      - op: copy
+        from: /spec/jobTemplate/template/spec/containers/0/image
+        path: /spec/jobTemplate/template/spec/initContainers/1/image
+      - op: add
+        path: /spec/jobTemplate/template/spec/initContainers/1/volumeMounts/-
+        value: {name: private, mountPath: /run/review, readOnly: true}
+      - op: add
+        path: /spec/jobTemplate/template/spec/initContainers/1/resources
+        value:
+          requests: {cpu: 250m, memory: 256Mi}
+          limits: {memory: 3Gi}
+      - op: add
+        path: /spec/jobTemplate/template/spec/containers/0/volumeMounts/-
+        value: {name: private, mountPath: /run/review}
+      - op: replace
+        path: /spec/jobTemplate/template/spec/containers/0/resources
+        value:
+          requests: {cpu: 250m, memory: 512Mi}
+          limits: {memory: 2Gi}
+  - target:
+      kind: TaskHandler
+      labelSelector: taskflow-role=judge
+    patch: |-
+      - op: test
+        path: /spec/jobTemplate/template/spec/initContainers/2/name
+        value: executor
+      - op: copy
+        from: /spec/jobTemplate/template/spec/containers/0/image
+        path: /spec/jobTemplate/template/spec/initContainers/2/image
+      - op: add
+        path: /spec/jobTemplate/template/spec/initContainers/2/volumeMounts/-
+        value: {name: private, mountPath: /run/judge, readOnly: true}
+      - op: add
+        path: /spec/jobTemplate/template/spec/initContainers/2/resources
+        value:
+          requests: {cpu: "1", memory: 1Gi}
+          limits: {memory: 6Gi}
+      - op: add
+        path: /spec/jobTemplate/template/spec/containers/0/volumeMounts/-
+        value: {name: private, mountPath: /run/judge}
+      - op: replace
+        path: /spec/jobTemplate/template/spec/containers/0/resources
+        value:
+          requests: {cpu: 250m, memory: 1Gi}
+          limits: {memory: 2Gi}

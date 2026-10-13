@@ -7,7 +7,7 @@ patches:
     patch: |-
       - op: remove
         path: /spec/jobTemplate/template/spec/runtimeClassName
-      # root で起動し、エージェントは 65533 に降ろす（ランナーが setpriv で降りる）。
+      # root で起動し、エージェント本体は 65533 に降ろす（ランナーが setpriv で降りる）。ツールは executor コンテナが 65533 に降ろして動かす。
       - op: replace
         path: /spec/jobTemplate/template/spec/securityContext
         value:
@@ -115,7 +115,7 @@ patches:
         value: {name: flow-workspace, mountPath: /results, subPath: results, readOnly: true}
       - op: add
         path: /spec/jobTemplate/template/spec/containers/0/env/-
-        value: {name: AGENT_CONFINE, value: setpriv}
+        value: {name: AGENT_CONFINE, value: executor}
       - op: add
         path: /spec/jobTemplate/template/spec/containers/0/env/-
         value:

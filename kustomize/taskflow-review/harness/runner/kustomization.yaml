@@ -77,13 +77,13 @@ patches:
       - op: remove
         path: /spec/jobTemplate/template/spec/containers/0/volumeMounts/4
       # ランナーは降りるときに bounding set も空にする（CAP_SETPCAP が要る）。SYS_ADMIN は付けないので、
-      # 自前の PID namespace は作らせず setpriv で降りるだけにする。
+      # エージェント本体は setpriv で降りるだけで自前の PID namespace は作らせない。ツールは executor コンテナが 65533 に降ろして動かす。
       - op: add
         path: /spec/jobTemplate/template/spec/containers/0/securityContext/capabilities/add/-
         value: SETPCAP
       - op: add
         path: /spec/jobTemplate/template/spec/containers/0/env/-
-        value: {name: AGENT_CONFINE, value: setpriv}
+        value: {name: AGENT_CONFINE, value: executor}
       - op: add
         path: /spec/jobTemplate/template/spec/containers/0/env/-
         value: {name: REPO_OWNER, value: Tsuguya-HC}

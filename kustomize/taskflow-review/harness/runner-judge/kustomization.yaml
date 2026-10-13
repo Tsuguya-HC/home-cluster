@@ -138,7 +138,7 @@ patches:
         path: /spec/jobTemplate/template/spec/containers/0/resources/limits/cpu
       - op: add
         path: /spec/jobTemplate/template/spec/containers/0/env/-
-        value: {name: AGENT_CONFINE, value: setpriv}
+        value: {name: AGENT_CONFINE, value: executor}
       - op: add
         path: /spec/jobTemplate/template/spec/containers/0/env/-
         value:

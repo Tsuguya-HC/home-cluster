@@ -8,7 +8,6 @@ configMapGenerator:
       - alias=implement-claude
       - key=taskflow-implement-claude
       - "header=x-tf-handler: taskflow-implement-claude"
-      - harness=claude
     options:
       disableNameSuffixHash: true
       annotations:

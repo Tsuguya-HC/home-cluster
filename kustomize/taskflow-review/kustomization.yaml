@@ -8,6 +8,7 @@ namespace: claude-code-build
 #   components: runtime/（任意）と models/<役割>/<モデル> を役割（work / review / judge / filer）ごとに 1 つずつ
 # を書いてここに並べる。役割を省くと、その役割はひな形の alias のまま動く。
 # モデルを足すときは models/<役割>/<モデル> と、その鍵に許可した gateway の alias を足す。
+# ランナーで使う alias は harness/model-registry.json にも entry を足す（無いと handler が起動時に止まる）。
 resources:
   - common.yaml
   - flows/implement
@@ -19,9 +20,15 @@ resources:
 # TaskHandler は CRD なので、kustomize は中の ConfigMap 参照を書き換えない。
 # ハッシュを付けると参照が切れる。
 configMapGenerator:
-  # claude ハーネスのランナーが Claude Code に渡す本物のモデル ID（alias → ID）。claude ハーネスで
-  # 動かす alias はすべてここに要り、無いと handler は起動時に止まる。ID は Claude Code が知っている
-  # `claude-` の ID であること。
+  # ランナーの登録表（alias → ハーネスとモデル設定）。ランナーで動かす alias はすべてここに要り、
+  # 無いと handler は起動時に止まる。claude の model は Claude Code が知っている `claude-` の ID、
+  # pi の provider は鍵の env を決める名前なので anthropic のままにする。鍵やヘッダは書けない。
+  - name: model-registry
+    files:
+      - registry.json=harness/model-registry.json
+    options:
+      disableNameSuffixHash: true
+  # 定義を固定した Task のランナーが読む。参照する Task が残っている間は消さない。
   - name: llm-alias-models
     files:
       - harness/llm-alias-models.json

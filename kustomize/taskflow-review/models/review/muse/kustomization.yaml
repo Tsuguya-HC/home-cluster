@@ -5,7 +5,6 @@ configMapGenerator:
     literals:
       - alias=review-muse
       - key=taskflow-review
-      - harness=pi
     options:
       disableNameSuffixHash: true
       annotations:

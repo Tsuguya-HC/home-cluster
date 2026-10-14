@@ -53,17 +53,19 @@ patches:
             fi
             chown 65533:65533 /scratch \
               || give_up "/scratch の所有者変更に失敗した。実装は行っていない。"
-            AGENT_MODEL="anthropic/${LLM_ALIAS}"
-            AGENT_MODELS_JSON=$(jq -cn --arg url "$ANTHROPIC_BASE_URL" --arg id "$LLM_ALIAS" --arg h "$ANTHROPIC_CUSTOM_HEADERS" '
-              {providers: {anthropic: {
-                baseUrl: $url,
-                headers: ($h | capture("^(?<k>[^:]+):[ ]*(?<v>.*)$") | {(.k): .v}),
-                models: [{id: $id, api: "anthropic-messages", reasoning: true,
-                          contextWindow: 1048576, maxTokens: 131072}]}}}') \
-              || give_up "ランナーのモデル設定を組めなかった。実装は行っていない。"
-            [ -n "$AGENT_MODELS_JSON" ] \
-              || give_up "ANTHROPIC_CUSTOM_HEADERS（$ANTHROPIC_CUSTOM_HEADERS）を名前: 値として読めなかった。実装は行っていない。"
-            export AGENT_MODEL AGENT_MODELS_JSON
+            export AGENT_MODEL="anthropic/${LLM_ALIAS}"
+            if [ "$AGENT_HARNESS" = pi ]; then
+              AGENT_MODELS_JSON=$(jq -cn --arg url "$ANTHROPIC_BASE_URL" --arg id "$LLM_ALIAS" --arg h "$ANTHROPIC_CUSTOM_HEADERS" '
+                {providers: {anthropic: {
+                  baseUrl: $url,
+                  headers: ($h | capture("^(?<k>[^:]+):[ ]*(?<v>.*)$") | {(.k): .v}),
+                  models: [{id: $id, api: "anthropic-messages", reasoning: true,
+                            contextWindow: 1048576, maxTokens: 131072}]}}}') \
+                || give_up "ランナーのモデル設定を組めなかった。実装は行っていない。"
+              [ -n "$AGENT_MODELS_JSON" ] \
+                || give_up "ANTHROPIC_CUSTOM_HEADERS（$ANTHROPIC_CUSTOM_HEADERS）を名前: 値として読めなかった。実装は行っていない。"
+              export AGENT_MODELS_JSON
+            fi
             exec node /opt/runner/dist/main.js run implement
       # ランナーは /run の下に root 専用の作業場所を作る。/run にボリュームを被せないこと。
       - op: test
@@ -84,6 +86,11 @@ patches:
       - op: add
         path: /spec/jobTemplate/template/spec/containers/0/env/-
         value: {name: AGENT_CONFINE, value: executor}
+      - op: add
+        path: /spec/jobTemplate/template/spec/containers/0/env/-
+        value:
+          name: AGENT_MODEL_MAP
+          valueFrom: {configMapKeyRef: {name: llm-alias-models, key: llm-alias-models.json}}
       - op: add
         path: /spec/jobTemplate/template/spec/containers/0/env/-
         value: {name: REPO_OWNER, value: Tsuguya-HC}

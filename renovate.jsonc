@@ -185,23 +185,24 @@
     {
       "description": [
         "The parts repository (skills / agents / CLAUDE.md fragments the taskflow",
-        "handlers fetch at run time) is pinned by commit in the parts-ref ConfigMap.",
-        "There are two of them (claude-code and claude-code-build namespaces, since",
-        "configMapKeyRef is namespace-local) and every handler reads the same sha, so",
-        "both files must match and both are listed here. branch is what Renovate",
-        "follows, sha is the digest it rewrites; the parts command refuses anything",
-        "but a full sha, so the pin can never drift to a moving ref."
+        "handlers fetch at run time) is pinned by commit in every handler's PARTS_REF:",
+        "directly in the two manifests handlers, and through one local-config source",
+        "that kustomize replacements copy into every taskflow-review handler. All of",
+        "them must carry the same sha, so they share one depName and one groupName",
+        "below and land in a single PR. branch is what Renovate follows, the sha is",
+        "the digest it rewrites; the parts command refuses anything but a full sha,",
+        "so the pin can never drift to a moving ref."
       ],
       "customType": "regex",
       "managerFilePatterns": [
-        "/manifests/claude-code/taskflow-common\\.yaml$/",
-        "/manifests/claude-code-build/taskflow-common\\.yaml$/"
+        "/kustomize/taskflow-review/flow/parts\\.yaml$/",
+        "/manifests/claude-code/taskflow-pr-review\\.yaml$/",
+        "/manifests/claude-code-build/taskflow-investigate\\.yaml$/"
       ],
       "matchStrings": [
-        "# renovate: datasource=git-refs depName=(?<depName>\\S+)\\s*\\n\\s*branch: (?<currentValue>\\S+)\\s*\\n\\s*sha: (?<currentDigest>[0-9a-f]{40})"
+        "# renovate: datasource=git-refs depName=(?<depName>\\S+) branch=(?<currentValue>\\S+)\\s*\\n[^\\n]*?\\b(?<currentDigest>[0-9a-f]{40})\\b"
       ],
-      "datasourceTemplate": "git-refs",
-      "autoReplaceStringTemplate": "# renovate: datasource=git-refs depName={{{depName}}}\n  branch: {{{newValue}}}\n  sha: {{{newDigest}}}"
+      "datasourceTemplate": "git-refs"
     }
   ],
 
@@ -332,6 +333,16 @@
       "automerge": true,
       "prConcurrentLimit": 0,
       "prHourlyLimit": 0
+    },
+    {
+      "description": [
+        "The parts pin appears in several files (see the git-refs customManager). One",
+        "group keeps every occurrence in the same branch, so a PR can never move only",
+        "some handlers to a new sha."
+      ],
+      "matchDatasources": ["git-refs"],
+      "matchDepNames": ["https://github.com/Tsuguya-HC/parts"],
+      "groupName": "parts"
     },
     {
       "description": "Do not automerge critical infrastructure",

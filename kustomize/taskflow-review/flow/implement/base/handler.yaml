@@ -117,11 +117,8 @@ spec:
             env:
               - name: HOME
                 value: /tmp
-              - name: PARTS_REF
-                valueFrom:
-                  configMapKeyRef:
-                    name: parts-ref
-                    key: sha
+              # 値は flow/parts.yaml の sha を replacements（flow/kustomization.yaml）が入れる。
+              - {name: PARTS_REF, value: set-by-flow-kustomization}
               - {name: GH_HOST, value: gh-ro.infra.tgy.io}
               - name: GH_ENTERPRISE_TOKEN
                 valueFrom:
@@ -1311,8 +1308,7 @@ spec:
               - name: ANTHROPIC_BASE_URL
                 value: http://llm-gateway.llm-gateway.svc.cluster.local/anthropic
               # api.anthropic.com 直行を止める 3 本。根拠は manifests/claude-code/taskflow-common.yaml。
-              # parts-ref と違い ConfigMap を複製しない — 値が "1" 固定で Renovate のバンプが
-              # 無いため、複製 + sha 同期と同じコストを払う理由がない。
+              # ConfigMap に切り出さない — 値は "1" 固定で変わらないので、使う側に直接書く。
               - name: DISABLE_TELEMETRY
                 value: "1"
               - name: DISABLE_ERROR_REPORTING

@@ -2,9 +2,14 @@
 #
 # **プロンプトは ConfigMap で持たない。** 手順（skill）と常時効く前提（claude-md）は private の
 # parts リポ（Tsuguya-HC/parts）にあり、各 handler の initContainer `parts` が必要な分だけ引く。
-# 版は下の parts-ref ConfigMap の 1 キーで全 handler 共通。かつて ConfigMap で持っていた頃、
-# プロンプトと handler が別ファイルにあって片方だけ直る事故があった（cnp-check、ADR-0005 の
-# out/ 撤去時）。共有の判定プロトコルも parts の claude-md/verdict-protocol に移した（#866）。
+# 版は各 handler の env PARTS_REF に commit SHA を直接書き、全 handler で同じ値にする（役割ごとに
+# 版を割らない）。ConfigMap 参照にしないのは、Task が開始時に写し取るのは TaskHandler だけで、
+# ConfigMap だと実行中の Task の途中の段から版が変わるため。値の置き場所と Renovate の追い方は
+# renovate.jsonc の git-refs customManager を参照。
+#
+# プロンプトをかつて ConfigMap で持っていた頃、handler と別ファイルにあって片方だけ直る事故が
+# あった（cnp-check、ADR-0005 の out/ 撤去時）。共有の判定プロトコルも parts の
+# claude-md/verdict-protocol に移した（#866）。
 #
 # **これは実際に起きた（当時の形での話）。** cnp-check のプロンプトだけは taskflow 以前の慣習で
 # manifests/claude-code/agent-prompts.yaml に離して置いてあり、ADR-0005 で out/ 層を撤去した
@@ -16,16 +21,15 @@
 # **判定を読み直して人間に通知する部品はここに置かない。** 通知は Pod の中の仕事ではなく、
 # framework が終端で出すもの（Warning Event / Ready=False / metric、design.md §5 / §9）から
 # 引くのが正。pr-review はサイドカーを持たない。
-# parts リポの版。全 handler が同じ SHA を読む（役割ごとに版を割らない）。branch は Renovate が
-# 追う先、sha が handler に渡る値（`parts` はブランチ名を受け付けない）。bump は Renovate の
-# customManager（renovate.jsonc の git-refs）。
+
+# 開始済みの Task が固定した handler 定義だけが configMapKeyRef で参照する。そうした Task が
+# 残っている間は消さない。新しい handler は参照しないので、値は変えない（Renovate の対象外）。
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: parts-ref
   namespace: claude-code
 data:
-  # renovate: datasource=git-refs depName=https://github.com/Tsuguya-HC/parts
   branch: main
   sha: 171653bdcf08f13ba21fbfa3cbca2c2db748dd58
 ---

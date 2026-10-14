@@ -484,9 +484,33 @@ spec:
                 if [ "${FLOW_ENDING:-}" != Success ]; then
                   stop_section >> "$PR_COMMENT" || give_up "PR へのコメントに止まった理由を足せなかった。"
                 fi
+                # 目印のあるコメントがあれば投稿済みとして扱い、二重に書かない。確かめられないときは送り直さない。
+                MARKER="filer-post: $(cat /proc/sys/kernel/random/uuid)" \
+                  || give_up "PR へのコメントの目印を作れなかった。"
+                printf '\n<!-- %s -->\n' "$MARKER" >> "$PR_COMMENT" \
+                  || give_up "PR へのコメントに目印を足せなかった。"
+                COMMENTS=$(mktemp) || give_up "コメント一覧の置き場を作れなかった。"
+                # 300 秒は Pod と GitHub の時計のずれを吸う余裕。
+                SINCE=$(date -u -d "@$(( $(date +%s) - 300 ))" +%Y-%m-%dT%H:%M:%SZ)
                 posted=
-                bg gh_rw api -X POST \
-                  "repos/${REPO}/issues/${PR}/comments" -F body=@"$PR_COMMENT" > /dev/null 2>/tmp/comment.err && posted=1
+                for _ in 1 2 3; do
+                  check_deadline
+                  if bg gh_rw api -X POST \
+                       "repos/${REPO}/issues/${PR}/comments" -F body=@"$PR_COMMENT" > /dev/null 2>/tmp/comment.err; then
+                    posted=1
+                    break
+                  fi
+                  sleep 10
+                  bg gh_ro api "repos/${REPO}/issues/${PR}/comments?per_page=100&since=${SINCE}" > "$COMMENTS" 2>>/tmp/comment.err \
+                    || break
+                  found=$(jq --arg m "<!-- $MARKER -->" 'any(.[]; .body | contains($m))' "$COMMENTS") \
+                    || break
+                  if [ "$found" = true ]; then
+                    posted=1
+                    break
+                  fi
+                done
+                rm -f "$COMMENTS"
                 rm -f "$PR_COMMENT"
                 if [ -z "$posted" ]; then
                   give_up "PR #${PR} にコメントできなかった。起票の結果は書かれていたが PR には残っていない。$(tail -3 /tmp/comment.err)"
@@ -495,7 +519,9 @@ spec:
                 if [ "${FLOW_ENDING:-}" = Success ]; then
                   if [ $(( DEADLINE - $(date +%s) )) -lt 60 ]; then
                     printf 'PR #%s の draft を外さなかった: 内部の期限まで余裕が無い\n' "$PR" >&2
-                  elif ! bg gh_rw pr ready "$PR" --repo "$REPO" > /dev/null 2>/tmp/ready.err; then
+                  elif ! bg gh_rw pr ready "$PR" --repo "$REPO" > /dev/null 2>/tmp/ready.err \
+                       && ! { [ $(( DEADLINE - $(date +%s) )) -ge 40 ] && sleep 10 \
+                              && bg gh_rw pr ready "$PR" --repo "$REPO" > /dev/null 2>>/tmp/ready.err; }; then
                     printf 'PR #%s の draft を外せなかった: %s\n' "$PR" "$(tail -3 /tmp/ready.err)" >&2
                   fi
                 fi

@@ -1340,9 +1340,6 @@ spec:
               # 上流を替えてもこの Pod は変わらない。
               - name: LLM_ALIAS
                 value: implement
-              # ランナーで動かすときのハーネス（claude | pi）。alias のモデルに合わせ、models/work が替える。
-              - name: AGENT_HARNESS
-                value: pi
               # direct を付けない。proxy に無いモジュールを VCS から直接取りに行くと、
               # 許可していない宛先でハングする。proxy で取れなければその場で失敗させる。
               - name: GOPROXY

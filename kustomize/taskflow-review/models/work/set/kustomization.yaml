@@ -2,8 +2,6 @@ apiVersion: kustomize.config.k8s.io/v1alpha1
 kind: Component
 # 鍵・alias・名乗りは 3 つ揃えて替える — 鍵と alias の片方だけだと gateway のルートに当たらず 404、
 # 名乗りを残すとアクセスログの tf.handler が llm.client と食い違う。
-# ハーネスも alias のモデルに揃える — Claude 以外を claude ハーネスで動かすと Claude Code の
-# 版上げで壊れうる。
 replacements:
   - source: {kind: ConfigMap, name: model-work, fieldPath: data.alias}
     targets:
@@ -20,8 +18,3 @@ replacements:
       - select: {kind: TaskHandler, labelSelector: taskflow-role=work}
         fieldPaths:
           - spec.jobTemplate.template.spec.containers.[name=agent].env.[name=ANTHROPIC_CUSTOM_HEADERS].value
-  - source: {kind: ConfigMap, name: model-work, fieldPath: data.harness}
-    targets:
-      - select: {kind: TaskHandler, labelSelector: taskflow-role=work}
-        fieldPaths:
-          - spec.jobTemplate.template.spec.containers.[name=agent].env.[name=AGENT_HARNESS].value

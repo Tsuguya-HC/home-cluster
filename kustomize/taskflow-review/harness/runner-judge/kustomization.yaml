@@ -100,15 +100,7 @@ patches:
             }
             chown 65533:65533 /scratch \
               || give_up "/scratch の所有者変更に失敗した。判定は行っていない。"
-            export AGENT_MODEL="anthropic/${LLM_ALIAS}"
-            if [ "$AGENT_HARNESS" = pi ]; then
-              AGENT_MODELS_JSON=$(jq -cn --arg url "$ANTHROPIC_BASE_URL" --arg id "$LLM_ALIAS" '
-                {providers: {anthropic: {baseUrl: $url, headers: {},
-                  models: [{id: $id, api: "anthropic-messages", reasoning: true,
-                            contextWindow: 1048576, maxTokens: 131072}]}}}') \
-                || give_up "ランナーのモデル設定を組めなかった。判定は行っていない。"
-              export AGENT_MODELS_JSON
-            fi
+            export AGENT_MODEL="$LLM_ALIAS"
             exec node /opt/runner/dist/main.js run judge
       - op: replace
         path: /spec/jobTemplate/template/spec/containers/0/securityContext
@@ -141,9 +133,13 @@ patches:
         value: {name: AGENT_CONFINE, value: executor}
       - op: add
         path: /spec/jobTemplate/template/spec/containers/0/env/-
-        value:
-          name: AGENT_MODEL_MAP
-          valueFrom: {configMapKeyRef: {name: llm-alias-models, key: llm-alias-models.json}}
+        value: {name: AGENT_MODEL_REGISTRY, value: /etc/agent-models/registry.json}
+      - op: add
+        path: /spec/jobTemplate/template/spec/containers/0/volumeMounts/-
+        value: {name: model-registry, mountPath: /etc/agent-models, readOnly: true}
+      - op: add
+        path: /spec/jobTemplate/template/spec/volumes/-
+        value: {name: model-registry, configMap: {name: model-registry}}
       - op: add
         path: /spec/jobTemplate/template/spec/containers/0/env/-
         value: {name: REPO_OWNER, value: Tsuguya-HC}

@@ -178,11 +178,11 @@ spec:
       # クライアントは retry を繰り返して何も進まない。
       timeouts:
         request: 600s
-    # implement flow の Claude 版（TaskFlow implement-claude）の実装と修正。Muse 版と比べるための枠。
+    # implement flow の作業役（TaskFlow implement と implement-claude の両方）の実装と修正。
     # **untrusted input を実行する Pod が Max に届く口**（#942 はこれを切り離した）なので、
     # 許可は taskflow-implement-claude だけに絞り、review / investigate には入れない。
     # Muse 版の taskflow-implement をここに足さないこと。
-    # review / investigate（claude-sonnet-5）と違い claude-sonnet-5-5 を指定しているのは、implement flow で Muse と比べるために選んだモデルだから。
+    # review / investigate（claude-sonnet-5）と違い、作業役には claude-sonnet-5-5 を指定する。
     - matches:
         - headers:
             - type: Exact

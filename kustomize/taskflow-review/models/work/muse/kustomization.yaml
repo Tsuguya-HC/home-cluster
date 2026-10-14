@@ -8,6 +8,7 @@ configMapGenerator:
       - alias=implement
       - key=taskflow-implement
       - "header=x-tf-handler: taskflow-implement"
+      - harness=pi
     options:
       disableNameSuffixHash: true
       annotations:

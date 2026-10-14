@@ -1323,7 +1323,7 @@ spec:
               # （manifests/llm-gateway/openrouter.yaml の x-llm-client 条件）。
               # untrusted input を実行する handler を Max から切り離すのが #942 の動機。
               # これはこの base の既定値の話。鍵を taskflow-implement-claude に差し替えた版だけは
-              # Max の implement-claude の経路に入る（意図した例外）。
+              # Max の implement-claude の経路に入る（意図した例外）。implement flow 本線もこの差し替えた版を使う。
               - name: ANTHROPIC_AUTH_TOKEN
                 valueFrom:
                   secretKeyRef:
@@ -1340,6 +1340,9 @@ spec:
               # 上流を替えてもこの Pod は変わらない。
               - name: LLM_ALIAS
                 value: implement
+              # ランナーで動かすときのハーネス（claude | pi）。alias のモデルに合わせ、models/work が替える。
+              - name: AGENT_HARNESS
+                value: pi
               # direct を付けない。proxy に無いモジュールを VCS から直接取りに行くと、
               # 許可していない宛先でハングする。proxy で取れなければその場で失敗させる。
               - name: GOPROXY

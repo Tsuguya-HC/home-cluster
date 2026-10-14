@@ -1,9 +1,9 @@
 # taskflow 自身の PR を taskflow でレビューする（taskflow #39、dogfooding）。
 #
 # **プロンプトはここには無い。** handler が読む skill / CLAUDE.md 断片は private の parts リポ
-# （Tsuguya-HC/parts）にあり、initContainer の `parts` が PARTS_REF（taskflow-common.yaml の
-# ConfigMap、commit SHA 固定）で必要な分だけ引いて /parts に敷く。agent は `/pr-review` skill を
-# 呼ぶだけで、flow ごとの ConfigMap は持たない。
+# （Tsuguya-HC/parts）にあり、initContainer の `parts` が PARTS_REF（commit SHA 固定）で
+# 必要な分だけ引いて /parts に敷く。agent は `/pr-review` skill を呼ぶだけで、flow ごとの
+# ConfigMap は持たない。
 #
 # **薄い最初の一手**: 1 フェーズ・1 レビュアー・読むだけ・差し戻し無し。目的は「動いた」ではなく
 # 「役に立った」の測定で、比較対象は同じ diff に対して回した /code-review-cycle（6 レビュアー ×
@@ -166,11 +166,9 @@ spec:
             env:
               - name: HOME
                 value: /tmp
-              - name: PARTS_REF
-                valueFrom:
-                  configMapKeyRef:
-                    name: parts-ref
-                    key: sha
+              # sha は kustomize/taskflow-review/flow/parts.yaml と同じ値（Renovate が同じ PR で揃えて上げる）。
+              # renovate: datasource=git-refs depName=https://github.com/Tsuguya-HC/parts branch=main
+              - {name: PARTS_REF, value: 171653bdcf08f13ba21fbfa3cbca2c2db748dd58}
               - name: GITHUB_APP_ID
                 value: "5009543"
             securityContext:

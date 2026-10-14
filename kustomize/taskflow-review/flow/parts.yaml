@@ -1,0 +1,14 @@
+# handler の initContainer `parts` が引く parts の版。replacements（kustomization.yaml）が
+# 全 handler の PARTS_REF に書き込む元で、local-config なのでクラスタには出ない。
+# sha は manifests/claude-code/taskflow-pr-review.yaml と manifests/claude-code-build/taskflow-investigate.yaml
+# の PARTS_REF と同じ値にする（Renovate の git-refs customManager が同じ PR で揃えて上げる）。
+# `parts` はブランチ名を受け付けないので、ここは常に 40 桁の sha。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: parts-version
+  annotations:
+    config.kubernetes.io/local-config: "true"
+data:
+  # renovate: datasource=git-refs depName=https://github.com/Tsuguya-HC/parts branch=main
+  sha: 171653bdcf08f13ba21fbfa3cbca2c2db748dd58

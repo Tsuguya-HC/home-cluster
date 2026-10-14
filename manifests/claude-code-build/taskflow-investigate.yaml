@@ -96,11 +96,9 @@ spec:
             env:
               - name: HOME
                 value: /tmp
-              - name: PARTS_REF
-                valueFrom:
-                  configMapKeyRef:
-                    name: parts-ref
-                    key: sha
+              # sha は kustomize/taskflow-review/flow/parts.yaml と同じ値（Renovate が同じ PR で揃えて上げる）。
+              # renovate: datasource=git-refs depName=https://github.com/Tsuguya-HC/parts branch=main
+              - {name: PARTS_REF, value: 171653bdcf08f13ba21fbfa3cbca2c2db748dd58}
               - {name: GH_HOST, value: gh-ro.infra.tgy.io}
             securityContext:
               allowPrivilegeEscalation: false

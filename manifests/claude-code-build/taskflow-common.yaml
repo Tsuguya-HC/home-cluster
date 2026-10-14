@@ -1,14 +1,10 @@
-# claude-code-build の handler が参照する parts-ref。同じ ConfigMap を manifests/claude-code/taskflow-common.yaml
-# にも置いてあるのは、configMapKeyRef が namespace ローカルだから — claude-code-build は
-# privileged PSA のために別 namespace に分けてある（manifests/claude-code-build/namespace.yaml）。
-# 経緯とこの ConfigMap の設計判断は manifests/claude-code/taskflow-common.yaml のコメントを参照。
-# sha は必ずそちらと同じ値にする（renovate.jsonc の customManager が両方を書き換える）。
+# 開始済みの Task が固定した handler 定義だけが configMapKeyRef で参照する。そうした Task が
+# 残っている間は消さない。新しい handler は参照しないので、値は変えない（Renovate の対象外）。
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: parts-ref
   namespace: claude-code-build
 data:
-  # renovate: datasource=git-refs depName=https://github.com/Tsuguya-HC/parts
   branch: main
   sha: 171653bdcf08f13ba21fbfa3cbca2c2db748dd58

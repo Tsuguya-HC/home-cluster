@@ -8,6 +8,7 @@ kind: Kustomization
 # component が対象を選ぶ印。gateway の LLM を使う handler には必ず付けること — 付け忘れた
 # handler は組み合わせのモデルに関係なくひな形の alias のまま動く。
 resources:
+  - parts.yaml
   - taskflow.yaml
   - planner/handler.yaml
   - review/general
@@ -27,3 +28,19 @@ resources:
 
 configurations:
   - nameref.yaml
+
+# Task は開始時に TaskHandler を写し取るので、parts の版は ConfigMap 参照でなく env の値として持たせる。
+# 対象は planner 以外の全 TaskHandler で、initContainer `parts` とその env PARTS_REF を持っていること
+# （無いと build が失敗する）。parts を持たない handler を足したら reject に並べる。
+replacements:
+  - source:
+      kind: ConfigMap
+      name: parts-version
+      fieldPath: data.sha
+    targets:
+      - select:
+          kind: TaskHandler
+        reject:
+          - name: review-planner
+        fieldPaths:
+          - spec.jobTemplate.template.spec.initContainers.[name=parts].env.[name=PARTS_REF].value

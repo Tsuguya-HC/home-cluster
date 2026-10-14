@@ -85,11 +85,8 @@ spec:
             env:
               - name: HOME
                 value: /tmp
-              - name: PARTS_REF
-                valueFrom:
-                  configMapKeyRef:
-                    name: parts-ref
-                    key: sha
+              # 値は flow/parts.yaml の sha を replacements（flow/kustomization.yaml）が入れる。
+              - {name: PARTS_REF, value: set-by-flow-kustomization}
               - {name: GH_HOST, value: gh-ro.infra.tgy.io}
             securityContext:
               runAsUser: 65533

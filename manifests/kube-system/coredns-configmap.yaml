@@ -23,6 +23,7 @@ data:
         # そこにはルートが無いので 404 になる。
         rewrite name gh-ro.infra.tgy.io github-mcp.llm-gateway.svc.cluster.local
         rewrite name gh-rw.infra.tgy.io github-mcp.llm-gateway.svc.cluster.local
+        rewrite name gh-issues.infra.tgy.io github-mcp.llm-gateway.svc.cluster.local
 
         hosts {
             192.168.10.192  idm.tgy.io

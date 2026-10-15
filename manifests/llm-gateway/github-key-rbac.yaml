@@ -23,6 +23,7 @@ rules:
     resourceNames:
       - github-api-ro-client-keys
       - github-api-rw-client-keys
+      - github-api-issues-client-keys
     verbs: [get, patch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

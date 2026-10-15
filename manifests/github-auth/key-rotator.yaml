@@ -11,7 +11,7 @@ metadata:
 ---
 # 書式: `<client> <role> <consumer>`
 #   client   … Secret のキー名になる。**重複させないこと**（片方が黙って無視される）
-#   role     … ro / rw
+#   role     … ro / rw / issues
 #   consumer … `<ns>/<secret>/<key>`、まだ配らないなら `-`
 #
 # **consumer を書く行を足したら、その namespace への書き込み Role も足すこと。**
@@ -34,6 +34,7 @@ data:
     taskflow-investigate ro claude-code-build/github-gateway-client-keys/taskflow-investigate
     taskflow-review ro claude-code-build/github-gateway-client-keys/taskflow-review
     taskflow-review-comment rw claude-code-build/github-gateway-client-keys/taskflow-review-comment
+    taskflow-file issues claude-code-build/github-gateway-client-keys/taskflow-file
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -89,6 +90,7 @@ data:
       case "$1" in
         ro) echo github-api-ro-client-keys ;;
         rw) echo github-api-rw-client-keys ;;
+        issues) echo github-api-issues-client-keys ;;
         *) echo "unknown role: $1" >&2; exit 1 ;;
       esac
     }

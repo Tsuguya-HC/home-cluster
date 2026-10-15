@@ -256,7 +256,74 @@ spec:
           port: 443
           weight: 1
 ---
-# **ro と rw は別の Secret を参照すること。** apiKeyAuth は参照した Secret の全キーを
+# 起票ロール。App は issue の作成と追記だけに使う起票専用のもの（issues:write のみ）。
+# 書き込みロールと App を分けるのは、起票の後の数え直しがこの App の名義で数えるため
+# （共有の App だと他の書き込みを拾う）。
+#
+# **通すのは POST の 2 経路だけ。** issues:write で届くラベル、他者コメントの編集・削除、
+# lock、transfer、close などを /api/v3 の丸ごと通過で開けないため、パスを正規表現で絞る。
+# owner は Tsuguya-HC に固定する。呼び手が他の owner に書けない。
+# それ以外のメソッド・パスはルートに当たらず 404。
+# 正規表現のマッチは ReplacePrefixMatch が使えないので、書き換えは HTTPRouteFilter で行う。
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: HTTPRouteFilter
+metadata:
+  name: github-issues-rewrite
+  namespace: llm-gateway
+spec:
+  urlRewrite:
+    hostname:
+      type: Backend
+    path:
+      type: ReplaceRegexMatch
+      replaceRegexMatch:
+        pattern: ^/api/v3(/.*)$
+        substitution: \1
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: github-issues
+  namespace: llm-gateway
+spec:
+  parentRefs:
+    - name: github-mcp
+      kind: Gateway
+      group: gateway.networking.k8s.io
+      sectionName: https-issues
+  hostnames:
+    - gh-issues.infra.tgy.io
+  rules:
+    - matches:
+        - method: POST
+          path:
+            type: RegularExpression
+            value: ^/api/v3/repos/Tsuguya-HC/[A-Za-z0-9_-][A-Za-z0-9._-]*/issues$
+        - method: POST
+          path:
+            type: RegularExpression
+            value: ^/api/v3/repos/Tsuguya-HC/[A-Za-z0-9_-][A-Za-z0-9._-]*/issues/[0-9]+/comments$
+      filters:
+        - type: ExtensionRef
+          extensionRef:
+            group: gateway.envoyproxy.io
+            kind: HTTPRouteFilter
+            name: github-issues-rewrite
+        - type: ExtensionRef
+          extensionRef:
+            group: gateway.envoyproxy.io
+            kind: HTTPRouteFilter
+            name: github-mcp-credential-issues
+      backendRefs:
+        # weight は CRD の既定値。書かないと apiserver が埋めた値とマニフェストが
+        # 食い違い、Application が永久に OutOfSync になる。
+        - name: github-api
+          kind: Backend
+          group: gateway.envoyproxy.io
+          port: 443
+          weight: 1
+---
+# **ro と rw と issues は別の Secret を参照すること。** apiKeyAuth は参照した Secret の全キーを
 # 有効な資格情報として扱うので、同じ Secret を指すと ro の鍵で rw のルートも通る。
 #
 # sanitize: true で呼び出し元鍵は上流へ行かず、同じルートの credentialInjection が
@@ -301,6 +368,26 @@ spec:
     sanitize: true
     forwardClientIDHeader: x-github-client-id
 ---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: github-issues
+  namespace: llm-gateway
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: github-issues
+  apiKeyAuth:
+    credentialRefs:
+      - group: ""
+        kind: Secret
+        name: github-api-issues-client-keys
+    extractFrom:
+      - headers: [Authorization]
+    sanitize: true
+    forwardClientIDHeader: x-github-client-id
+---
 # handler が TLS で来るためのサーバー証明書。DNS-01 なので外から到達可能にする必要は無い。
 #
 # **公開 Gateway にこのホスト名の HTTPRoute を作らないこと。** 名前は外からも引けるので、
@@ -318,6 +405,7 @@ spec:
   dnsNames:
     - gh-ro.infra.tgy.io
     - gh-rw.infra.tgy.io
+    - gh-issues.infra.tgy.io
 ---
 # **route timeout を明示する。** 既定のままだと git の clone / push が途中で切れる。
 # 効くのは「レスポンス全体を受け切るまで」で、接続の idle ではない。
@@ -335,6 +423,9 @@ spec:
     - group: gateway.networking.k8s.io
       kind: HTTPRoute
       name: github-rw
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: github-issues
   timeout:
     http:
       requestTimeout: 300s

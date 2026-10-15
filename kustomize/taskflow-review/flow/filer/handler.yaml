@@ -1,3 +1,5 @@
+# flows/implement では harness/runner-file を組み合わせ、ランナーの `run file` に差し替わる。以下はこの base（スクリプト版）の説明で、
+# gh-ro の鍵・MCP の /issues・Bash を渡さない、は差し替え後には当てはまらない。
 # 起票（#1081）。implement flow の finally として、終わり方に関係なく 1 回走る。仕分けが
 # 「この PR では直さない」「確かめられなかった」として残した候補を、issue にする・既存の issue に
 # 足す・起票しない、のどれかに決めて GitHub に書き、PR に結果をコメントで残す。完了まで進んだ

@@ -7,6 +7,7 @@ namespace: claude-code-build
 # models/<役割>/<モデル>（work / review / judge / filer）を差し替える。
 # harness/runner・runner-plan・runner-review・runner-judge・executor は雛形どおり残す（外すとランナーのない flow になり、
 # runner-plan を外すと観点出しだけスクリプト版に戻る）。
+# harness/runner-file も残す。外すと finally だけスクリプト版に戻る。
 # モデルを足すときは models/<役割>/<モデル> と、その鍵に許可した gateway の alias を足す。
 # ランナーで使う alias は harness/model-registry.json にも entry を足す（無いと handler が起動時に止まる）。
 resources:

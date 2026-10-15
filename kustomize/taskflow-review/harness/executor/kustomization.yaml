@@ -10,7 +10,7 @@ kind: Component
 patches:
   - target:
       kind: TaskHandler
-      labelSelector: taskflow-role in (work,review,judge)
+      labelSelector: taskflow-role in (work,review,judge,filer)
     patch: |-
       - op: add
         path: /spec/jobTemplate/template/spec/volumes/-
@@ -136,4 +136,30 @@ patches:
         path: /spec/jobTemplate/template/spec/containers/0/resources
         value:
           requests: {cpu: 250m, memory: 1Gi}
+          limits: {memory: 2Gi}
+  - target:
+      kind: TaskHandler
+      labelSelector: taskflow-role=filer
+    patch: |-
+      - op: test
+        path: /spec/jobTemplate/template/spec/initContainers/1/name
+        value: executor
+      - op: copy
+        from: /spec/jobTemplate/template/spec/containers/0/image
+        path: /spec/jobTemplate/template/spec/initContainers/1/image
+      - op: add
+        path: /spec/jobTemplate/template/spec/initContainers/1/volumeMounts/-
+        value: {name: private, mountPath: /run/file, readOnly: true}
+      - op: add
+        path: /spec/jobTemplate/template/spec/initContainers/1/resources
+        value:
+          requests: {cpu: 100m, memory: 128Mi}
+          limits: {memory: 1Gi}
+      - op: add
+        path: /spec/jobTemplate/template/spec/containers/0/volumeMounts/-
+        value: {name: private, mountPath: /run/file}
+      - op: replace
+        path: /spec/jobTemplate/template/spec/containers/0/resources
+        value:
+          requests: {cpu: 250m, memory: 512Mi}
           limits: {memory: 2Gi}

@@ -1,0 +1,149 @@
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+# base の init・args・env・volume を置き換えるので、executor の component より前に並べること。
+# 起票をランナーで動かす。エージェントは読むだけで、GitHub への書き込み（起票・追記・PR へのコメント・
+# draft 解除・数え直し）はランナー自身が鍵を持って行う。エージェントには鍵も書き込みの道具も渡らない。
+patches:
+  - target:
+      kind: TaskHandler
+      labelSelector: taskflow-role=filer
+    patch: |-
+      # Kata を外して runc にする。root の CHOWN / DAC_OVERRIDE と executor の同居がこの形を前提にする。
+      - op: remove
+        path: /spec/jobTemplate/template/spec/runtimeClassName
+      - op: add
+        path: /spec/jobTemplate/template/spec/imagePullSecrets
+        value:
+          - name: harbor-agents-pull
+      - op: test
+        path: /spec/jobTemplate/template/spec/volumes/2/name
+        value: github-gateway-key
+      - op: replace
+        path: /spec/jobTemplate/template/spec/volumes/2
+        value:
+          name: github-gateway-key-issues
+          secret:
+            secretName: github-gateway-client-keys
+            defaultMode: 0444
+            items:
+              - key: taskflow-file
+                path: key
+      - op: test
+        path: /spec/jobTemplate/template/spec/volumes/1/name
+        value: parts
+      - op: replace
+        path: /spec/jobTemplate/template/spec/volumes/1
+        value:
+          name: scratch
+          # ノードのディスクを使うので上限を付ける。
+          emptyDir: {sizeLimit: 2Gi}
+      # ランナーは鍵を読んだ後にファイルを消す。読み取り専用の Secret は消せないので、init が
+      # emptyDir に写す。
+      - op: replace
+        path: /spec/jobTemplate/template/spec/initContainers
+        value:
+          - name: github-key
+            image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:c7880af8bbff8d5ae87387d19da26eacd4221d9faf215f545c173f0cadd6f49f
+            command: [sh, -c]
+            args: ['umask 077 && cp /github-gateway-key-rw/key /github-token/token && cp /github-gateway-key-issues/key /github-token/issues']
+            securityContext:
+              runAsUser: 65532
+              runAsNonRoot: true
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities: {drop: [ALL]}
+            volumeMounts:
+              - {name: github-gateway-key-rw, mountPath: /github-gateway-key-rw, readOnly: true}
+              - {name: github-gateway-key-issues, mountPath: /github-gateway-key-issues, readOnly: true}
+              - {name: github-token, mountPath: /github-token}
+            resources:
+              requests: {cpu: 10m, memory: 16Mi}
+              limits: {memory: 64Mi}
+      - op: test
+        path: /spec/jobTemplate/template/spec/containers/0/name
+        value: agent
+      # private プロジェクトのタグは Kyverno が digest に解決できず（401）Job ごと拒否されるので、
+      # digest で固定する。
+      - op: replace
+        path: /spec/jobTemplate/template/spec/containers/0/image
+        value: registry.infra.tgy.io/agents/runner:latest@sha256:91e9f978e7ca68e8e2d0aaf2191745acda88711d8a65e98dc5e7f3940e5f0dce
+      - op: replace
+        path: /spec/jobTemplate/template/spec/containers/0/command
+        value: [bash, -c]
+      # finally が書けるのは filed だけ。ランナー起動前の失敗は exit 1（まだ何も起票していないので再試行してよい）。
+      # ランナー自身が降りるときは何も書かず exit 0、理由はログに出す。
+      - op: replace
+        path: /spec/jobTemplate/template/spec/containers/0/args
+        value:
+          - |
+            set -u
+            chown 65533:65533 /scratch || {
+              echo "/scratch の所有者変更に失敗した。起票は行っていない。" >&2
+              exit 1
+            }
+            export AGENT_MODEL="$LLM_ALIAS"
+            exec node /opt/runner/dist/main.js run file
+      - op: replace
+        path: /spec/jobTemplate/template/spec/containers/0/securityContext
+        value:
+          runAsUser: 0
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: [ALL]
+            add: [SETUID, SETGID, CHOWN, DAC_OVERRIDE, FOWNER, SETPCAP]
+      # ランナーは /run の下に root 専用の作業場所を作る。/run にボリュームを被せないこと。
+      - op: test
+        path: /spec/jobTemplate/template/spec/containers/0/volumeMounts/2/mountPath
+        value: /parts
+      - op: replace
+        path: /spec/jobTemplate/template/spec/containers/0/volumeMounts/2
+        value: {name: scratch, mountPath: /scratch}
+      # 過去の全 run の棚（taskflow ADR-0003）。PR の URL と全周回の仕分け・検証・実装の報告を読む。
+      - op: add
+        path: /spec/jobTemplate/template/spec/containers/0/volumeMounts/-
+        value: {name: flow-workspace, mountPath: /results, subPath: results, readOnly: true}
+      - op: add
+        path: /spec/jobTemplate/template/spec/containers/0/volumeMounts/-
+        value: {name: flow-workspace, mountPath: /inputs, subPath: inputs, readOnly: true}
+      - op: test
+        path: /spec/jobTemplate/template/spec/containers/0/env/9/name
+        value: MCP_CLIENT_KEY
+      - op: remove
+        path: /spec/jobTemplate/template/spec/containers/0/env/9
+      - op: add
+        path: /spec/jobTemplate/template/spec/containers/0/env/-
+        value: {name: AGENT_CONFINE, value: executor}
+      - op: add
+        path: /spec/jobTemplate/template/spec/containers/0/env/-
+        value: {name: AGENT_MODEL_REGISTRY, value: /etc/agent-models/registry.json}
+      - op: add
+        path: /spec/jobTemplate/template/spec/containers/0/volumeMounts/-
+        value: {name: model-registry, mountPath: /etc/agent-models, readOnly: true}
+      - op: add
+        path: /spec/jobTemplate/template/spec/volumes/-
+        value: {name: model-registry, configMap: {name: model-registry}}
+      - op: add
+        path: /spec/jobTemplate/template/spec/containers/0/env/-
+        value: {name: REPO_OWNER, value: Tsuguya-HC}
+      # PR へのコメント・draft 解除・重複の確認・数え直しの検索。
+      - op: add
+        path: /spec/jobTemplate/template/spec/containers/0/env/-
+        value: {name: GITHUB_GATEWAY_HOST, value: gh-rw.infra.tgy.io}
+      - op: add
+        path: /spec/jobTemplate/template/spec/containers/0/env/-
+        value: {name: GITHUB_KEY_FILE, value: /github-token/token}
+      # issue の作成と追記だけ。数え直しはこの App の名義で数えるので、ほかの書き込みをこの鍵で送らないこと。
+      - op: add
+        path: /spec/jobTemplate/template/spec/containers/0/env/-
+        value: {name: GITHUB_ISSUES_GATEWAY_HOST, value: gh-issues.infra.tgy.io}
+      - op: add
+        path: /spec/jobTemplate/template/spec/containers/0/env/-
+        value: {name: GITHUB_ISSUES_KEY_FILE, value: /github-token/issues}
+      # 鍵 taskflow-file の App と揃える。食い違うと数え直しが何も数えず素通りする。
+      - op: add
+        path: /spec/jobTemplate/template/spec/containers/0/env/-
+        value: {name: FILE_APP_SLUG, value: tgy-hc-tf-issuer}
+      # Job の timeout より短く。
+      - op: add
+        path: /spec/jobTemplate/template/spec/containers/0/env/-
+        value: {name: PHASE_BUDGET_MS, value: "1200000"}

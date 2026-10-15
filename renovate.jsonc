@@ -321,7 +321,7 @@
     },
     {
       "description": [
-        "The agents runner (implement flow's writer, fixer, planner, review and judge handlers). A",
+        "The agents runner (implement flow's writer, fixer, planner, review, judge and filer handlers). A",
         "running Task keeps the handler specs it copied at start, so a new digest",
         "reaches only Tasks created after it lands.",
         "Exempt from the PR limits: the concurrent limit counts open PRs that wait",

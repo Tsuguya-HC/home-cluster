@@ -321,6 +321,7 @@ spec:
 ---
 # **route timeout を明示する。** 既定のままだと git の clone / push が途中で切れる。
 # 効くのは「レスポンス全体を受け切るまで」で、接続の idle ではない。
+# timeout と retry はこの 1 つの policy に置く（同じ route に BackendTrafficPolicy を 2 つ付けない）。
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: BackendTrafficPolicy
 metadata:
@@ -337,3 +338,13 @@ spec:
   timeout:
     http:
       requestTimeout: 300s
+  # 送り直すのは、上流が要求を処理していないと分かる失敗だけにする。書き込みの経路も通るので、
+  # reset や 5xx を足すと同じ書き込みが二度届きうる。
+  retry:
+    numRetries: 2
+    perRetry:
+      backOff:
+        baseInterval: 1s
+        maxInterval: 5s
+    retryOn:
+      triggers: [refused-stream, connect-failure, reset-before-request]

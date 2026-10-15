@@ -1,6 +1,6 @@
 # 観点出し（#1081）。PR の事実を Jev に渡して、起動する観点をディレクトリで答える。
-# LLM のエージェントも対象リポのコードも動かさない（スクリプトだけ）ので runc で、OpenRouter の
-# 鍵も直接持つ。エージェントを足すなら、鍵を gateway 側へ移してから。
+# この base はスクリプトだけ（LLM のエージェントも対象リポのコードも動かさない）で、runc で OpenRouter の
+# 鍵も直接持つ。harness/runner-plan を組み合わせるとランナーの `run plan` に差し替わる。エージェントを足すなら、鍵を gateway 側へ移してから。
 apiVersion: flow.tgy.io/v1alpha1
 kind: TaskHandler
 metadata:

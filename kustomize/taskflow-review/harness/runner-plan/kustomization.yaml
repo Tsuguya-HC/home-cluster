@@ -1,0 +1,60 @@
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+patches:
+  - target:
+      kind: TaskHandler
+      name: review-planner
+    patch: |-
+      - op: add
+        path: /spec/jobTemplate/template/spec/imagePullSecrets
+        value:
+          - name: harbor-agents-pull
+      - op: add
+        path: /spec/jobTemplate/template/spec/volumes/-
+        value:
+          name: github-token
+          emptyDir: {}
+      # ランナーは鍵を読んだ後にファイルを消す。読み取り専用の Secret は消せないので、init が
+      # emptyDir に写す。
+      - op: add
+        path: /spec/jobTemplate/template/spec/initContainers
+        value:
+          - name: github-key
+            image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:c7880af8bbff8d5ae87387d19da26eacd4221d9faf215f545c173f0cadd6f49f
+            command: [sh, -c]
+            args: ['cp /github-gateway-key/key /github-token/token']
+            securityContext:
+              runAsUser: 65532
+              runAsNonRoot: true
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities: {drop: [ALL]}
+            volumeMounts:
+              - {name: github-gateway-key, mountPath: /github-gateway-key, readOnly: true}
+              - {name: github-token, mountPath: /github-token}
+            resources:
+              requests: {cpu: 10m, memory: 16Mi}
+              limits: {memory: 64Mi}
+      - op: test
+        path: /spec/jobTemplate/template/spec/containers/0/name
+        value: planner
+      # private プロジェクトのタグは Kyverno が digest に解決できず（401）Job ごと拒否されるので、
+      # digest で固定する。
+      - op: replace
+        path: /spec/jobTemplate/template/spec/containers/0/image
+        value: registry.infra.tgy.io/agents/runner:latest@sha256:b9636106a92a6d134b5e3be419f9951609af824cea65f5473677ba6466ca5ae9
+      - op: replace
+        path: /spec/jobTemplate/template/spec/containers/0/command
+        value: [node, /opt/runner/dist/main.js, run, plan]
+      - op: add
+        path: /spec/jobTemplate/template/spec/containers/0/env/-
+        value: {name: REPO_OWNER, value: Tsuguya-HC}
+      - op: add
+        path: /spec/jobTemplate/template/spec/containers/0/env/-
+        value: {name: GITHUB_GATEWAY_HOST, value: gh-ro.infra.tgy.io}
+      - op: test
+        path: /spec/jobTemplate/template/spec/containers/0/volumeMounts/4/name
+        value: github-gateway-key
+      - op: replace
+        path: /spec/jobTemplate/template/spec/containers/0/volumeMounts/4
+        value: {name: github-token, mountPath: /github-token}

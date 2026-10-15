@@ -5,7 +5,8 @@ namespace: claude-code-build
 # implement flow（#1081）の組み合わせ。flows/<名前> が TaskFlow と handler の一式になる。
 # 組み合わせを足すときは flows/implement をコピーして nameSuffix を付け、
 # models/<役割>/<モデル>（work / review / judge / filer）を差し替える。
-# harness/runner・runner-review・runner-judge・executor は雛形どおり残す（外すとランナーのない flow になる）。
+# harness/runner・runner-plan・runner-review・runner-judge・executor は雛形どおり残す（外すとランナーのない flow になり、
+# runner-plan を外すと観点出しだけスクリプト版に戻る）。
 # モデルを足すときは models/<役割>/<モデル> と、その鍵に許可した gateway の alias を足す。
 # ランナーで使う alias は harness/model-registry.json にも entry を足す（無いと handler が起動時に止まる）。
 resources:

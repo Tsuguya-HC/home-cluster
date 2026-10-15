@@ -178,7 +178,7 @@ spec:
       # クライアントは retry を繰り返して何も進まない。
       timeouts:
         request: 600s
-    # implement flow の作業役（TaskFlow implement と implement-claude の両方）の実装と修正。
+    # implement flow の作業役の実装と修正。
     # **untrusted input を実行する Pod が Max に届く口**（#942 はこれを切り離した）なので、
     # 許可は taskflow-implement-claude だけに絞り、review / investigate には入れない。
     # Muse 版の taskflow-implement をここに足さないこと。

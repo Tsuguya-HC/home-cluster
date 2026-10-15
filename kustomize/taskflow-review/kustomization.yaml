@@ -2,20 +2,15 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: claude-code-build
 
-# implement flow（#1081）の組み合わせ。flows/<名前> が TaskFlow <名前> と、その名前を suffix に
-# 持つ handler の一式になる。組み合わせを足すときは flows/ にディレクトリを作り、
-#   resources: [../../flow]、nameSuffix: <名前から implement を除いた部分>、
-#   components: runtime/（任意）と models/<役割>/<モデル> を役割（work / review / judge / filer）ごとに 1 つずつ
-# を書いてここに並べる。役割を省くと、その役割はひな形の alias のまま動く。
+# implement flow（#1081）の組み合わせ。flows/<名前> が TaskFlow と handler の一式になる。
+# 組み合わせを足すときは flows/implement をコピーして nameSuffix を付け、
+# models/<役割>/<モデル>（work / review / judge / filer）を差し替える。
+# harness/runner・runner-review・runner-judge・executor は雛形どおり残す（外すとランナーのない flow になる）。
 # モデルを足すときは models/<役割>/<モデル> と、その鍵に許可した gateway の alias を足す。
 # ランナーで使う alias は harness/model-registry.json にも entry を足す（無いと handler が起動時に止まる）。
 resources:
   - common.yaml
   - flows/implement
-  - flows/implement-fast
-  - flows/implement-claude
-  - flows/implement-claude-review-muse
-  - flows/implement-fast-review-muse
 
 # TaskHandler は CRD なので、kustomize は中の ConfigMap 参照を書き換えない。
 # ハッシュを付けると参照が切れる。

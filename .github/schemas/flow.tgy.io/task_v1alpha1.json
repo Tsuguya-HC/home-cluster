@@ -37,6 +37,21 @@
   "status": {
    "description": "TaskStatus holds control state only. Logs, reports and results are not here\n— etcd has been lost twice here, and a design that puts payloads in it turns\nthat from an outage into data loss. Nor are pointers to them: where a run's\noutput was put is the deployment's arrangement, and this status is written\nby a controller that has no part in it (ADR-0008).",
    "properties": {
+    "archive": {
+     "description": "Archive says where the record of this task was sent. It is set when the\nsending begins and is absent where ended tasks are not sent away.",
+     "properties": {
+      "endpoint": {
+       "description": "Endpoint is the object store's address that Location is on.",
+       "type": "string"
+      },
+      "location": {
+       "description": "Location is the s3:// URL, ending in a slash, under which the record's\nobjects are stored.",
+       "type": "string"
+      }
+     },
+     "type": "object",
+     "additionalProperties": false
+    },
     "conditions": {
      "items": {
       "description": "Condition contains details for one aspect of the current state of this API Resource.",
@@ -137,7 +152,7 @@
      "type": "array"
     },
     "expiresAt": {
-     "description": "ExpiresAt is when the controller deletes this task, set once it stops.\nThe moment is fixed here rather than derived from the flow's ttl each\ntime, so a task at TaskFailed keeps its date even after the flow that\nset it is edited or gone — the same reason the reserved phases need no\nflow to be terminal.",
+     "description": "ExpiresAt is when the controller deletes this task, set once it stops.\nWhere ended tasks are sent away, the deletion waits past this moment\nuntil the sending has either succeeded or failed.\nThe moment is fixed here rather than derived from the flow's ttl each\ntime, so a task at TaskFailed keeps its date even after the flow that\nset it is edited or gone — the same reason the reserved phases need no\nflow to be terminal.",
      "format": "date-time",
      "type": "string"
     },

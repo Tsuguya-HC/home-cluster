@@ -7,6 +7,16 @@ spec:
   jetstream:
     version: latest
     replicas: 3
+    # Raft の 3 つを別のノードに置く。2 つが同じノードに乗ると、そのノードが落ちたときに quorum を失う。
+    # preferred では、ノードの優先（nodeAffinity の preferred）と同点になって寄ることがあるので required にする。
+    affinity:
+      podAntiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          - topologyKey: kubernetes.io/hostname
+            labelSelector:
+              matchLabels:
+                controller: eventbus-controller
+                eventbus-name: default
     securityContext:
       runAsNonRoot: true
       runAsUser: 1000

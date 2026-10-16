@@ -164,7 +164,7 @@ spec:
                       --from-file=credential=/tmp/credential \
                       --dry-run=client -o yaml \
                       | kubectl apply --server-side --force-conflicts -f -
-                    # 起票ロールは MCP と REST（issue の作成とコメント）だけで使い、git は通さない。
+                    # 起票ロールは MCP と REST（issue の作成・コメント・ラベルの追加）だけで使い、git は通さない。
                     if [ "$role" = issues ]; then
                       rm -f /github-app/private-key /github-token/token /tmp/credential
                       echo "rotated: ${role}"

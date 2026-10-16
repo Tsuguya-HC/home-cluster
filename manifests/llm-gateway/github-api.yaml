@@ -256,12 +256,14 @@ spec:
           port: 443
           weight: 1
 ---
-# 起票ロール。App は issue の作成と追記だけに使う起票専用のもの（issues:write のみ）。
+# 起票ロール。App は issue の作成・追記・ラベル付けだけに使う起票専用のもの（issues:write のみ）。
 # 書き込みロールと App を分けるのは、起票の後の数え直しがこの App の名義で数えるため
 # （共有の App だと他の書き込みを拾う）。
 #
-# **通すのは POST の 2 経路だけ。** issues:write で届くラベル、他者コメントの編集・削除、
-# lock、transfer、close などを /api/v3 の丸ごと通過で開けないため、パスを正規表現で絞る。
+# **通すのは POST の 3 経路だけ。** issues:write で届くラベルの削除・置き換え、他者コメントの
+# 編集・削除、lock、transfer、close などを /api/v3 の丸ごと通過で開けないため、パスを正規表現で絞る。
+# ラベルは足すことしかできない。どの issue に、どの名前を足したかは gateway では絞れない
+# （番号も本文も見ない。存在しない名前はリポにラベルとして作られうる）ので、起票役の数え直しで確かめる。
 # owner は Tsuguya-HC に固定する。呼び手が他の owner に書けない。
 # それ以外のメソッド・パスはルートに当たらず 404。
 # 正規表現のマッチは ReplacePrefixMatch が使えないので、書き換えは HTTPRouteFilter で行う。
@@ -303,6 +305,10 @@ spec:
           path:
             type: RegularExpression
             value: ^/api/v3/repos/Tsuguya-HC/[A-Za-z0-9_-][A-Za-z0-9._-]*/issues/[0-9]+/comments$
+        - method: POST
+          path:
+            type: RegularExpression
+            value: ^/api/v3/repos/Tsuguya-HC/[A-Za-z0-9_-][A-Za-z0-9._-]*/issues/[0-9]+/labels$
       filters:
         - type: ExtensionRef
           extensionRef:

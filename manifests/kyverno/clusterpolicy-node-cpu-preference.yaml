@@ -1,0 +1,149 @@
+# 常駐サービスを N100 (wn-01/wn-02) に寄せ、CPU を張り付かせる処理には 7940HS (wn-03) を
+# 寄せる。どちらも preferred なので、寄せ先が満杯・停止なら他のワーカーに乗る。
+#
+# - 既存の affinity は消さない。preferred の配列末尾に 1 項目足すだけで、required には触らない。
+#   patchStrategicMerge は使えない: preferredDuringScheduling... は patch merge key を持たない
+#   リストなので、既存の項目が丸ごと置き換わる。JSON patch の `add .../-` は Kyverno が
+#   EnsurePathExistsOnAdd 付きで当てるので、affinity が無い Pod でも途中のパスが作られる。
+# - node.home.tgy.io/cpu を既に nodeSelector / required / preferred のどこかで指定している Pod は
+#   書いた側の意図を優先して触らない（Kyverno の再呼び出しで 2 重に足さないためにも要る）。
+# - weight 50: nodeAffinity の preferred の中で、Pod 自身が持つ weight 100 の項目を上回らない（podAntiAffinity・topologySpread とは比べられない）。
+# - DaemonSet の Pod は対象外（ノードごとに固定されるので意味が無い）。nodeName 済みの Pod
+#   （static Pod の mirror など）も同じ。
+# - control-plane の taint を許容している Pod は CP に乗る前提なので N100 へ寄せない。
+# - Job / Workflow が作る使い捨ての Pod は常駐ではないので N100 へ寄せない（重い namespace の
+#   ものは 7940HS 側で拾う）。
+# - Pod の CREATE だけ。autogen を切っているので Deployment 等のテンプレートは変えない
+#   （変えると ArgoCD の desired とずれる）。background も無効なので既存 Pod は変わらない。
+# - 配置の好みでしかないので、webhook が落ちていても Pod の作成を止めない（Ignore）。
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: node-cpu-preference
+  annotations:
+    pod-policies.kyverno.io/autogen-controllers: none
+    policies.kyverno.io/description: >-
+      Prefer the N100 workers for long-running service pods and the 7940HS
+      worker for CPU-saturating workloads, by appending a preferred nodeAffinity
+      term on node.home.tgy.io/cpu. Existing affinity terms are kept.
+spec:
+  # admission が注入するデフォルトを明示しないと ArgoCD が OutOfSync になる
+  admission: true
+  background: false
+  emitWarning: false
+  validationFailureAction: Audit
+  webhookConfiguration:
+    failurePolicy: Ignore
+  rules:
+    - name: prefer-7940hs
+      skipBackgroundRequests: true
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              operations:
+                - CREATE
+              namespaces:
+                - claude-code
+                - claude-code-build
+                - image-build
+                - ollama
+                - talos-build
+          - resources:
+              kinds:
+                - Pod
+              operations:
+                - CREATE
+              selector:
+                matchLabels:
+                  workload-class: cpu-saturating
+      preconditions:
+        all:
+          - key: "{{ request.object.spec.nodeName || '' }}"
+            operator: Equals
+            value: ""
+          - key: "{{ length(request.object.metadata.ownerReferences || `[]` | [?kind == 'DaemonSet']) }}"
+            operator: Equals
+            value: 0
+          - key: "{{ length(keys(request.object.spec.nodeSelector || `{}`) | [?@ == 'node.home.tgy.io/cpu']) }}"
+            operator: Equals
+            value: 0
+          # `[][?...]` と続けると常に空になるので、フラット化とフィルタの間にパイプを入れる
+          - key: "{{ length(request.object.spec.affinity.nodeAffinity.preferredDuringSchedulingIgnoredDuringExecution[].preference.matchExpressions[] || `[]` | [?key == 'node.home.tgy.io/cpu']) }}"
+            operator: Equals
+            value: 0
+          - key: "{{ length(request.object.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[].matchExpressions[] || `[]` | [?key == 'node.home.tgy.io/cpu']) }}"
+            operator: Equals
+            value: 0
+      mutate:
+        patchesJson6902: |-
+          - op: add
+            path: /spec/affinity/nodeAffinity/preferredDuringSchedulingIgnoredDuringExecution/-
+            value:
+              weight: 50
+              preference:
+                matchExpressions:
+                  - key: node.home.tgy.io/cpu
+                    operator: In
+                    values:
+                      - 7940hs
+    - name: prefer-n100
+      skipBackgroundRequests: true
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              operations:
+                - CREATE
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - claude-code
+                - claude-code-build
+                - image-build
+                - ollama
+                - talos-build
+                - kube-system
+                - kyverno
+          - resources:
+              selector:
+                matchLabels:
+                  workload-class: cpu-saturating
+      preconditions:
+        all:
+          - key: "{{ request.object.spec.nodeName || '' }}"
+            operator: Equals
+            value: ""
+          - key: "{{ length(request.object.metadata.ownerReferences || `[]` | [?kind == 'DaemonSet']) }}"
+            operator: Equals
+            value: 0
+          - key: "{{ length(keys(request.object.spec.nodeSelector || `{}`) | [?@ == 'node.home.tgy.io/cpu']) }}"
+            operator: Equals
+            value: 0
+          - key: "{{ length(request.object.spec.affinity.nodeAffinity.preferredDuringSchedulingIgnoredDuringExecution[].preference.matchExpressions[] || `[]` | [?key == 'node.home.tgy.io/cpu']) }}"
+            operator: Equals
+            value: 0
+          - key: "{{ length(request.object.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[].matchExpressions[] || `[]` | [?key == 'node.home.tgy.io/cpu']) }}"
+            operator: Equals
+            value: 0
+          - key: "{{ length(request.object.metadata.ownerReferences || `[]` | [?kind == 'Job' || kind == 'Workflow']) }}"
+            operator: Equals
+            value: 0
+          - key: "{{ length(request.object.spec.tolerations || `[]` | [?key == 'node-role.kubernetes.io/control-plane' || (operator == 'Exists' && !key)]) }}"
+            operator: Equals
+            value: 0
+      mutate:
+        patchesJson6902: |-
+          - op: add
+            path: /spec/affinity/nodeAffinity/preferredDuringSchedulingIgnoredDuringExecution/-
+            value:
+              weight: 50
+              preference:
+                matchExpressions:
+                  - key: node.home.tgy.io/cpu
+                    operator: In
+                    values:
+                      - n100

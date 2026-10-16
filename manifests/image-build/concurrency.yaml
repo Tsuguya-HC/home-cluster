@@ -1,0 +1,10 @@
+# 同時に走ってよい重いビルド（先頭の確認・buildkit・構造検査・署名をまとめた単位）の数。
+# image-build と single-repo-image-build の synchronization が同じ key を取り合う。
+# ノードの数より小さく保つ。重なると Kata の VM と構造検査が CPU を取り合い、締め切りを超える。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: image-build-concurrency
+  namespace: image-build
+data:
+  heavy-build: "2"

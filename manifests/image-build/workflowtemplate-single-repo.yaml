@@ -4,7 +4,9 @@ metadata:
   name: single-repo-image-build
   namespace: image-build
 spec:
-  activeDeadlineSeconds: 1800
+  # 全体の上限。heavy-build の枠の空き待ちもここで数えられるので、待ちの長さを見込んで大きく取る。
+  # 走っている時間の上限は各段の activeDeadlineSeconds が持つ。
+  activeDeadlineSeconds: 10800
   serviceAccountName: image-build-executor
   entrypoint: main
   arguments:
@@ -19,6 +21,7 @@ spec:
       # 空なら従来どおりイメージと同じリポジトリに署名する。
       - name: signature-repository
         value: ""
+      # ビルドするのは常に枠を取った時点の main の先頭。この値はトリガーの確認にだけ使う。
       - name: commit-sha
         value: main
       # リポジトリルートからの Dockerfile 名。1 リポジトリから複数イメージを出す
@@ -33,10 +36,80 @@ spec:
     seccompProfile:
       type: RuntimeDefault
   templates:
+    # 同じイメージのビルドを 1 本ずつにする。並ぶと古い先頭のビルドが後から終わって latest を
+    # 戻しうるし、前の 1 本が作り終えたか（タグと署名）を見て飛ばす判断も成り立たない。
+    # mutex は heavy-build の枠と別の template に置く: 同じ template に置くと、
+    # mutex 待ちのビルドが枠の待ち行列の先頭に居座り、空いた枠を他のイメージが取れない。
     - name: main
+      synchronization:
+        mutexes:
+          - name: "{{=sprig.trimPrefix('github.com/', workflow.parameters['repo-url'])}}/{{workflow.parameters.image-name}}"
+      steps:
+        - - name: build
+            template: heavy-build
+      outputs:
+        parameters:
+          - name: sha
+            valueFrom:
+              parameter: "{{steps.build.outputs.parameters.sha}}"
+          - name: action
+            valueFrom:
+              parameter: "{{steps.build.outputs.parameters.action}}"
+
+    # 先頭の確認からビルド・構造検査・署名までを 1 つの枠で包む。構造検査も buildkit の VM と
+    # ノードの CPU を取り合うので、buildkit の段だけを絞っても重なりは残る。
+    # 枠は image-build と共有する（key を変えるなら両方そろえる）。
+    - name: heavy-build
+      synchronization:
+        semaphores:
+          - configMapKeyRef:
+              name: image-build-concurrency
+              key: heavy-build
+      steps:
+        # 枠を取ってから main の先頭を読み、それを作る。トリガーの commit を作ると、後の push が
+        # このイメージの入力に触れずビルドを起こさなかったとき、古いまま残る。
+        - - name: resolve-head
+            template: resolve-head
+            arguments:
+              parameters:
+                - name: repo
+                  value: "{{=sprig.trimPrefix('github.com/', workflow.parameters['repo-url'])}}"
+                - name: commit-sha
+                  value: "{{workflow.parameters.commit-sha}}"
+                - name: image
+                  value: "registry.infra.tgy.io/{{workflow.parameters.project}}/{{workflow.parameters.image-name}}"
+                - name: signature-repository
+                  value: "{{workflow.parameters.signature-repository}}"
+        # 先頭が既に作られて署名済みなら作らない。飛ばしても Workflow は Succeeded で終わる。
+        - - name: build-test-sign
+            template: build-test-sign
+            when: "'{{steps.resolve-head.outputs.parameters.action}}' == 'build'"
+            arguments:
+              parameters:
+                - name: sha
+                  value: "{{steps.resolve-head.outputs.parameters.sha}}"
+      outputs:
+        parameters:
+          # ビルドした（build）か、前の 1 本が作り終えていたので飛ばした（skip）sha。
+          # トリガーの commit-sha と違えば、枠を待つ間に main が進んで先頭に読み替えた。
+          - name: sha
+            valueFrom:
+              parameter: "{{steps.resolve-head.outputs.parameters.sha}}"
+          - name: action
+            valueFrom:
+              parameter: "{{steps.resolve-head.outputs.parameters.action}}"
+
+    - name: build-test-sign
+      inputs:
+        parameters:
+          - name: sha
       steps:
         - - name: build
             template: buildkit-build
+            arguments:
+              parameters:
+                - name: sha
+                  value: "{{inputs.parameters.sha}}"
         # 署名の前に置く。イメージは既に push 済みなので「push を止める」ことはできないが、
         # Kyverno が署名を要求しているので、ここで落とせば署名されず＝クラスタで起動できない。
         # structure-test.yaml を置いていないリポジトリでは丸ごとスキップされる。
@@ -56,8 +129,214 @@ spec:
                 - name: digest
                   value: "{{steps.build.outputs.parameters.digest}}"
 
+    - name: resolve-head
+      activeDeadlineSeconds: 300
+      # GitHub API や registry の一時的な失敗で Workflow を落とさない。
+      retryStrategy:
+        limit: "3"
+        retryPolicy: Always
+        backoff:
+          duration: "15s"
+          factor: "2"
+      inputs:
+        parameters:
+          # owner/name
+          - name: repo
+          - name: commit-sha
+          # registry.infra.tgy.io/<project>/<image>。buildkit の段が push する先と同じ形。
+          - name: image
+          # 空ならイメージと同じリポジトリ。cosign-sign の COSIGN_REPOSITORY と同じ値を渡す。
+          - name: signature-repository
+      securityContext:
+        runAsUser: 65532
+        runAsNonRoot: true
+        runAsGroup: 65532
+        fsGroup: 65532
+      volumes:
+        - name: github-token
+          emptyDir: {}
+        - name: github-app-secret
+          secret:
+            secretName: github-app-private-key
+        - name: docker-config
+          emptyDir: {}
+        - name: work
+          emptyDir: {}
+      initContainers:
+        - name: github-auth
+          image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:c7880af8bbff8d5ae87387d19da26eacd4221d9faf215f545c173f0cadd6f49f
+          command: [github-auth.sh]
+          env:
+            - name: GITHUB_APP_ID
+              value: "5008613"
+            - name: GITHUB_REPO
+              value: "{{inputs.parameters.repo}}"
+          securityContext:
+            runAsUser: 65532
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: github-app-secret
+              mountPath: /github-app
+              readOnly: true
+            - name: github-token
+              mountPath: /github-token
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+        - name: setup-registry-auth
+          image: alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+          command: [sh, -c]
+          args:
+            - |
+              HARBOR_AUTH=$(printf '%s:%s' "$HARBOR_USER" "$HARBOR_PASS" | base64 -w0)
+              printf '{"auths":{"registry.infra.tgy.io":{"auth":"%s"}}}' "$HARBOR_AUTH" > /docker-config/config.json
+          env:
+            - name: HARBOR_USER
+              valueFrom:
+                secretKeyRef:
+                  name: harbor-robot-images
+                  key: username
+            - name: HARBOR_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: harbor-robot-images
+                  key: credential
+          securityContext:
+            runAsUser: 65532
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: docker-config
+              mountPath: /docker-config
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+      container:
+        image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:c7880af8bbff8d5ae87387d19da26eacd4221d9faf215f545c173f0cadd6f49f
+        command: [sh, -c]
+        args:
+          - |
+            set -eu
+            if [ "$COMMIT_SHA" != main ] && ! printf '%s' "$COMMIT_SHA" | grep -qxE '[0-9a-f]{40}'; then
+              echo "commit-sha must be main or a 40-digit hex sha: ${COMMIT_SHA}" >&2
+              exit 1
+            fi
+            # token をプロセスの引数に載せない（ps や /proc から読める）。printf は組み込み。
+            umask 077
+            printf 'Authorization: Bearer %s\n' "$(cat /github-token/token)" > /work/github-header
+            RESPONSE=$(curl -sfL --max-time 60 \
+              -H @/work/github-header \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${REPO}/git/ref/heads/main")
+            HEAD_SHA=$(printf '%s' "$RESPONSE" | jq -er .object.sha)
+            printf '%s' "$HEAD_SHA" | grep -qxE '[0-9a-f]{40}'
+            # webhook の直後は ref の API が push 前の値を返しうる。読めた先頭がトリガーの commit を
+            # 含まない（behind / diverged）なら、古い sha を作らないよう落として retry に任せる。
+            if [ "$COMMIT_SHA" != main ]; then
+              COMPARE=$(curl -sfL --max-time 60 \
+                -H @/work/github-header \
+                -H "Accept: application/vnd.github+json" \
+                "https://api.github.com/repos/${REPO}/compare/${COMMIT_SHA}...${HEAD_SHA}")
+              STATUS=$(printf '%s' "$COMPARE" | jq -er .status)
+              case "$STATUS" in
+                identical | ahead) ;;
+                *)
+                  echo "compare ${COMMIT_SHA}...${HEAD_SHA} is ${STATUS}; main may not reflect the push yet" >&2
+                  exit 1
+                  ;;
+              esac
+            fi
+            rm -f /work/github-header
+            printf '%s' "$HEAD_SHA" > /work/sha
+            if [ "$HEAD_SHA" != "$COMMIT_SHA" ]; then
+              echo "requested ${COMMIT_SHA}; main is at ${HEAD_SHA}, targeting that instead"
+            fi
+
+            # 0 = ある、1 = 無い。それ以外の失敗（認証・通信）を「無い」と読むと
+            # 余計なビルドが走るだけだが、「ある」と読むと先頭が作られないので、どちらにも倒さず落とす。
+            # Harbor は無いタグにも無いリポジトリにも NOT_FOUND を返す。
+            exists() {
+              if crane digest "$1" > /work/digest 2> /work/crane-err; then
+                return 0
+              fi
+              if grep -qE ': (NOT_FOUND|MANIFEST_UNKNOWN|NAME_UNKNOWN): ' /work/crane-err; then
+                return 1
+              fi
+              cat /work/crane-err >&2
+              exit 1
+            }
+            # sha のタグだけでは足りない。前の 1 本が push 後に構造検査か署名で落ちていると、
+            # 署名の無いイメージが残る。cosign-sign が legacy モードで置く署名のタグも見る。
+            ACTION=build
+            if exists "${IMAGE}:${HEAD_SHA}"; then
+              DIGEST=$(cat /work/digest)
+              if exists "${SIGNATURE_REPOSITORY:-$IMAGE}:sha256-${DIGEST#sha256:}.sig"; then
+                echo "${IMAGE}:${HEAD_SHA} is already built and signed (${DIGEST}), skipping"
+                ACTION=skip
+              fi
+            fi
+            echo "$ACTION" > /work/action
+        env:
+          - name: REPO
+            value: "{{inputs.parameters.repo}}"
+          - name: COMMIT_SHA
+            value: "{{inputs.parameters.commit-sha}}"
+          - name: IMAGE
+            value: "{{inputs.parameters.image}}"
+          - name: SIGNATURE_REPOSITORY
+            value: "{{inputs.parameters.signature-repository}}"
+          - name: DOCKER_CONFIG
+            value: /docker-config
+          - name: HOME
+            value: /work
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: [ALL]
+        volumeMounts:
+          - name: github-token
+            mountPath: /github-token
+            readOnly: true
+          - name: docker-config
+            mountPath: /docker-config
+            readOnly: true
+          - name: work
+            mountPath: /work
+        resources:
+          requests:
+            cpu: 10m
+            memory: 64Mi
+          limits:
+            memory: 128Mi
+      outputs:
+        parameters:
+          # ビルドの対象。トリガーの commit ではなく、枠を取った時点の main の先頭。
+          - name: sha
+            valueFrom:
+              path: /work/sha
+          # build / skip の 1 語。yes/no は式パーサにブールと解釈される余地があるので使わない。
+          - name: action
+            valueFrom:
+              path: /work/action
+
     - name: buildkit-build
+      inputs:
+        parameters:
+          - name: sha
       podSpecPatch: '{"runtimeClassName": "kata"}'
+      activeDeadlineSeconds: 1500
       # LLM バッチ Pod が名乗る workload-class=cpu-saturating から逃げる（同居回避の衛生策。
       # 2026-08-25 のビルド遅延の主因ではなかった — 下の workspace volume のコメント参照）。
       # preferred なので LLM が走っていなければ一番速い wn-03 を使える。requests だけでは
@@ -145,7 +424,7 @@ spec:
             - name: REPO_URL
               value: "{{workflow.parameters.repo-url}}"
             - name: COMMIT_SHA
-              value: "{{workflow.parameters.commit-sha}}"
+              value: "{{inputs.parameters.sha}}"
           securityContext:
             runAsUser: 65532
             runAsNonRoot: true
@@ -224,7 +503,7 @@ spec:
               --local context=/workspace \
               --local dockerfile=/workspace \
               --opt filename={{workflow.parameters.dockerfile}} \
-              --output 'type=image,"name=registry.infra.tgy.io/{{workflow.parameters.project}}/{{workflow.parameters.image-name}}:{{workflow.parameters.commit-sha}},registry.infra.tgy.io/{{workflow.parameters.project}}/{{workflow.parameters.image-name}}:latest",push=true' \
+              --output 'type=image,"name=registry.infra.tgy.io/{{workflow.parameters.project}}/{{workflow.parameters.image-name}}:{{inputs.parameters.sha}},registry.infra.tgy.io/{{workflow.parameters.project}}/{{workflow.parameters.image-name}}:latest",push=true' \
               --metadata-file /workspace/metadata.json
             jq -r '."containerimage.digest"' /workspace/metadata.json > /workspace/digest
             grep -q '^sha256:' /workspace/digest
@@ -293,6 +572,7 @@ spec:
               path: /workspace/has-structure-test
 
     - name: structure-test
+      activeDeadlineSeconds: 1800
       inputs:
         parameters:
           - name: digest
@@ -385,6 +665,7 @@ spec:
             memory: 2Gi
 
     - name: cosign-sign
+      activeDeadlineSeconds: 300
       inputs:
         parameters:
           - name: digest

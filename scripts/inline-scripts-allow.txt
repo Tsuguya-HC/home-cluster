@@ -45,8 +45,6 @@ manifests/claude-code/wf-improver-wft.yaml::SC2164::cd /workspace
 manifests/claude-code/wf-improver-wft.yaml::SC2164::cd /workspace
 manifests/claude-code/workflowtemplate.yaml::SC2164::cd /workspace
 manifests/claude-code/workflowtemplate.yaml::SC2164::cd /workspace
-manifests/image-build/workflowtemplate.yaml::SC2164::cd /tmp
-manifests/image-build/workflowtemplate.yaml::SC2164::cd repo
 
 # `A && B || C`。C が A の失敗と B の失敗を区別しない。個別には未精査。
 kustomize/taskflow-review/flow/filer/handler.yaml::SC2015::&& chown 65533:65533 /tmp/mcp.json \

@@ -132,7 +132,7 @@ patches:
       - op: add
         path: /spec/jobTemplate/template/spec/containers/0/env/-
         value: {name: GITHUB_KEY_FILE, value: /github-token/token}
-      # issue の作成と追記だけ。数え直しはこの App の名義で数えるので、ほかの書き込みをこの鍵で送らないこと。
+      # issue の作成・追記・ラベルの追加だけ。数え直しはこの App の名義で数えるので、ほかの書き込みをこの鍵で送らないこと。
       - op: add
         path: /spec/jobTemplate/template/spec/containers/0/env/-
         value: {name: GITHUB_ISSUES_GATEWAY_HOST, value: gh-issues.infra.tgy.io}
@@ -143,6 +143,10 @@ patches:
       - op: add
         path: /spec/jobTemplate/template/spec/containers/0/env/-
         value: {name: FILE_APP_SLUG, value: tgy-hc-tf-issuer}
+      # agent-ready を付けてよい元 issue の作者。ログイン名は変えられて他人に取られうるので数値の ID で書く。
+      - op: add
+        path: /spec/jobTemplate/template/spec/containers/0/env/-
+        value: {name: FILE_OWNER_USER_ID, value: "6055622"}
       # Job の timeout より短く。
       - op: add
         path: /spec/jobTemplate/template/spec/containers/0/env/-

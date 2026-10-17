@@ -13,6 +13,7 @@ kubectl get pods -A -o json | jq -r '.items[]
   | @tsv' > "$tmp/pods.tsv"
 
 agents=$(kubectl get pods -n kube-system -l k8s-app=cilium -o jsonpath='{.items[*].metadata.name}')
+: > "$tmp/eps.tsv"
 for pod in $agents; do
   kubectl exec -n kube-system "$pod" -c cilium-agent -- cilium-dbg endpoint list -o json \
     | jq -r '.[] | select(.status.networking.addressing[0].ipv4 != null)

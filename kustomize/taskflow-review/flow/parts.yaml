@@ -11,4 +11,4 @@ metadata:
     config.kubernetes.io/local-config: "true"
 data:
   # renovate: datasource=git-refs depName=https://github.com/Tsuguya-HC/parts branch=main
-  sha: 171653bdcf08f13ba21fbfa3cbca2c2db748dd58
+  sha: 9e4bff840537018fffa0f364e0ad5033bf5874bf

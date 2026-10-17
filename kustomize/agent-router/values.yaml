@@ -51,6 +51,8 @@ controller:
       memory: 128Mi
     limits:
       memory: 512Mi
-
-# MCP ルートは使わない。使うときは mcpSessionEncryptionSeed（チャート既定は
-# "default-insecure-seed"）を ESO 経由の値に差し替えること。
+  mcp:
+    sessionEncryption:
+      # kustomize 展開では lookup が効かないので、チャートに seed を作らせると render のたびに変わる。
+      # ESO が一度だけ生成した Secret を渡す。
+      existingSecret: ai-gateway-mcp-session-encryption

@@ -72,6 +72,15 @@ rollOutCiliumPods: true
 extraConfig:
   tofqdns-min-ttl: "30"
 
+# DNS プロキシは応答を返す前に、解決した IP が datapath に入るのをこの時間だけ待つ。
+# 既定の 100ms では N100 のノードで間に合わないことがあり、agent が
+# "Timed out waiting for datapath updates of FQDN IP information" を出して応答を先に返す。
+# その直後の SYN は toFQDNs で許可した宛先でも落ちる（2026-10-17 に 24h で約 400 行、
+# Pod 起動直後の cloudflared / argocd-repo-server などに集中）。
+# 待つのは更新が遅いときだけで、普段の応答は数 ms で返るので上限は大きめに取る。
+dnsProxy:
+  proxyResponseMaxDelay: 1s
+
 encryption:
   enabled: true
   type: wireguard

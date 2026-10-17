@@ -45,7 +45,7 @@ spec:
                       runAsUser: 65532
                       runAsNonRoot: true
                     script:
-                      image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:c7880af8bbff8d5ae87387d19da26eacd4221d9faf215f545c173f0cadd6f49f
+                      image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:aaf50f2677b5089678e8633d7f749f9d1009321fdc1fa9ae9fb9bceaed7a6bbd
                       command: [sh]
                       source: |
                         TASK_ID="{{workflow.parameters.task-id}}"

@@ -8,6 +8,8 @@ global:
 master:
   replicas: 3
   defaultReplication: "001"
+  # 既定で有効の匿名統計送信（telemetry.seaweedfs.com）を止める。CNP で落ちるだけなので drop のノイズになる。
+  extraArgs: ["-telemetry=false"]
   data:
     type: "emptyDir"
   logs:

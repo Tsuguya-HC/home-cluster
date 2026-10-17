@@ -13,6 +13,9 @@ extraEnv:
     value: /data/.ollama
   - name: HOME
     value: /data
+  # クラウド推論・web 検索は使わない。止めないと ollama.com へ model recommendations を約 4h おきに取りに行く。
+  - name: OLLAMA_NO_CLOUD
+    value: "1"
 
 serviceAccount:
   create: true

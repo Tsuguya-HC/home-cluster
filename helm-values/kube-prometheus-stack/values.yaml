@@ -212,6 +212,10 @@ grafana:
       check_for_updates: false
       check_for_plugin_updates: false
       reporting_enabled: false
+    # 起動時に grafana.com から既定の plugin 群と署名鍵を取りに行くが、CNP で落ちて毎回タイムアウトする。
+    plugins:
+      preinstall_disabled: true
+      public_key_retrieval_disabled: true
     security:
       disable_gravatar: true
     log:

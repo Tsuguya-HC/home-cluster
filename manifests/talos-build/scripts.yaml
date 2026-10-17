@@ -4,6 +4,52 @@ metadata:
   name: talos-build-scripts
   namespace: talos-build
 data:
+  resolve-extensions.sh: |
+    #!/bin/sh
+    # 拡張は Talos のリリースごとに組が決まっているので、版ごとの一覧から引く。
+    # 一覧に無い・形が違うときは落とす。拡張を欠いたまま焼いてはいけない。
+    set -euo pipefail
+
+    REPO=ghcr.io/siderolabs/extensions
+    OUT=/tmp/out
+
+    fail() {
+      echo "ERROR: $1" >&2
+      exit 1
+    }
+
+    [ -n "${VERSION:-}" ] || fail "VERSION が空"
+    mkdir -p "$OUT"
+
+    DIGEST=$(crane digest "${REPO}:${VERSION}") || fail "${REPO}:${VERSION} の digest を引けなかった"
+    printf '%s' "$DIGEST" | grep -qE '^sha256:[0-9a-f]{64}$' || fail "digest の形が想定外: ${DIGEST}"
+
+    # 署名が縛るのは digest だけでタグは含まない。同じ署名者の別の版をこのタグへ付け替えても
+    # 署名検証は通るので、版との対応は下の一覧の中身で確かめる。
+    cosign verify "${REPO}@${DIGEST}" \
+      --certificate-identity releasemgr-svc@talos-production.iam.gserviceaccount.com \
+      --certificate-oidc-issuer https://accounts.google.com > /dev/null \
+      || fail "${REPO}@${DIGEST} の署名を検証できなかった"
+    echo "${REPO}:${VERSION} = ${DIGEST}" >&2
+
+    crane export --platform linux/amd64 "${REPO}@${DIGEST}" - | tar -xOf - image-digests > /tmp/image-digests \
+      || fail "${REPO}@${DIGEST} から image-digests を取り出せなかった"
+
+    # カーネルモジュールを持つ拡張は Talos の版をタグに含む。それが 1 つも無ければ別の版の一覧。
+    grep -qF -- "-${VERSION}@sha256:" /tmp/image-digests \
+      || fail "${REPO}@${DIGEST} の一覧に ${VERSION} 向けの拡張が無い"
+
+    REFS=""
+    for NAME in iscsi-tools spin kata-containers; do
+      REF=$(grep -E "^ghcr\.io/siderolabs/${NAME}:[^@[:space:]]+@sha256:[0-9a-f]{64}\$" /tmp/image-digests) \
+        || fail "${NAME} が ${VERSION} の一覧に無い"
+      [ "$(printf '%s\n' "$REF" | wc -l)" -eq 1 ] || fail "${NAME} が ${VERSION} の一覧に複数ある"
+      printf '%s' "$REF" > "${OUT}/${NAME}"
+      REFS="${REFS:+${REFS} }${REF}"
+      echo "${REF}" >&2
+    done
+    printf '%s' "$REFS" > "${OUT}/refs"
+
   plan-build.sh: |
     #!/bin/sh
     # 前回成功した run と入力が同じなら焼かない。
@@ -16,11 +62,12 @@ data:
     #
     # 判定材料は「前回成功した run 自身」から取る。Argo は run ごとに参照先 WorkflowTemplate
     # の全テンプレートを status.storedWorkflowTemplateSpec に凍結して持っており、そこに
-    # imager へ渡す引数——拡張の digest とカーネル引数——がそのまま残っている。だから
-    # レジストリに目印を足す必要も、指紋を持ち回る必要もない。
+    # imager へ渡す引数（カーネル引数など）が残っている。拡張の ref は実行時に引くので
+    # spec には変数のまま残る。こちらは各 run の resolve-extensions の出力を比べる。
+    # だからレジストリに目印を足す必要も、指紋を持ち回る必要もない。
     #
     # **`status.storedTemplates` ではない。** そちらはコントローラが解決したテンプレートを
-    # 順に足していく器で、このステップが走る時点（2 番目）では build 系がまだ入っていない。
+    # 順に足していく器で、このステップが走る時点では build 系がまだ入っていない。
     # 完了した run を見ると全部入っているので揃っているように見えるが、それは完了後の姿。
     # 2026-09-07 に実際に storedTemplates で書いて本番に出し、今回の run の imager 入力を
     # 取り出せず build 側へ倒れて 1 回余分に焼いた。storedWorkflowTemplateSpec は
@@ -29,8 +76,8 @@ data:
     # 判定に要るものが 1 つでも取れなければ焼く。初回・Argo が古い run を GC した後・
     # apiserver 不通は全部そちらに倒れる。逆に倒すと「焼くべきものを焼かないまま緑」になる。
     #
-    # 見ないもの（判定材料——版・imager 引数——が変わらないので、前回成功 run と一致して
-    # skip される）:
+    # 見ないもの（判定材料——版・拡張の ref・imager 引数——が変わらないので、前回成功 run と
+    # 一致して skip される）:
     #   * 署名鍵のローテーション —— 前回 run の spec は同じままなので差が出ない。しかも
     #     ローテーションは manifests/secrets/（app: secrets）の変更で、このワークフローを
     #     叩く talos-build app とは別 app（reconcile が隔離）のため、自動では sync も
@@ -46,6 +93,7 @@ data:
 
     [ -n "${VERSION:-}" ] || build "VERSION が空"
     [ -n "${WORKFLOW_NAME:-}" ] || build "WORKFLOW_NAME が空"
+    [ -n "${EXTENSIONS:-}" ] || build "EXTENSIONS が空"
 
     # imager を使う initContainer だけを名前順に取る。同じファイルに載っている
     # argo-tools や alpine の digest は入らない——そこが「無関係な変更で焼き直さない」の要。
@@ -66,7 +114,8 @@ data:
     ALL=$(kubectl -n talos-build get workflow -o json) \
       || build "Workflow を一覧できなかった"
 
-    # 前回成功した run。version はその run の resolve-version が出力した値。
+    # 前回成功した run。version / extensions はその run の resolve-version /
+    # resolve-extensions が出力した値。
     #
     # **「直近の成功 run」ではなく「材料が揃っている直近の成功 run」を選ぶ。** 同じ
     # WorkflowTemplate を entrypoint 指定で部分実行すると（診断で実際にやった）、
@@ -82,19 +131,22 @@ data:
           , version: ([ .status.nodes[]?
                         | select(.templateName == \"resolve-version\")
                         | .outputs.parameters[]? | select(.name == \"version\") | .value ] | first)
+          , extensions: ([ .status.nodes[]?
+                           | select(.templateName == \"resolve-extensions\")
+                           | .outputs.parameters[]? | select(.name == \"refs\") | .value ] | first)
           , imager: ($SEL) }
-        | select(.version != null and (.imager | length) > 0)
+        | select(.version != null and .extensions != null and (.imager | length) > 0)
       ]
       | sort_by(.finishedAt) | last
-      | if . == null then null else { version: .version, imager: .imager } end") \
+      | if . == null then null else { version: .version, extensions: .extensions, imager: .imager } end") \
       || build "前回の run を読めなかった"
 
     case "$LAST" in ''|null) build "材料の揃った成功 run が無い" ;; esac
 
     # 今回の run。焼くのはこの凍結 spec なので、比較もこれで行う。
-    NOW=$(printf '%s' "$ALL" | jq -c "
+    NOW=$(printf '%s' "$ALL" | jq -c --arg ext "$EXTENSIONS" "
       [ .items[] | select(.metadata.name == \"${WORKFLOW_NAME}\") ] | first
-      | if . == null then null else { version: \"${VERSION}\", imager: ($SEL) } end") \
+      | if . == null then null else { version: \"${VERSION}\", extensions: \$ext, imager: ($SEL) } end") \
       || build "今回の run を読めなかった"
 
     case "$NOW" in ''|null) build "今回の run を読めなかった" ;; esac
@@ -102,11 +154,11 @@ data:
       || build "今回の run から imager 入力を取り出せなかった"
 
     if [ "$LAST" = "$NOW" ]; then
-      echo "=> skip: 前回成功した run と版・imager 入力が同じ" >&2
+      echo "=> skip: 前回成功した run と版・拡張・imager 入力が同じ" >&2
       printf 'false' > /tmp/build.txt
       exit 0
     fi
-    build "版か imager 入力が前回と違う"
+    build "版・拡張・imager 入力のどれかが前回と違う"
 
   push-installer.sh: |
     #!/bin/sh

@@ -85,12 +85,20 @@ spec:
               parameters:
                 - name: version
                   value: "{{workflow.parameters.version}}"
+        - - name: resolve-extensions
+            template: resolve-extensions
+            arguments:
+              parameters:
+                - name: version
+                  value: "{{steps.resolve-version.outputs.parameters.version}}"
         - - name: plan-build
             template: plan-build
             arguments:
               parameters:
                 - name: version
                   value: "{{steps.resolve-version.outputs.parameters.version}}"
+                - name: extensions
+                  value: "{{steps.resolve-extensions.outputs.parameters.refs}}"
         # 前回成功した run と入力が同じなら焼かない。`!= 'false'` にしてあるのは、
         # 出力が空や想定外の値になったときも焼く側へ倒すため（`== 'true'` だと
         # 空文字が「skip」と評価されて、何も焼かずに緑で終わる）。
@@ -103,6 +111,12 @@ spec:
               parameters:
                 - name: version
                   value: "{{steps.resolve-version.outputs.parameters.version}}"
+                - name: iscsi-tools
+                  value: "{{steps.resolve-extensions.outputs.parameters.iscsi-tools}}"
+                - name: spin
+                  value: "{{steps.resolve-extensions.outputs.parameters.spin}}"
+                - name: kata-containers
+                  value: "{{steps.resolve-extensions.outputs.parameters.kata-containers}}"
           - name: build-and-push-iso
             template: build-and-push-iso
             when: "'{{steps.plan-build.outputs.parameters.build}}' != 'false'"
@@ -110,6 +124,12 @@ spec:
               parameters:
                 - name: version
                   value: "{{steps.resolve-version.outputs.parameters.version}}"
+                - name: iscsi-tools
+                  value: "{{steps.resolve-extensions.outputs.parameters.iscsi-tools}}"
+                - name: spin
+                  value: "{{steps.resolve-extensions.outputs.parameters.spin}}"
+                - name: kata-containers
+                  value: "{{steps.resolve-extensions.outputs.parameters.kata-containers}}"
         - - name: finalize-release
             template: finalize-release
             arguments:
@@ -172,6 +192,62 @@ spec:
           limits:
             memory: 64Mi
 
+    - name: resolve-extensions
+      retryStrategy:
+        limit: 3
+        retryPolicy: Always
+        backoff:
+          duration: 10s
+          factor: 2
+      inputs:
+        parameters:
+          - name: version
+      outputs:
+        parameters:
+          - name: iscsi-tools
+            valueFrom:
+              path: /tmp/out/iscsi-tools
+          - name: spin
+            valueFrom:
+              path: /tmp/out/spin
+          - name: kata-containers
+            valueFrom:
+              path: /tmp/out/kata-containers
+          - name: refs
+            valueFrom:
+              path: /tmp/out/refs
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      container:
+        image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:c7880af8bbff8d5ae87387d19da26eacd4221d9faf215f545c173f0cadd6f49f
+        command: [sh, /scripts/resolve-extensions.sh]
+        env:
+          - name: VERSION
+            value: "{{inputs.parameters.version}}"
+          # readOnlyRootFilesystem なので cosign の TUF キャッシュの既定の置き場が書けない。
+          - name: HOME
+            value: /tmp
+        securityContext:
+          runAsUser: 65532
+          runAsNonRoot: true
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: [ALL]
+        volumeMounts:
+          - name: scripts
+            mountPath: /scripts
+            readOnly: true
+          - name: tmp
+            mountPath: /tmp
+        resources:
+          requests:
+            cpu: 10m
+            memory: 64Mi
+          limits:
+            memory: 256Mi
+
     - name: plan-build
       # kubectl は 1 回呼ぶだけで、結果を jq で 2 回（前回 run・今回 run の抽出）使い回して
       # いる。ここでハングすると spec.synchronization.mutexes を握ったまま後続の run を
@@ -196,6 +272,7 @@ spec:
       inputs:
         parameters:
           - name: version
+          - name: extensions
       outputs:
         parameters:
           - name: build
@@ -212,6 +289,8 @@ spec:
             value: "{{inputs.parameters.version}}"
           - name: WORKFLOW_NAME
             value: "{{workflow.name}}"
+          - name: EXTENSIONS
+            value: "{{inputs.parameters.extensions}}"
           # readOnlyRootFilesystem なので kubectl の既定のキャッシュ先が書けない。
           - name: HOME
             value: /tmp
@@ -251,6 +330,9 @@ spec:
       inputs:
         parameters:
           - name: version
+          - name: iscsi-tools
+          - name: spin
+          - name: kata-containers
       volumes:
         - name: docker-config
           emptyDir: {}
@@ -309,14 +391,11 @@ spec:
             - --arch
             - amd64
             - --system-extension-image
-            # renovate: datasource=docker depName=ghcr.io/siderolabs/iscsi-tools
-            - ghcr.io/siderolabs/iscsi-tools:v0.2.0@sha256:97794a8b6064e24d8053b6d424662ccd844052ee57e1b3efc795889ec21bcb0b
+            - "{{inputs.parameters.iscsi-tools}}"
             - --system-extension-image
-            # renovate: datasource=docker depName=ghcr.io/siderolabs/spin
-            - ghcr.io/siderolabs/spin:v0.25.1@sha256:c4b70eb85061847af749772dba3955749235445eb939edbecddbd9bd4c957304
+            - "{{inputs.parameters.spin}}"
             - --system-extension-image
-            # renovate: datasource=docker depName=ghcr.io/siderolabs/kata-containers
-            - ghcr.io/siderolabs/kata-containers:3.32.0@sha256:9099f25b0ef62e99d8ca2c93efdc3b8e86544297bae05a51014bbfba740f8be2
+            - "{{inputs.parameters.kata-containers}}"
             - --base-installer-image
             - "ghcr.io/tsuguya-hc/installer-base:{{inputs.parameters.version}}"
             - --extra-kernel-arg
@@ -387,6 +466,9 @@ spec:
       inputs:
         parameters:
           - name: version
+          - name: iscsi-tools
+          - name: spin
+          - name: kata-containers
       volumes:
         - name: docker-config
           emptyDir: {}
@@ -447,14 +529,11 @@ spec:
             - --arch
             - amd64
             - --system-extension-image
-            # renovate: datasource=docker depName=ghcr.io/siderolabs/iscsi-tools
-            - ghcr.io/siderolabs/iscsi-tools:v0.2.0@sha256:97794a8b6064e24d8053b6d424662ccd844052ee57e1b3efc795889ec21bcb0b
+            - "{{inputs.parameters.iscsi-tools}}"
             - --system-extension-image
-            # renovate: datasource=docker depName=ghcr.io/siderolabs/spin
-            - ghcr.io/siderolabs/spin:v0.25.1@sha256:c4b70eb85061847af749772dba3955749235445eb939edbecddbd9bd4c957304
+            - "{{inputs.parameters.spin}}"
             - --system-extension-image
-            # renovate: datasource=docker depName=ghcr.io/siderolabs/kata-containers
-            - ghcr.io/siderolabs/kata-containers:3.32.0@sha256:9099f25b0ef62e99d8ca2c93efdc3b8e86544297bae05a51014bbfba740f8be2
+            - "{{inputs.parameters.kata-containers}}"
             - --base-installer-image
             - "ghcr.io/tsuguya-hc/installer-base:{{inputs.parameters.version}}"
             - --extra-kernel-arg
@@ -489,14 +568,11 @@ spec:
             - --arch
             - amd64
             - --system-extension-image
-            # renovate: datasource=docker depName=ghcr.io/siderolabs/iscsi-tools
-            - ghcr.io/siderolabs/iscsi-tools:v0.2.0@sha256:97794a8b6064e24d8053b6d424662ccd844052ee57e1b3efc795889ec21bcb0b
+            - "{{inputs.parameters.iscsi-tools}}"
             - --system-extension-image
-            # renovate: datasource=docker depName=ghcr.io/siderolabs/spin
-            - ghcr.io/siderolabs/spin:v0.25.1@sha256:c4b70eb85061847af749772dba3955749235445eb939edbecddbd9bd4c957304
+            - "{{inputs.parameters.spin}}"
             - --system-extension-image
-            # renovate: datasource=docker depName=ghcr.io/siderolabs/kata-containers
-            - ghcr.io/siderolabs/kata-containers:3.32.0@sha256:9099f25b0ef62e99d8ca2c93efdc3b8e86544297bae05a51014bbfba740f8be2
+            - "{{inputs.parameters.kata-containers}}"
             - --base-installer-image
             - "ghcr.io/tsuguya-hc/installer-base:{{inputs.parameters.version}}"
             - --extra-kernel-arg

@@ -148,6 +148,7 @@
 | discord-notify | send (curl) | 10m / 16Mi | 64Mi |
 | node-shutdown | resolve-nodes | 10m / 16Mi | 64Mi |
 | node-shutdown | shutdown-nodes (talosctl) | 10m / 32Mi | 64Mi |
+| talos-secureboot-build | resolve-extensions | 10m / 64Mi | 256Mi |
 | talos-secureboot-build | plan-build | 10m / 64Mi | 128Mi |
 | talos-secureboot-build | run-imager | 100m / 512Mi | 2Gi |
 | talos-secureboot-build | push-installer | 50m / 256Mi | 1Gi |

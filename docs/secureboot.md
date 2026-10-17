@@ -64,22 +64,27 @@ ExternalSecret: `manifests/secrets/talos-build-secureboot-signing-keys.yaml`
 1. GHA が `talos-custom-build` で imager + installer-base をビルド → GHCR push
 2. GHA が pre-release 作成 → GitHub webhook
 3. Argo Events Sensor が `prerelease: true` のリリースをフィルタ
-4. `plan-build` が前回成功した run と比較し、**版と imager への入力が同じなら 5 を skip する**
-5. Argo WF が imager コンテナで SecureBoot installer/ISO をビルド → GHCR に installer push、
+4. `resolve-extensions` が `ghcr.io/siderolabs/extensions:<version>` の cosign 署名を digest で検証し、
+   その `image-digests` から iscsi-tools / spin / kata-containers の `ref@sha256:` を引く。一覧に無ければ失敗する
+5. `plan-build` が前回成功した run と比較し、**版・拡張の ref・imager への入力が同じなら 6 を skip する**
+6. Argo WF が imager コンテナで SecureBoot installer/ISO をビルド → GHCR に installer push、
    GitHub Release に ISO + PXE assets upload
-6. Release を pre-release → release に更新（skip した回も走る。`gh release edit` は冪等）
+7. Release を pre-release → release に更新（skip した回も走る。`gh release edit` は冪等）
 
 トリガーは 2 経路ある。上が release webhook 経由（version 指定あり）で、もう 1 本は ArgoCD が
 talos-build アプリを同期したときに `talos-extension-bump` Sensor が起動する経路（version 未指定
-＝最新 release を解決）。後者は `manifests/talos-build/` が変われば発火するので、拡張の digest
-更新だけでなく argo-tools の digest bump のような無関係な変更でも走る。焼き直すと
+＝最新 release を解決）。後者は `manifests/talos-build/` が変われば発火するので、カーネル引数の
+変更だけでなく argo-tools の digest bump のような無関係な変更でも走る。焼き直すと
 `installer:<version>` が同じタグに上書きされるだけで意味がない。`plan-build` は無関係な
 変更のたびに 16 分×2 のビルドを丸ごと走らせないために居る。
 
-比較材料は、run ごとに Argo が `status.storedWorkflowTemplateSpec` へ凍結する imager の引数（拡張の digest
-とカーネル引数）と、`resolve-version` が出した版。**署名鍵のローテーションと、同じ版のまま
-installer-base / imager を焼き直した場合は見ていない。** どちらも判定材料（版・imager 引数）が
-変わらないので、前回成功 run と一致して skip される。署名鍵のローテーションは `manifests/secrets/`
+比較材料は、run ごとに Argo が `status.storedWorkflowTemplateSpec` へ凍結する imager の引数
+（カーネル引数など）と、`resolve-version` が出した版と、`resolve-extensions` が出した拡張の ref。
+拡張の ref は実行時に引くので spec には変数のまま残り、各 run の出力で比べる。同じ版のタグに
+siderolabs が別の extensions を付け直した場合も、次に走った run で拡張の digest が変わっていれば焼き直す
+（付け直し自体はどのトリガーにもならない）。
+**署名鍵のローテーションと、同じ版のまま installer-base / imager を焼き直した場合は見ていない。**
+どちらも判定材料（版・拡張の ref・imager 引数）が変わらないので、前回成功 run と一致して skip される。署名鍵のローテーションは `manifests/secrets/`
 配下の変更で、`talos-build` app とは別 app（reconcile が隔離されている）のため、**ローテーション
 だけでは `talos-build` の sync も plan-build の再判定も自動では起きない。**
 

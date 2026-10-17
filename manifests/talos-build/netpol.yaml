@@ -25,6 +25,9 @@ spec:
         - matchPattern: "*.githubusercontent.com"
         - matchName: "dl-cdn.alpinelinux.org"
         - matchName: "discord.com"
+        # resolve-extensions の cosign verify が信頼のルートを Sigstore の TUF から取る。
+        # 塞がると署名検証が落ちてビルドが止まる。
+        - matchName: "tuf-repo-cdn.sigstore.dev"
       toPorts:
         - ports:
             - port: "443"

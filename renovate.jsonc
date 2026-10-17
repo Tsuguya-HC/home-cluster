@@ -174,15 +174,6 @@
       "extractVersionTemplate": "^v(?<version>.+)$"
     },
     {
-      // Argo Workflows step images: a YAML list item, optionally digest-pinned.
-      // currentDigest is what lets the digest-cooldown gate re-pin these in place.
-      "customType": "regex",
-      "managerFilePatterns": ["/manifests/talos-build/workflowtemplate\\.yaml$/"],
-      "matchStrings": [
-        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s*\\n\\s*-\\s*[^\\s:]+:(?<currentValue>[^@\\s]+)(?:@(?<currentDigest>sha256:[a-f0-9]+))?"
-      ]
-    },
-    {
       "description": [
         "The parts repository (skills / agents / CLAUDE.md fragments the taskflow",
         "handlers fetch at run time) is pinned by commit in every handler's PARTS_REF:",
@@ -312,8 +303,7 @@
         "2.2 / 0.5 days, so more than half fall under the digest-cooldown's three days.",
         "Each rebuild re-targets the digest PR and restarts the clock: the 1.35 digest",
         "PR #843 took 6.2 days to merge, and the 1.37 one (#937) was re-targeted twice",
-        "on 2026-09-18 alone. Same weekly window as ghcr.io/renovatebot/renovate and",
-        "talos-extensions."
+        "on 2026-09-18 alone. Same weekly window as ghcr.io/renovatebot/renovate."
       ],
       "matchPackageNames": ["registry.suse.com/suse/kubectl"],
       "schedule": ["before 6am on monday"],
@@ -427,35 +417,6 @@
       "groupName": "seaweedfs",
       "matchPackageNames": [
         "/seaweedfs/"
-      ]
-    },
-    {
-      "description": [
-        "Group Talos system extensions. siderolabs rebuilds all three under the",
-        "same version tags at once — the three digests in #487 shared a first-seen",
-        "instant to the millisecond — so they belong in one PR.",
-        "",
-        "The weekly window is what makes that PR reachable. Rebuild intervals",
-        "measured from the signature tags run 1 to 12 days, and three of the last",
-        "seven were under three days: 07-21→07-23, 08-04→08-06, 08-19→08-20. Every",
-        "rebuild re-targets the branch to a new digest, which restarts the",
-        "digest-cooldown clock, so a PR opened during a fast stretch can never",
-        "reach three days. #487 was reset twice that way — opened 08-17, first-seen",
-        "dragged to 08-20.",
-        "",
-        "updateNotScheduled is what actually holds it: schedule alone still permits",
-        "out-of-schedule updates to an existing branch. Same fix as the one on",
-        "ghcr.io/renovatebot/renovate above, for the same reason."
-      ],
-      "groupName": "talos-extensions",
-      // Extension versions must match the Talos release they are installed into,
-      // and they are applied with a Talos upgrade rather than continuously, so
-      // there is nothing to gain from tracking them daily.
-      "automerge": false,
-      "schedule": ["before 6am on monday"],
-      "updateNotScheduled": false,
-      "matchPackageNames": [
-        "/^ghcr.io/siderolabs/(iscsi-tools|spin|kata-containers)$/"
       ]
     },
     {

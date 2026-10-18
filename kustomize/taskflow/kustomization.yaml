@@ -39,7 +39,7 @@ kind: Kustomization
 # 実測していない。この不確実性に賭けず、renovate.jsonc の packageRules で明示的に
 # enabled: false にして止めている。
 resources:
-  - https://github.com/Tsuguya-HC/taskflow//config/default?ref=65d6a91aa1f90b090dbd251a710a38d423b6268d
+  - https://github.com/Tsuguya-HC/taskflow//config/default?ref=32391deb90a0d6d71416cc7984ac7f0b4659bb55
 
 # newTag と digest を分けて併記すると、Renovate の kustomize manager が
 # invalid-dependency-specification で抽出を捨て、digest が自動更新されなくなる
@@ -49,7 +49,7 @@ resources:
 images:
   - name: controller
     newName: registry.infra.tgy.io/tools/taskflow
-    newTag: latest@sha256:a28ddcdc1641ce16b3acf15761c9df13a3cda244741d9ed4b1818b19705ded0c
+    newTag: latest@sha256:f997ea7e268a4c512fd853231d1cea29e755fc21ea6c1c244d390c1d32446867
 
 patches:
   # 全 namespace restricted 運用に合わせる（config/default の Namespace にはラベルが無い）
@@ -88,7 +88,27 @@ patches:
               - name: manager
                 env:
                   - name: SIDECAR_IMAGE
-                    value: registry.infra.tgy.io/tools/agent-sidecar:latest@sha256:2e9e3b562058f70391771f50f6d84f7b6db5637608dd8305267d0309e50cc8be
+                    value: registry.infra.tgy.io/tools/agent-sidecar:latest@sha256:0579b72d9a3892840d62431a191e6a5e14bcac1b5221a8ebfa9d30291c3240f6
+
+  # 送り役 Job は Task の namespace で動き、そこに Secret taskflow-archive-s3 と、送り側・filer の
+  # 受け側の両方の CNP が要る。欠けた namespace の Task は記録が送られないまま消え、再送されない。
+  # Task を走らせる namespace を増やすときは、先に Secret と CNP をそろえる。
+  - target:
+      kind: Deployment
+      name: taskflow-controller-manager
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/args/-
+        value: --archive-endpoint=seaweedfs-s3.seaweedfs.svc:8333
+      - op: add
+        path: /spec/template/spec/containers/0/args/-
+        value: --archive-bucket=taskflow-archive
+      - op: add
+        path: /spec/template/spec/containers/0/args/-
+        value: --archive-credentials-secret=taskflow-archive-s3
+      - op: add
+        path: /spec/template/spec/containers/0/args/-
+        value: --archive-insecure
 
   # TaskFlow の構造検査 webhook（taskflow #17 / ADR-0006）。taskflow 側は caBundle を
   # 持たない ValidatingWebhookConfiguration を配るだけなので、埋めるのはこちら —

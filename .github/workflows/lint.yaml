@@ -79,6 +79,7 @@ jobs:
       images: ${{ steps.filter.outputs.images }}
       argo: ${{ steps.filter.outputs.argo }}
       cmscripts: ${{ steps.filter.outputs.cmscripts }}
+      buckets: ${{ steps.filter.outputs.buckets }}
       workflows: ${{ steps.filter.outputs.workflows }}
       renovate: ${{ steps.filter.outputs.renovate }}
       aqua: ${{ steps.filter.outputs.aqua }}
@@ -140,6 +141,10 @@ jobs:
               - '.github/workflows/_configmap-scripts.yml'
               - 'aqua.yaml'
               - 'aqua-checksums.json'
+            buckets:
+              - 'helm-values/seaweedfs/**'
+              - 'scripts/seaweedfs-buckets.py'
+              - '.github/workflows/_seaweedfs-buckets.yml'
             workflows:
               - '.github/workflows/**'
               - '.github/zizmor.yml'
@@ -202,6 +207,13 @@ jobs:
     permissions:
       contents: read
 
+  seaweedfs-buckets:
+    needs: detect
+    if: ${{ needs.detect.outputs.buckets == 'true' }}
+    uses: ./.github/workflows/_seaweedfs-buckets.yml # zizmor: ignore[self-repository]
+    permissions:
+      contents: read
+
   # Most of this file is bash inside `run:` blocks, and none of it is exercised
   # until a push runs it. actionlint checks the expressions and the job graph,
   # and shells out to shellcheck for every script — which is where the real
@@ -252,6 +264,7 @@ jobs:
       - image-existence
       - argo-lint
       - configmap-scripts
+      - seaweedfs-buckets
       - lint-workflows
       - lint-renovate
       - lint-aqua

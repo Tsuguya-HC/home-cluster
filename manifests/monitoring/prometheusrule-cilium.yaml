@@ -9,8 +9,7 @@ spec:
   groups:
     - name: cilium
       rules:
-        # agent の起動直後は全 endpoint の再生成が重なり、DNS 応答の datapath 待ちが一時的に延びる。
-        # 起動から 15 分は対象外にする。
+        # 起動から 15 分は対象外にする。rollout 直後に timeout が出る（#1371）。
         - alert: CiliumDNSProxyDatapathSlow
           expr: |
             (
@@ -66,6 +65,9 @@ spec:
         - alert: CiliumEndpointRegenerationFailed
           expr: |
             sum by (node) (increase(cilium_endpoint_regenerations_total{outcome="fail"}[15m])) > 0
+            or
+            sum by (node) (cilium_endpoint_regenerations_total{outcome="fail"})
+              unless sum by (node) (cilium_endpoint_regenerations_total{outcome="fail"} offset 15m)
           labels:
             severity: warning
           annotations:
@@ -84,6 +86,8 @@ spec:
         - alert: CiliumHealthEndpointsUnreachable
           expr: |
             max by (node) (cilium_unreachable_health_endpoints) > 0
+            unless on ()
+            (count(kube_node_status_condition{condition="Ready",status="true"} == 0) > 0)
           for: 10m
           labels:
             severity: warning

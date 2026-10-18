@@ -52,6 +52,17 @@ spec:
             app: harbor
             component: registry
             io.kubernetes.pod.namespace: harbor
+        # taskflow の送り役 Job（ADR-0015）。Task が走る namespace を足すときは、ここと
+        # その namespace の送り役 egress を両方足す — 片側だけだと UploadFailed が出るだけで
+        # Task はそのまま消える。
+        - matchLabels:
+            app.kubernetes.io/managed-by: taskflow
+            flow.tgy.io/role: archive
+            io.kubernetes.pod.namespace: claude-code
+        - matchLabels:
+            app.kubernetes.io/managed-by: taskflow
+            flow.tgy.io/role: archive
+            io.kubernetes.pod.namespace: claude-code-build
       toPorts:
         - ports:
             - port: "8333"

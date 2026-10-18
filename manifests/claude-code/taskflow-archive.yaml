@@ -1,0 +1,22 @@
+# taskflow の送り役 Job（ADR-0015）。送り先はクラスタ内の filer の S3 だけで、s3.infra.tgy.io
+# （Gateway 経由）に向けるとここで落ちる。
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: taskflow-archive
+  namespace: claude-code
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/managed-by: taskflow
+      flow.tgy.io/role: archive
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: seaweedfs
+            app.kubernetes.io/component: filer
+            io.kubernetes.pod.namespace: seaweedfs
+      toPorts:
+        - ports:
+            - port: "8333"
+              protocol: TCP

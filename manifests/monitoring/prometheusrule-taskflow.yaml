@@ -84,3 +84,19 @@ spec:
           annotations:
             summary: "taskflow: {{ $labels.flow }} の定義が壊れていて TaskFailed"
             description: "{{ $labels.flow }} の Task が定義の破損で TaskFailed に着いた（outcome Structural）。束縛の無いフェーズ・同じディレクトリを指す 2 ステータス・開始時に handler が無い・定義の写しが収まらない／消された等で、作業ではなく git の TaskFlow / TaskHandler を直す。flow が <unresolved> なら参照先の TaskFlow が存在しないか写しが消された。対象は `kubectl get task -A` で Ready=False のものを探し、Ready 条件の reason（FlowBroken / DefinitionsLost 等）と message を読む。"
+        - alert: TaskFlowArchiveFailed
+          expr: |
+            increase(taskflow_archive_outcomes_total{outcome="Failed"}[5m]) > 0
+          labels:
+            severity: warning
+          annotations:
+            summary: "taskflow: {{ $labels.flow }} の Task の記録を S3 に送れなかった"
+            description: "{{ $labels.flow }} の Task の送り役 Job が失敗した（Archived=False、reason UploadFailed）。Task は期限が過ぎていればこのまま消え、記録は残らない。対象は `kubectl get task -A` で Archived 条件が False のものを探し、message を読む。Task が既に消えていれば Warning Event（reason UploadFailed）の note を見る。多いのは S3 への疎通（送り役 Pod の CNP / filer 側の受け入れ）と、namespace に資格情報の Secret が無いこと。"
+        - alert: TaskFlowArchiveWithheld
+          expr: |
+            increase(taskflow_archive_outcomes_total{outcome="Withheld"}[5m]) > 0
+          labels:
+            severity: warning
+          annotations:
+            summary: "taskflow: {{ $labels.flow }} の Task の記録の一部を送らなかった"
+            description: "{{ $labels.flow }} の Task の送り役が、秘密値の規則に当たったファイル・symlink・通常ファイル以外・読めないファイルを送らずに残した（Archived=True、reason Withheld）。秘密値に当たったなら、handler の出力（答え・報告・transcript）に資格情報が載った疑いがある。何をなぜ送らなかったかは、Task の status.archive.location にある manifest.json の withheld に出る。Task が残っていれば Archived 条件の message に件数が出る。"

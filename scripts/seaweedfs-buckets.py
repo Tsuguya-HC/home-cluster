@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""filer.s3.createBuckets と、その写しの s3.annotations の一致を検査する（#1411）。
+"""filer.s3.createBuckets と、その写しの s3.annotations の一致を検査する。
 
 バケットを作るのは chart の bucket hook（ArgoCD の PostSync）だけで、hook は sync が
 走ったときにしか動かない。自動 sync は hook 以外に差分があるときしか走らず、
@@ -26,6 +26,9 @@ def expected_text(buckets: list) -> str:
 
 
 def check(values: dict) -> list[str]:
+    # chart の hook は s3.createBuckets があればそちらを使い、filer.s3.createBuckets を見ない。
+    if ((values.get("s3") or {}).get("createBuckets")) is not None:
+        return ["s3.createBuckets is set; keep the list in filer.s3.createBuckets only"]
     buckets = ((values.get("filer") or {}).get("s3") or {}).get("createBuckets")
     if not isinstance(buckets, list) or not buckets:
         return ["filer.s3.createBuckets is missing or empty"]

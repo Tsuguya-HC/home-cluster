@@ -17,3 +17,13 @@ spec:
         - ports:
             - port: "6443"
               protocol: TCP
+    # 消すとこのワークフローが終わらない。
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: seaweedfs
+            app.kubernetes.io/component: filer
+            io.kubernetes.pod.namespace: seaweedfs
+      toPorts:
+        - ports:
+            - port: "8333"
+              protocol: TCP

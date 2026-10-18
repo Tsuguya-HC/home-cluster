@@ -5,14 +5,24 @@ metadata:
   namespace: argo
 ---
 apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cnp-pair-auditor-executor
+  namespace: argo
+rules:
+  - apiGroups: [argoproj.io]
+    resources: [workflowtaskresults]
+    verbs: [create, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: cnp-pair-auditor
   namespace: argo
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: argo-workflows-edit
+  kind: Role
+  name: cnp-pair-auditor-executor
 subjects:
   - kind: ServiceAccount
     name: cnp-pair-auditor
@@ -54,6 +64,8 @@ spec:
   entrypoint: main
   templates:
     - name: main
+      retryStrategy:
+        limit: 2
       metadata:
         labels:
           cnp-pair-audit: "true"
@@ -75,17 +87,12 @@ spec:
             drop: ["ALL"]
         source: |
           #!/usr/bin/env python3
-          """Report cross-namespace CNP allows that are open on one side only.
-
-          Cilium needs both the client's egress and the server's ingress to allow a
-          flow. A rule written on one side only is either a forgotten counterpart
-          (traffic drops) or a stale grant (open door nobody uses).
-          """
           import json, ssl, sys, urllib.request
           from collections import defaultdict
 
           NSK = 'io.kubernetes.pod.namespace'
           SAK = 'io.cilium.k8s.policy.serviceaccount'
+          CLK = 'io.cilium.k8s.policy.cluster'
           BROAD = {'all', 'cluster'}
 
 
@@ -120,7 +127,7 @@ spec:
 
 
           def peer_sel(sel, polns):
-              # A namespaced policy's peer selector without a namespace key means its own namespace.
+              # a peer without a namespace key is the policy's own namespace
               if polns is None:
                   return sel
               keys = set((sel.get('matchLabels') or {})) | {e['key'] for e in sel.get('matchExpressions') or []}
@@ -130,8 +137,14 @@ spec:
               return s
 
 
+          PEER_KEYS = {'toEndpoints', 'toEntities', 'toFQDNs', 'toCIDR', 'toCIDRSet', 'toServices', 'toGroups', 'toNodes', 'toRequires',
+                       'fromEndpoints', 'fromEntities', 'fromCIDR', 'fromCIDRSet', 'fromGroups', 'fromNodes', 'fromRequires'}
+
+
           def ports_of(rule):
               out = []
+              if rule.get('icmps') and not rule.get('toPorts'):
+                  return [('0', None, 'ICMP')]
               for tp in rule.get('toPorts') or []:
                   for p in tp.get('ports') or []:
                       out.append((str(p.get('port', '0')), p.get('endPort'), (p.get('protocol') or 'ANY').upper()))
@@ -157,7 +170,7 @@ spec:
                   if p['status'].get('phase') != 'Running' or p['spec'].get('hostNetwork'):
                       continue
                   ns = p['metadata']['namespace']
-                  labels = {**(p['metadata'].get('labels') or {}), NSK: ns, SAK: p['spec'].get('serviceAccountName', 'default')}
+                  labels = {**(p['metadata'].get('labels') or {}), NSK: ns, CLK: 'default', SAK: p['spec'].get('serviceAccountName', 'default')}
                   cports = [(c['containerPort'], c.get('name'), c.get('protocol', 'TCP'))
                             for ct in p['spec']['containers'] for c in ct.get('ports') or []]
                   pods.append({'ns': ns, 'name': p['metadata']['name'], 'labels': labels, 'ports': cports})
@@ -174,8 +187,22 @@ spec:
                   name = f"{ns + '/' if ns else 'ccnp/'}{p['metadata']['name']}"
                   for d, pk, ek in (('egress', 'toEndpoints', 'toEntities'), ('ingress', 'fromEndpoints', 'fromEntities')):
                       for r in sp.get(d) or []:
-                          rules[d].append({'pol': name, 'subj': subj, 'broad': bool(BROAD & set(r.get(ek) or [])),
+                          rules[d].append({'pol': name, 'subj': subj,
+                                           'broad': bool(BROAD & set(r.get(ek) or [])) or not PEER_KEYS & set(r),
                                            'peers': [peer_sel(s, ns) for s in r.get(pk) or []], 'ports': ports_of(r)})
+
+              for r in rules['ingress']:
+                  for pod in pods:
+                      if not match(r['subj'], pod['labels']):
+                          continue
+                      for p, end, pr in r['ports']:
+                          if not p.isdigit() or int(p) == 0:
+                              continue
+                          hi = int(end) if end and int(end) - int(p) <= 1024 else int(p)
+                          for n in range(int(p), hi + 1):
+                              cand = (n, None, 'TCP' if pr == 'ANY' else pr)
+                              if not any(c[0] == n and c[2] == cand[2] for c in pod['ports']):
+                                  pod['ports'].append(cand)
 
               def allowed(direction, subj_pod, peer_pod, port, pname, proto):
                   for r in rules[direction]:

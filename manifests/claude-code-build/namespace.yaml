@@ -6,9 +6,7 @@
 # privileged を要求する Pod は必ず runtimeClassName: kata であること。privileged はゲスト VM の
 # 中の話でホストには及ばない（containerd が privileged_without_host_devices = true）が、
 # **runtimeClass を書き忘れた Pod は runc で本物のホスト特権を取る**。namespace は runtime の
-# 境界ではないので、PSA では止められず、Kyverno の require-kata-runtime が privileged の Pod
-# だけを止める。特権を持たず信頼できない入力を実行しない Pod は runc で動く — taskflow の
-# 送り役 Job（ADR-0015）はこれで、runtimeClassName を持たない。
+# 境界ではないので、これは PSA では止められない。
 apiVersion: v1
 kind: Namespace
 metadata:

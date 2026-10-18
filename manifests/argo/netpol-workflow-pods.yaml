@@ -22,6 +22,8 @@ spec:
         operator: DoesNotExist
       - key: pluto-check
         operator: DoesNotExist
+      - key: cnp-pair-audit
+        operator: DoesNotExist
   ingressDeny:
     - fromEntities:
         - world

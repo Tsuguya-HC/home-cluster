@@ -165,12 +165,23 @@ spec:
               a, b = rule['subj'].get('matchLabels') or {}, sel.get('matchLabels') or {}
               return all(a[k] == b[k] for k in a.keys() & b.keys())
 
+          def ns_values(sel):
+              v = (sel.get('matchLabels') or {}).get(NSK)
+              if v is not None:
+                  return [v]
+              for e in sel.get('matchExpressions') or []:
+                  if e['key'] == NSK and e['operator'] == 'In':
+                      return list(e.get('values') or [])
+              return None
+
+
           def only_own_ns(sel, ns):
-              return (sel.get('matchLabels') or {}).get(NSK) == ns
+              return ns_values(sel) == [ns]
 
 
           def ns_label(sel):
-              return (sel.get('matchLabels') or {}).get(NSK) or 'any namespace'
+              v = ns_values(sel)
+              return ','.join(v) if v else 'any namespace'
 
 
           def ports_of(rule):
@@ -261,8 +272,7 @@ spec:
                               checked += 1
                               if not allowed('ingress', server, client, port, pname, proto):
                                   findings[('egress', r['pol'])].add(f"{client['ns']}/{client['name']} -> {server['ns']}/{server['name']}:{port}")
-              # Clients of an ingress grant are often short-lived pods, so whether the grant is used
-              # is judged from policies: some egress rule in an admitted namespace must open it.
+              # Judged from policies, not pods: the clients may not be running at audit time.
               for r in rules['ingress']:
                   servers = [p for p in pods if match(r['subj'], p['labels'])]
                   for sel in r['peers']:

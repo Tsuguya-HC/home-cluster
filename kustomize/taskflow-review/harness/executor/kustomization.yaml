@@ -136,7 +136,8 @@ patches:
         path: /spec/jobTemplate/template/spec/containers/0/resources
         value:
           requests: {cpu: 250m, memory: 1Gi}
-          limits: {memory: 2Gi}
+          # agent コンテナは Claude Code と runner を抱え、長い検証の回では 2Gi を超える。
+          limits: {memory: 3Gi}
   - target:
       kind: TaskHandler
       labelSelector: taskflow-role=filer

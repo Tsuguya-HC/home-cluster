@@ -1,9 +1,0 @@
-# TaskFlow から TaskHandler への参照に nameSuffix を伝える。キーにワイルドカードは使えないので、
-# フェーズを足したらここにも足すこと — 足さないとそのフェーズだけ suffix の無い handler を指し、
-# 組み立ては黙って通る。
-nameReference:
-  - kind: TaskHandler
-    group: flow.tgy.io
-    fieldSpecs:
-      - {kind: TaskFlow, group: flow.tgy.io, path: spec/bindings/判断/handler}
-      - {kind: TaskFlow, group: flow.tgy.io, path: spec/bindings/評価/handler}

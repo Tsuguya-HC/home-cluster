@@ -1,0 +1,129 @@
+# GITHUB_GATEWAY_HOST を gh-ro から変えないこと（GitHub に書き込まない役）。
+# taskflow-role は decide のままにする（executor と models が選ぶ印）。
+apiVersion: flow.tgy.io/v1alpha1
+kind: TaskHandler
+metadata:
+  name: decide
+  labels:
+    taskflow-role: decide
+spec:
+  phase: 判断
+  runner:
+    type: Job
+  timeout: 30m
+  maxInfraRetries: 1
+  workspace:
+    volume: flow-workspace
+    mountPath: /workspace
+  jobTemplate:
+    template:
+      metadata:
+        labels:
+          taskflow-review: "true"
+      spec:
+        restartPolicy: Never
+        serviceAccountName: agent-reviewer
+        automountServiceAccountToken: false
+        terminationGracePeriodSeconds: 60
+        # root で起動し、鍵を読んで消してから agent を 65533 に降ろす（ランナーが setpriv で降りる）。
+        securityContext:
+          runAsUser: 0
+          seccompProfile:
+            type: RuntimeDefault
+        affinity:
+          podAntiAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+              - weight: 100
+                podAffinityTerm:
+                  labelSelector:
+                    matchLabels:
+                      taskflow-review: "true"
+                  namespaceSelector: {}
+                  topologyKey: kubernetes.io/hostname
+        volumes:
+          - name: tmp
+            emptyDir: {}
+          - name: scratch
+            # ノードのディスクを使うので上限を付ける。
+            emptyDir: {sizeLimit: 5Gi}
+          - name: github-gateway-key
+            secret:
+              secretName: github-gateway-client-keys
+              defaultMode: 0444
+              items:
+                - key: taskflow-review
+                  path: key
+          - name: github-token
+            emptyDir: {}
+          - name: model-registry
+            configMap:
+              name: model-registry
+        # ランナーは鍵を読んだ後にファイルを消す。読み取り専用の Secret は消せないので、init が
+        # emptyDir に写す。agent と executor に github-gateway-key を入れないこと。
+        initContainers:
+          - name: github-key
+            image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:aaf50f2677b5089678e8633d7f749f9d1009321fdc1fa9ae9fb9bceaed7a6bbd
+            command: [sh, -c]
+            args: ['cp /github-gateway-key/key /github-token/token']
+            securityContext:
+              runAsUser: 65532
+              runAsNonRoot: true
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities: {drop: [ALL]}
+            volumeMounts:
+              - {name: github-gateway-key, mountPath: /github-gateway-key, readOnly: true}
+              - {name: github-token, mountPath: /github-token}
+            resources:
+              requests: {cpu: 10m, memory: 16Mi}
+              limits: {memory: 64Mi}
+        containers:
+          - name: agent
+            image: registry.infra.tgy.io/agents/runner
+            workingDir: /workspace
+            command: [bash, -c]
+            args:
+              - |
+                set -u
+                chown 65533:65533 /scratch || {
+                  mkdir -p /workspace/fail
+                  printf '%s\n' "/scratch の所有者変更に失敗した。判断は行っていない。" > /workspace/fail/report.md
+                  sync; exit 0
+                }
+                export AGENT_MODEL="$LLM_ALIAS"
+                exec node /opt/runner/dist/main.js run decide
+            env:
+              - {name: HOME, value: /tmp}
+              - {name: ANTHROPIC_BASE_URL, value: http://llm-gateway.llm-gateway.svc.cluster.local/anthropic}
+              - {name: DISABLE_TELEMETRY, value: "1"}
+              - {name: DISABLE_ERROR_REPORTING, value: "1"}
+              - {name: CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC, value: "1"}
+              - name: ANTHROPIC_AUTH_TOKEN
+                valueFrom:
+                  secretKeyRef:
+                    name: llm-gateway-client-keys
+                    key: placeholder
+              - {name: ANTHROPIC_API_KEY, value: ""}
+              - {name: LLM_ALIAS, value: placeholder}
+              - {name: AGENT_MODEL_REGISTRY, value: /etc/agent-models/registry.json}
+              - {name: AGENT_CONFINE, value: executor}
+              - {name: REPO_OWNER, value: Tsuguya-HC}
+              - {name: GITHUB_GATEWAY_HOST, value: gh-ro.infra.tgy.io}
+              # Job の timeout より短く。
+              - {name: PHASE_BUDGET_MS, value: "1500000"}
+            securityContext:
+              runAsUser: 0
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop: [ALL]
+                add: [SETUID, SETGID, CHOWN, DAC_OVERRIDE, FOWNER, SETPCAP]
+            # ランナーは /run の下に root 専用の作業場所を作る。/run にボリュームを被せないこと。
+            volumeMounts:
+              - {name: flow-workspace, mountPath: /workspace}
+              - {name: tmp, mountPath: /tmp}
+              - {name: scratch, mountPath: /scratch}
+              - {name: github-token, mountPath: /github-token}
+              - {name: model-registry, mountPath: /etc/agent-models, readOnly: true}
+            resources:
+              requests: {cpu: 250m, memory: 512Mi}
+              limits: {memory: 2Gi}

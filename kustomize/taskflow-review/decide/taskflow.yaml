@@ -1,16 +1,3 @@
-# 判断役の入口の判断。答えは記録するだけで、issue・PR・Task には手を出さない。
-#
-# 投げ方:
-#   kubectl -n claude-code-build create -f - <<EOT
-#   apiVersion: flow.tgy.io/v1alpha1
-#   kind: Task
-#   metadata: {generateName: decide-, namespace: claude-code-build}
-#   spec:
-#     flow: decide
-#     input: {repo: Tsuguya-HC/home-rss, issue: 106}
-#   EOT
-#
-# 答え（decided/decision.json と report.md）は Task の workspace の棚にしか残らない。
 apiVersion: flow.tgy.io/v1alpha1
 kind: TaskFlow
 metadata:
@@ -30,20 +17,6 @@ spec:
   terminals:
     完了: Success
 ---
-# 判断役の評価。ref は cases を読む git ref。only（[{repo: <owner>/<name>, issue: <番号>}, ...]）で
-# 指した issue の case だけを回し、省くと全件。
-#
-# 投げ方:
-#   kubectl -n claude-code-build create -f - <<EOT
-#   apiVersion: flow.tgy.io/v1alpha1
-#   kind: Task
-#   metadata: {generateName: eval-, namespace: claude-code-build}
-#   spec:
-#     flow: eval
-#     input: {ref: main}
-#   EOT
-#
-# 答え（evaluated/report.json と judgments.json）は Task の workspace の棚にしか残らない。
 apiVersion: flow.tgy.io/v1alpha1
 kind: TaskFlow
 metadata:

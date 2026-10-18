@@ -1,0 +1,241 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cnp-pair-auditor
+  namespace: argo
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cnp-pair-auditor
+  namespace: argo
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: argo-workflows-edit
+subjects:
+  - kind: ServiceAccount
+    name: cnp-pair-auditor
+    namespace: argo
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cnp-pair-auditor
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [list]
+  - apiGroups: [cilium.io]
+    resources: [ciliumnetworkpolicies, ciliumclusterwidenetworkpolicies]
+    verbs: [list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cnp-pair-auditor
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cnp-pair-auditor
+subjects:
+  - kind: ServiceAccount
+    name: cnp-pair-auditor
+    namespace: argo
+---
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: cnp-pair-audit
+  namespace: argo
+spec:
+  activeDeadlineSeconds: 600
+  serviceAccountName: cnp-pair-auditor
+  entrypoint: main
+  templates:
+    - name: main
+      metadata:
+        labels:
+          cnp-pair-audit: "true"
+      script:
+        image: python:3.14-alpine@sha256:f6a589d43c42b9e7f7dc67a12d37132491f362859a5d750607710cc56da3bc72
+        command: [python3]
+        resources:
+          requests:
+            cpu: 10m
+            memory: 64Mi
+          limits:
+            memory: 256Mi
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 65534
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        source: |
+          #!/usr/bin/env python3
+          """Report cross-namespace CNP allows that are open on one side only.
+
+          Cilium needs both the client's egress and the server's ingress to allow a
+          flow. A rule written on one side only is either a forgotten counterpart
+          (traffic drops) or a stale grant (open door nobody uses).
+          """
+          import json, ssl, sys, urllib.request
+          from collections import defaultdict
+
+          NSK = 'io.kubernetes.pod.namespace'
+          SAK = 'io.cilium.k8s.policy.serviceaccount'
+          BROAD = {'all', 'cluster'}
+
+
+          SA = '/var/run/secrets/kubernetes.io/serviceaccount'
+          CTX = ssl.create_default_context(cafile=f'{SA}/ca.crt')
+
+
+          def kget(path):
+              token = open(f'{SA}/token').read()
+              items, cont = [], ''
+              while True:
+                  req = urllib.request.Request(f'https://kubernetes.default.svc{path}?limit=500&continue={cont}',
+                                               headers={'Authorization': f'Bearer {token}'})
+                  body = json.load(urllib.request.urlopen(req, context=CTX, timeout=30))
+                  items += body['items']
+                  cont = body['metadata'].get('continue', '')
+                  if not cont:
+                      return items
+
+
+          def match(sel, labels):
+              for k, v in (sel.get('matchLabels') or {}).items():
+                  if labels.get(k) != v:
+                      return False
+              for e in sel.get('matchExpressions') or []:
+                  k, op, vals = e['key'], e['operator'], e.get('values') or []
+                  if op == 'In' and labels.get(k) not in vals: return False
+                  if op == 'NotIn' and labels.get(k) in vals: return False
+                  if op == 'Exists' and k not in labels: return False
+                  if op == 'DoesNotExist' and k in labels: return False
+              return True
+
+
+          def peer_sel(sel, polns):
+              # A namespaced policy's peer selector without a namespace key means its own namespace.
+              if polns is None:
+                  return sel
+              keys = set((sel.get('matchLabels') or {})) | {e['key'] for e in sel.get('matchExpressions') or []}
+              if NSK in keys:
+                  return sel
+              s = dict(sel); s['matchLabels'] = {**(sel.get('matchLabels') or {}), NSK: polns}
+              return s
+
+
+          def ports_of(rule):
+              out = []
+              for tp in rule.get('toPorts') or []:
+                  for p in tp.get('ports') or []:
+                      out.append((str(p.get('port', '0')), p.get('endPort'), (p.get('protocol') or 'ANY').upper()))
+              return out
+
+
+          def port_ok(rule_ports, port, name, proto):
+              if not rule_ports:
+                  return True
+              for p, end, pr in rule_ports:
+                  if pr not in ('ANY', proto):
+                      continue
+                  if p == '0' or p == str(port) or (name and p == name):
+                      return True
+                  if end and p.isdigit() and int(p) <= port <= int(end):
+                      return True
+              return False
+
+
+          def main():
+              pods = []
+              for p in kget('/api/v1/pods'):
+                  if p['status'].get('phase') != 'Running' or p['spec'].get('hostNetwork'):
+                      continue
+                  ns = p['metadata']['namespace']
+                  labels = {**(p['metadata'].get('labels') or {}), NSK: ns, SAK: p['spec'].get('serviceAccountName', 'default')}
+                  cports = [(c['containerPort'], c.get('name'), c.get('protocol', 'TCP'))
+                            for ct in p['spec']['containers'] for c in ct.get('ports') or []]
+                  pods.append({'ns': ns, 'name': p['metadata']['name'], 'labels': labels, 'ports': cports})
+              if not pods:
+                  sys.exit('ERROR: no pods listed')
+
+              pols = [(p['metadata']['namespace'], p) for p in kget('/apis/cilium.io/v2/ciliumnetworkpolicies')] + [(None, p) for p in kget('/apis/cilium.io/v2/ciliumclusterwidenetworkpolicies')]
+              rules = {'egress': [], 'ingress': []}
+              for ns, p in pols:
+                  sp = p.get('spec') or {}
+                  subj = sp.get('endpointSelector') or {}
+                  if ns is not None:
+                      subj = peer_sel(subj, ns)
+                  name = f"{ns + '/' if ns else 'ccnp/'}{p['metadata']['name']}"
+                  for d, pk, ek in (('egress', 'toEndpoints', 'toEntities'), ('ingress', 'fromEndpoints', 'fromEntities')):
+                      for r in sp.get(d) or []:
+                          rules[d].append({'pol': name, 'subj': subj, 'broad': bool(BROAD & set(r.get(ek) or [])),
+                                           'peers': [peer_sel(s, ns) for s in r.get(pk) or []], 'ports': ports_of(r)})
+
+              def allowed(direction, subj_pod, peer_pod, port, pname, proto):
+                  for r in rules[direction]:
+                      if not match(r['subj'], subj_pod['labels']) or not port_ok(r['ports'], port, pname, proto):
+                          continue
+                      if r['broad'] or any(match(s, peer_pod['labels']) for s in r['peers']):
+                          return True
+                  return False
+
+              findings = defaultdict(set)
+              checked = 0
+              for d in ('egress', 'ingress'):
+                  for r in rules[d]:
+                      if not r['peers']:
+                          continue
+                      subjects = [p for p in pods if match(r['subj'], p['labels'])]
+                      peers = [p for p in pods if any(match(s, p['labels']) for s in r['peers'])]
+                      for s in subjects:
+                          for q in peers:
+                              if s['ns'] == q['ns']:
+                                  continue
+                              client, server = (s, q) if d == 'egress' else (q, s)
+                              for port, pname, proto in server['ports']:
+                                  if not port_ok(r['ports'], port, pname, proto):
+                                      continue
+                                  checked += 1
+                                  other = 'ingress' if d == 'egress' else 'egress'
+                                  o_subj, o_peer = (server, client) if other == 'ingress' else (client, server)
+                                  if not allowed(other, o_subj, o_peer, port, pname, proto):
+                                      findings[(d, r['pol'])].add(f"{client['ns']}/{client['name']} -> {server['ns']}/{server['name']}:{port}")
+              print(f"checked {checked} client/server/port pairs from {len(rules['egress'])} egress and {len(rules['ingress'])} ingress rules")
+              if checked == 0:
+                  sys.exit('ERROR: nothing checked')
+              if not findings:
+                  print('no one-sided allows')
+                  return
+              for (d, pol), pairs in sorted(findings.items()):
+                  side = 'egress without server ingress' if d == 'egress' else 'ingress without client egress'
+                  print(f"\n{pol}: {side} ({len(pairs)})")
+                  for x in sorted(pairs)[:10]:
+                      print(f"  {x}")
+                  if len(pairs) > 10:
+                      print(f"  ... {len(pairs) - 10} more")
+              sys.exit(1)
+
+
+          if __name__ == '__main__':
+              main()
+---
+apiVersion: argoproj.io/v1alpha1
+kind: CronWorkflow
+metadata:
+  name: cnp-pair-audit
+  namespace: argo
+spec:
+  schedules:
+    - "30 10 * * *"
+  timezone: Asia/Tokyo
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 600
+  workflowSpec:
+    workflowTemplateRef:
+      name: cnp-pair-audit

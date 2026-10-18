@@ -1,0 +1,19 @@
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: cnp-pair-audit
+  namespace: argo
+spec:
+  endpointSelector:
+    matchLabels:
+      cnp-pair-audit: "true"
+  ingressDeny:
+    - fromEntities:
+        - world
+  egress:
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "6443"
+              protocol: TCP

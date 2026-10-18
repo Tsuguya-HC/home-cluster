@@ -1,0 +1,92 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: cilium
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: cilium
+      rules:
+        # agent の起動直後は全 endpoint の再生成が重なり、DNS 応答の datapath 待ちが一時的に延びる。
+        # 起動から 15 分は対象外にする。
+        - alert: CiliumDNSProxyDatapathSlow
+          expr: |
+            (
+              sum by (node) (increase(cilium_proxy_upstream_reply_seconds_count{scope="dataplaneTime"}[15m]))
+              -
+              sum by (node) (increase(cilium_proxy_upstream_reply_seconds_bucket{scope="dataplaneTime",le="0.5"}[15m]))
+            ) > 0
+            and on (node)
+            (
+              time() - max by (node) (
+                kube_pod_container_state_started{namespace="kube-system",container="cilium-agent"}
+                * on (namespace, pod) group_left (node) kube_pod_info{namespace="kube-system"}
+              )
+            ) > 900
+          labels:
+            severity: warning
+          annotations:
+            summary: "Cilium の DNS プロキシで datapath の更新待ちが 0.5 秒を超えた ({{ $labels.node }})"
+            description: "{{ $labels.node }} で直近 15 分に、解決した IP の datapath への反映待ちが 0.5 秒を超えた DNS 応答が {{ $value | humanize }} 件ある。上限を超えると toFQDNs で許可した宛先への最初の接続が落ちる。agent ログの `Timed out waiting for datapath updates of FQDN IP information` と hubble の drop を突き合わせる。"
+
+        - alert: CiliumBPFMapPressureHigh
+          expr: |
+            max by (node, map_name) (cilium_bpf_map_pressure) > 0.9
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Cilium の BPF map {{ $labels.map_name }} が 90% を超えている ({{ $labels.node }})"
+            description: "{{ $labels.node }} の BPF map {{ $labels.map_name }} の使用率が {{ $value | humanizePercentage }}。満杯になると新しい接続や endpoint が黙って落ちる。"
+
+        - alert: CiliumControllersFailing
+          expr: |
+            max by (node) (cilium_controllers_failing) > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Cilium agent の controller が失敗し続けている ({{ $labels.node }})"
+            description: "{{ $labels.node }} で失敗中の controller が {{ $value }} 個ある。`kubectl -n kube-system exec <cilium pod> -c cilium-agent -- cilium-dbg status --all-controllers` で失敗しているものと理由を確認する。"
+
+        - alert: CiliumEndpointsNotReady
+          expr: |
+            sum by (node, endpoint_state) (
+              cilium_endpoint_state{endpoint_state!~"ready|regenerating|waiting-to-regenerate"}
+            ) > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Cilium の endpoint が {{ $labels.endpoint_state }} のまま ({{ $labels.node }})"
+            description: "{{ $labels.node }} で {{ $labels.endpoint_state }} の endpoint が 15 分以上 {{ $value }} 個ある。該当 Pod の通信は policy が当たらないか届かない。`cilium-dbg endpoint list` で確認する。"
+
+        - alert: CiliumEndpointRegenerationFailed
+          expr: |
+            sum by (node) (increase(cilium_endpoint_regenerations_total{outcome="fail"}[15m])) > 0
+          labels:
+            severity: warning
+          annotations:
+            summary: "Cilium の endpoint の再生成が失敗した ({{ $labels.node }})"
+            description: "{{ $labels.node }} で直近 15 分に endpoint の再生成が失敗した。失敗した endpoint には古い policy が残る。agent ログで regeneration の失敗理由を確認する。"
+
+        - alert: CiliumPolicyImportFailed
+          expr: |
+            sum by (node) (increase(cilium_policy_change_total{outcome="fail"}[15m])) > 0
+          labels:
+            severity: warning
+          annotations:
+            summary: "Cilium が network policy の取り込みに失敗した ({{ $labels.node }})"
+            description: "{{ $labels.node }} の agent が直近 15 分に policy の取り込みに失敗した。その CNP は適用されていない。agent ログと `kubectl get cnp -A` の status を確認する。"
+
+        - alert: CiliumHealthEndpointsUnreachable
+          expr: |
+            max by (node) (cilium_unreachable_health_endpoints) > 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Cilium のノード間の疎通確認が失敗している ({{ $labels.node }})"
+            description: "{{ $labels.node }} から {{ $value }} 個の health endpoint に届かない。ノード間の経路（WireGuard / VXLAN）を確認する。`cilium-dbg status --verbose` の Cluster health を見る。"

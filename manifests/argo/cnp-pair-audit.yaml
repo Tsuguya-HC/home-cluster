@@ -141,6 +141,38 @@ spec:
                        'fromEndpoints', 'fromEntities', 'fromCIDR', 'fromCIDRSet', 'fromGroups', 'fromNodes', 'fromRequires'}
 
 
+          def ns_admitted(sel, ns):
+              if ns is None:
+                  return True
+              v = (sel.get('matchLabels') or {}).get(NSK)
+              if v is not None:
+                  return v == ns
+              for e in sel.get('matchExpressions') or []:
+                  if e['key'] != NSK:
+                      continue
+                  if e['operator'] == 'In' and ns not in e.get('values', []): return False
+                  if e['operator'] == 'NotIn' and ns in e.get('values', []): return False
+                  if e['operator'] == 'DoesNotExist': return False
+              return True
+
+
+          def may_overlap(rule, sel, pods):
+              # A cluster-wide policy counts only through a running pod it shares with the grant.
+              if rule['ns'] is None:
+                  return any(match(rule['subj'], p['labels']) and match(sel, p['labels']) for p in pods)
+              if not ns_admitted(sel, rule['ns']):
+                  return False
+              a, b = rule['subj'].get('matchLabels') or {}, sel.get('matchLabels') or {}
+              return all(a[k] == b[k] for k in a.keys() & b.keys())
+
+          def only_own_ns(sel, ns):
+              return (sel.get('matchLabels') or {}).get(NSK) == ns
+
+
+          def ns_label(sel):
+              return (sel.get('matchLabels') or {}).get(NSK) or 'any namespace'
+
+
           def ports_of(rule):
               out = []
               if rule.get('icmps') and not rule.get('toPorts'):
@@ -187,7 +219,7 @@ spec:
                   name = f"{ns + '/' if ns else 'ccnp/'}{p['metadata']['name']}"
                   for d, pk, ek in (('egress', 'toEndpoints', 'toEntities'), ('ingress', 'fromEndpoints', 'fromEntities')):
                       for r in sp.get(d) or []:
-                          rules[d].append({'pol': name, 'subj': subj,
+                          rules[d].append({'pol': name, 'ns': ns, 'subj': subj,
                                            'broad': bool(BROAD & set(r.get(ek) or [])) or not PEER_KEYS & set(r),
                                            'peers': [peer_sel(s, ns) for s in r.get(pk) or []], 'ports': ports_of(r)})
 
@@ -214,25 +246,39 @@ spec:
 
               findings = defaultdict(set)
               checked = 0
-              for d in ('egress', 'ingress'):
-                  for r in rules[d]:
-                      if not r['peers']:
-                          continue
-                      subjects = [p for p in pods if match(r['subj'], p['labels'])]
-                      peers = [p for p in pods if any(match(s, p['labels']) for s in r['peers'])]
-                      for s in subjects:
-                          for q in peers:
-                              if s['ns'] == q['ns']:
+              for r in rules['egress']:
+                  if not r['peers']:
+                      continue
+                  clients = [p for p in pods if match(r['subj'], p['labels'])]
+                  servers = [p for p in pods if any(match(s, p['labels']) for s in r['peers'])]
+                  for client in clients:
+                      for server in servers:
+                          if client['ns'] == server['ns']:
+                              continue
+                          for port, pname, proto in server['ports']:
+                              if not port_ok(r['ports'], port, pname, proto):
                                   continue
-                              client, server = (s, q) if d == 'egress' else (q, s)
-                              for port, pname, proto in server['ports']:
-                                  if not port_ok(r['ports'], port, pname, proto):
-                                      continue
-                                  checked += 1
-                                  other = 'ingress' if d == 'egress' else 'egress'
-                                  o_subj, o_peer = (server, client) if other == 'ingress' else (client, server)
-                                  if not allowed(other, o_subj, o_peer, port, pname, proto):
-                                      findings[(d, r['pol'])].add(f"{client['ns']}/{client['name']} -> {server['ns']}/{server['name']}:{port}")
+                              checked += 1
+                              if not allowed('ingress', server, client, port, pname, proto):
+                                  findings[('egress', r['pol'])].add(f"{client['ns']}/{client['name']} -> {server['ns']}/{server['name']}:{port}")
+              # Clients of an ingress grant are often short-lived pods, so whether the grant is used
+              # is judged from policies: some egress rule in an admitted namespace must open it.
+              for r in rules['ingress']:
+                  servers = [p for p in pods if match(r['subj'], p['labels'])]
+                  for sel in r['peers']:
+                      for server in servers:
+                          for port, pname, proto in server['ports']:
+                              if not port_ok(r['ports'], port, pname, proto):
+                                  continue
+                              if only_own_ns(sel, server['ns']):
+                                  continue
+                              users = [e for e in rules['egress']
+                                       if e['ns'] != server['ns'] and may_overlap(e, sel, pods)
+                                       and port_ok(e['ports'], port, pname, proto)
+                                       and (e['broad'] or any(match(t, server['labels']) for t in e['peers']))]
+                              checked += 1
+                              if not users:
+                                  findings[('ingress', r['pol'])].add(f"{ns_label(sel)} -> {server['ns']}/{server['name']}:{port}")
               print(f"checked {checked} client/server/port pairs from {len(rules['egress'])} egress and {len(rules['ingress'])} ingress rules")
               if checked == 0:
                   sys.exit('ERROR: nothing checked')
@@ -240,7 +286,7 @@ spec:
                   print('no one-sided allows')
                   return
               for (d, pol), pairs in sorted(findings.items()):
-                  side = 'egress without server ingress' if d == 'egress' else 'ingress without client egress'
+                  side = 'egress without server ingress' if d == 'egress' else 'ingress no admitted client uses'
                   print(f"\n{pol}: {side} ({len(pairs)})")
                   for x in sorted(pairs)[:10]:
                       print(f"  {x}")

@@ -1,0 +1,46 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../base
+nameSuffix: -eval
+patches:
+  - target: {kind: TaskHandler, name: decide}
+    patch: |-
+      - op: replace
+        path: /spec/phase
+        value: 評価
+      # 全件を 1 本で回し切れる大きさにする。PHASE_BUDGET_MS は timeout より短く。
+      - op: replace
+        path: /spec/timeout
+        value: 8h
+      # インフラ起因で再試行しない。
+      - op: replace
+        path: /spec/maxInfraRetries
+        value: 0
+      - op: test
+        path: /spec/jobTemplate/template/spec/volumes/1/name
+        value: scratch
+      - op: replace
+        path: /spec/jobTemplate/template/spec/volumes/1/emptyDir/sizeLimit
+        value: 1Gi
+      - op: test
+        path: /spec/jobTemplate/template/spec/containers/0/name
+        value: agent
+      - op: test
+        path: /spec/jobTemplate/template/spec/containers/0/env/12/name
+        value: PHASE_BUDGET_MS
+      - op: replace
+        path: /spec/jobTemplate/template/spec/containers/0/env/12/value
+        value: "27900000"
+      - op: replace
+        path: /spec/jobTemplate/template/spec/containers/0/args
+        value:
+          - |
+            set -u
+            chown 65533:65533 /scratch || {
+              mkdir -p /workspace/fail
+              printf '%s\n' "/scratch の所有者変更に失敗した。評価は行っていない。" > /workspace/fail/report.md
+              sync; exit 0
+            }
+            export AGENT_MODEL="$LLM_ALIAS"
+            exec node /opt/runner/dist/main.js run eval

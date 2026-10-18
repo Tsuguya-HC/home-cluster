@@ -1,0 +1,37 @@
+apiVersion: flow.tgy.io/v1alpha1
+kind: TaskFlow
+metadata:
+  name: decide
+spec:
+  profile: investigate
+  start: 判断
+  workspace: {}
+  ttl:
+    succeeded: 168h
+  bindings:
+    判断:
+      handler: decide
+      next:
+        完了: decided
+        TaskFailed: fail
+  terminals:
+    完了: Success
+---
+apiVersion: flow.tgy.io/v1alpha1
+kind: TaskFlow
+metadata:
+  name: eval
+spec:
+  profile: investigate
+  start: 評価
+  workspace: {}
+  ttl:
+    succeeded: 168h
+  bindings:
+    評価:
+      handler: decide-eval
+      next:
+        完了: evaluated
+        TaskFailed: fail
+  terminals:
+    完了: Success

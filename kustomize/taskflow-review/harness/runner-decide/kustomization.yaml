@@ -1,0 +1,20 @@
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+# executor は image をここで決めた値から写すので、executor の component より前に並べること。
+patches:
+  - target:
+      kind: TaskHandler
+      labelSelector: taskflow-role=decide
+    patch: |-
+      - op: add
+        path: /spec/jobTemplate/template/spec/imagePullSecrets
+        value:
+          - name: harbor-agents-pull
+      - op: test
+        path: /spec/jobTemplate/template/spec/containers/0/name
+        value: agent
+      # private プロジェクトのタグは Kyverno が digest に解決できず（401）Job ごと拒否されるので、
+      # digest で固定する。
+      - op: replace
+        path: /spec/jobTemplate/template/spec/containers/0/image
+        value: registry.infra.tgy.io/agents/runner:latest@sha256:ee34e8d459360f55c1e93af39e15d78240597bfdb1801f8b13cbd30de5ba95c7

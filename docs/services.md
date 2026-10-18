@@ -34,6 +34,20 @@ ArgoCD のみ TLS Passthrough（専用 argocd-gateway、ArgoCD 自身が TLS 終
 | SeaweedFS (S3) | seaweedfs-filer.seaweedfs.svc:8333 | S3 互換オブジェクトストレージ |
 | Valkey | valkey-master.nextcloud.svc:6379 | Nextcloud キャッシュ (Redis 互換) |
 
+## taskflow のアーカイブ（SeaweedFS `taskflow-archive`）
+
+taskflow のコントローラは、終わった Task の JSON と workspace の `results/`（封印された run の答え・報告・transcript）を、Task を消す前に送り役 Job でこのバケットへ PUT する（taskflow ADR-0015）。保持は 90 日（`helm-values/seaweedfs/values.yaml` の `ttl`。書き込み時に焼き込まれるので、変えても既に書いた物には効かない）。
+
+- **置き場所**: Task の `status.archive.location`（`s3://taskflow-archive/<namespace>/<flow>/<Task UID>/`）。中身は `task.json`、`results/…`、`manifest.json`（送らなかったファイルと理由）
+- **`status.archive.endpoint` はクラスタ内の Service 名**で、手元からは届かない。外からは `s3.infra.tgy.io` に読み替える
+- **読む経路**:
+  - ブラウザ: `https://seaweedfs.infra.tgy.io` の filer UI で `/buckets/taskflow-archive/` を開く
+  - CLI: `s3.infra.tgy.io` に、Admin か、このバケットの Read と List を持つ S3 identity で。例 `aws --endpoint-url https://s3.infra.tgy.io s3 ls s3://taskflow-archive/<namespace>/<flow>/<Task UID>/`
+- **読める人**: filer UI は Kanidm の `seaweedfs_users` グループ（filer UI は S3 の identity を見ないので、全バケットが見える）。S3 は Admin か Read を持つ identity の鍵を持つ人（一覧には List も要る）。送り役の identity `taskflow-archive` は Write だけで読めない
+- **中身の機密度**: private のリポを扱う Task の中身（issue 本文・コード片・transcript）も入る。送り役は秘密値の固定規則に当たったファイルを送らないが、規則に無い秘密値は送られる。読める人を広げるときはこれを前提にする
+- **資格情報**: Task が走る各 namespace の Secret `taskflow-archive-s3`（キー `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`）。値は private 側の tofu が生成して Secret に直接書く。このリポには置かない
+- **失敗に気づく**: `TaskFlowArchiveFailed` / `TaskFlowArchiveWithheld`（`manifests/monitoring/prometheusrule-taskflow.yaml`）。Task の `Archived` 条件と Warning Event `UploadFailed` にも出る
+
 ## データベース (shared-pg)
 
 | データベース | オーナー | 利用サービス |

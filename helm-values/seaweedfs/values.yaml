@@ -148,6 +148,11 @@ filer:
       - name: argo-artifacts
       - name: nextcloud
       - name: harbor
+      # TTL は書き込んだ時点で各オブジェクトに焼き込まれる。値を変えても既に書いた物の期限は
+      # 変わらない（延ばしても既存は元の期限で消える）。ttl の行を消しても filer に入った設定は
+      # 外れない — 外すには fs.configure -delete を手で打つ。
+      - name: taskflow-archive
+        ttl: 90d
       # private 利用者のバケットはここに書かない（名前を public に出さない）。
   extraEnvironmentVars:
     WEED_LEVELDB2_ENABLED: "false"

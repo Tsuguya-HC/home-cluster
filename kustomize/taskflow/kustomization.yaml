@@ -39,7 +39,7 @@ kind: Kustomization
 # 実測していない。この不確実性に賭けず、renovate.jsonc の packageRules で明示的に
 # enabled: false にして止めている。
 resources:
-  - https://github.com/Tsuguya-HC/taskflow//config/default?ref=32391deb90a0d6d71416cc7984ac7f0b4659bb55
+  - https://github.com/Tsuguya-HC/taskflow//config/default?ref=a6b7d3b7ccc105a9dc67407da3f70fdab8a63aaa
 
 # newTag と digest を分けて併記すると、Renovate の kustomize manager が
 # invalid-dependency-specification で抽出を捨て、digest が自動更新されなくなる
@@ -49,7 +49,7 @@ resources:
 images:
   - name: controller
     newName: registry.infra.tgy.io/tools/taskflow
-    newTag: latest@sha256:f997ea7e268a4c512fd853231d1cea29e755fc21ea6c1c244d390c1d32446867
+    newTag: latest@sha256:5fe9219eb119c1ebcf6d4be29aee875010fe994922e72433dac4bc91b1371cd9
 
 patches:
   # 全 namespace restricted 運用に合わせる（config/default の Namespace にはラベルが無い）
@@ -93,7 +93,7 @@ patches:
               - name: manager
                 env:
                   - name: SIDECAR_IMAGE
-                    value: registry.infra.tgy.io/tools/agent-sidecar:latest@sha256:0579b72d9a3892840d62431a191e6a5e14bcac1b5221a8ebfa9d30291c3240f6
+                    value: registry.infra.tgy.io/tools/agent-sidecar:latest@sha256:23914575dd08743c028c7c86914e6058f7e6da11db01bb401887d85f41ebd8d6
 
   # 送り役 Job は Task の namespace で動き、そこに Secret taskflow-archive-s3 と、送り側・filer の
   # 受け側の両方の CNP が要る。欠けた namespace の Task は記録が送られないまま消え、再送されない。

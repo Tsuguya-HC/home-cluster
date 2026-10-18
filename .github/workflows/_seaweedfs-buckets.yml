@@ -1,0 +1,26 @@
+name: seaweedfs buckets
+
+# scripts/seaweedfs-buckets.py を workflow_call で公開する leaf。オーケストレーターは
+# `Lint` (lint.yaml) で、必須チェックはそこの `CI Gate` 1 個だけ。直接のトリガーは
+# 持たない — leaf 自身が pull_request で起動すると、同じコミットに対して gate 経由の
+# 結果と重複した check run が並ぶ。
+on:
+  workflow_call:
+
+permissions: {}
+
+jobs:
+  seaweedfs-buckets:
+    name: seaweedfs buckets
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
+
+      - name: Check the createBuckets copy that triggers the bucket hook
+        run: python3 scripts/seaweedfs-buckets.py

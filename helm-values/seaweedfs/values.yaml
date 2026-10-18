@@ -185,3 +185,11 @@ filer:
 
 s3:
   enabled: false
+  annotations:
+    tgy.io/create-buckets: |
+      {"name": "loki-storage"}
+      {"name": "tempo-storage"}
+      {"name": "argo-artifacts"}
+      {"name": "nextcloud"}
+      {"name": "harbor"}
+      {"name": "taskflow-archive", "ttl": "90d"}

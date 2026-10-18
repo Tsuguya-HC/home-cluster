@@ -23,13 +23,14 @@ spec:
         - ports:
             - port: "6443"
               protocol: TCP
+    # インスタンスマネージャ（8000）。Cluster を置く namespace はどこでもよいので、namespace は限らず
+    # CNPG が付けるインスタンスのラベルで選ぶ（namespace の名前をここに並べない）。
     - toEndpoints:
         - matchLabels:
-            cnpg.io/cluster: shared-pg
-            io.kubernetes.pod.namespace: database
-        - matchLabels:
-            cnpg.io/cluster: rss-pg
-            io.kubernetes.pod.namespace: rss
+            cnpg.io/podRole: instance
+          matchExpressions:
+            - key: io.kubernetes.pod.namespace
+              operator: Exists
       toPorts:
         - ports:
             - port: "8000"

@@ -220,6 +220,17 @@ spec:
         - ports:
             - port: "9327"
               protocol: TCP
+    # CNPG のインスタンスの metrics。Cluster はどの namespace にも置けるので namespace は限らない。
+    - toEndpoints:
+        - matchLabels:
+            cnpg.io/podRole: instance
+          matchExpressions:
+            - key: io.kubernetes.pod.namespace
+              operator: Exists
+      toPorts:
+        - ports:
+            - port: "9187"
+              protocol: TCP
     - toEndpoints:
         - matchLabels:
             app.kubernetes.io/name: trivy-operator

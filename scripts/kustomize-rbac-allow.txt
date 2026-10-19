@@ -28,3 +28,6 @@ kustomize/taskflow::RoleBinding::taskflow-system/taskflow-leader-election-rolebi
 
 # 続きの判断を起こす CronJob（#1399）。claude-code-build の Task の読み取りと作成だけ。
 kustomize/taskflow-review::RoleBinding::claude-code-build/decide-continuation::Role/decide-continuation::ServiceAccount:claude-code-build/decide-continuation
+
+# 入口の判断を起こす CronJob。claude-code-build の Task の読み取りと作成だけ。
+kustomize/taskflow-review::RoleBinding::claude-code-build/decide-intake::Role/decide-intake::ServiceAccount:claude-code-build/decide-intake

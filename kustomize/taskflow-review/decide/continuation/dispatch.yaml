@@ -1,0 +1,116 @@
+# Task の spec.flow は RBAC では絞れない。decide 以外の Task を作らせない admission の検査が
+# この SA 名で照合しているので、SA 名を変えるときは揃える。
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: decide-continuation
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: decide-continuation
+rules:
+  - apiGroups: ["flow.tgy.io"]
+    resources: ["tasks"]
+    verbs: ["list", "create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: decide-continuation
+subjects:
+  - kind: ServiceAccount
+    name: decide-continuation
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: decide-continuation
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: decide-continuation
+spec:
+  schedule: "*/10 * * * *"
+  # 止めるときはここを true にして push する（kubectl patch は selfHeal が戻す）。
+  suspend: false
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 300
+      template:
+        metadata:
+          labels:
+            decide-continuation: "true"
+        spec:
+          serviceAccountName: decide-continuation
+          automountServiceAccountToken: true
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            seccompProfile:
+              type: RuntimeDefault
+          volumes:
+            - name: script
+              configMap:
+                name: decide-continuation
+            - name: github-gateway-key
+              secret:
+                secretName: github-gateway-client-keys
+                items:
+                  - key: taskflow-decide-continuation
+                    path: key
+            - name: tmp
+              emptyDir: {sizeLimit: 64Mi}
+          containers:
+            - name: dispatch
+              image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:aaf50f2677b5089678e8633d7f749f9d1009321fdc1fa9ae9fb9bceaed7a6bbd
+              command: [sh, /script/dispatch.sh]
+              env:
+                - {name: HOME, value: /tmp}
+                # 窓はスケジュールの間隔より十分長く。窓より前に終わった Task には作らない。
+                - {name: WINDOW_SECONDS, value: "10800"}
+                - {name: MAX_PER_RUN, value: "2"}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: [ALL]
+              volumeMounts:
+                - {name: script, mountPath: /script, readOnly: true}
+                - {name: github-gateway-key, mountPath: /github-gateway-key, readOnly: true}
+                - {name: tmp, mountPath: /tmp}
+              resources:
+                requests: {cpu: 10m, memory: 32Mi}
+                limits: {memory: 128Mi}
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: decide-continuation
+spec:
+  endpointSelector:
+    matchLabels:
+      decide-continuation: "true"
+  egress:
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "6443"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/managed-by: envoy-gateway
+            io.kubernetes.pod.namespace: llm-gateway
+      toPorts:
+        - ports:
+            - port: "10443"
+              protocol: TCP

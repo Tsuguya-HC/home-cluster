@@ -503,6 +503,7 @@ spec:
               --local context=/workspace \
               --local dockerfile=/workspace \
               --opt filename={{workflow.parameters.dockerfile}} \
+              --opt build-arg:RUNNER_VERSION={{inputs.parameters.sha}} \
               --output 'type=image,"name=registry.infra.tgy.io/{{workflow.parameters.project}}/{{workflow.parameters.image-name}}:{{inputs.parameters.sha}},registry.infra.tgy.io/{{workflow.parameters.project}}/{{workflow.parameters.image-name}}:latest",push=true' \
               --metadata-file /workspace/metadata.json
             jq -r '."containerimage.digest"' /workspace/metadata.json > /workspace/digest

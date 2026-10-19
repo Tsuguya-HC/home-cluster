@@ -1,0 +1,34 @@
+# 入口の判断を起こす SA には、decide 以外の flow の Task と、intake- で始まらない名前の Task を作らせない。
+# 名前を絞るのは、続きの判断の decide-<implement 名> を先に取らせないため。
+# 照合する username は SA 名から組む。SA 名を変えるときは揃える（ずれると検査が黙って外れる）。
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: decide-intake
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: claude-code-build
+    resourceRules:
+      - apiGroups: ["flow.tgy.io"]
+        apiVersions: ["*"]
+        operations: ["CREATE"]
+        resources: ["tasks"]
+  matchConditions:
+    - name: dispatcher
+      expression: request.userInfo.username == "system:serviceaccount:claude-code-build:decide-intake"
+  validations:
+    - expression: object.spec.flow == "decide"
+      message: decide-intake may create only Tasks of flow decide
+    - expression: object.metadata.name.startsWith("intake-")
+      message: decide-intake may create only Tasks named intake-*
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: decide-intake
+spec:
+  policyName: decide-intake
+  validationActions: [Deny]

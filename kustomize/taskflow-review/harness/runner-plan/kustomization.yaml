@@ -42,7 +42,7 @@ patches:
       # digest で固定する。
       - op: replace
         path: /spec/jobTemplate/template/spec/containers/0/image
-        value: registry.infra.tgy.io/agents/runner:latest@sha256:f75f1dab27f8a740d8c5ef3f24a61fad912f0d3c41f9e9893da090a871e74e6a
+        value: registry.infra.tgy.io/agents/runner:latest@sha256:a0e5bcc61b860740f59690f6d091cdf75e1ec3bcbfc656968a572e1aa5968e78
       - op: replace
         path: /spec/jobTemplate/template/spec/containers/0/command
         value: [node, /opt/runner/dist/main.js, run, plan]

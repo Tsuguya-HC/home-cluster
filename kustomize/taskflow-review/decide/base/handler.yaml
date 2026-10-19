@@ -79,7 +79,7 @@ spec:
               limits: {memory: 64Mi}
         containers:
           - name: agent
-            image: registry.infra.tgy.io/agents/runner@sha256:dcd606919e02645cf617729bf57853a2cc6544f31dd49218a1bf022488116188
+            image: registry.infra.tgy.io/agents/runner@sha256:3a0290a9bb58e2ac1bfa8b224548f0dd7d6d9e9f8c636189ee97b125f02f19b0
             workingDir: /workspace
             command: [bash, -c]
             args:

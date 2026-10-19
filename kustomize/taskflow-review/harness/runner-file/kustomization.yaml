@@ -131,6 +131,9 @@ patches:
         value: {name: GITHUB_GATEWAY_HOST, value: gh-rw.infra.tgy.io}
       - op: add
         path: /spec/jobTemplate/template/spec/containers/0/env/-
+        value: {name: GITHUB_TRUSTED_USER_IDS, value: "6055622"}
+      - op: add
+        path: /spec/jobTemplate/template/spec/containers/0/env/-
         value: {name: GITHUB_KEY_FILE, value: /github-token/token}
       # issue の作成・追記・ラベルの追加だけ。数え直しはこの App の名義で数えるので、ほかの書き込みをこの鍵で送らないこと。
       - op: add

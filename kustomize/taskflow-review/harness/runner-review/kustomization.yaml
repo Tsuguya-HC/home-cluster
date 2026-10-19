@@ -123,6 +123,9 @@ patches:
       - op: add
         path: /spec/jobTemplate/template/spec/containers/0/env/-
         value: {name: GITHUB_GATEWAY_HOST, value: gh-ro.infra.tgy.io}
+      - op: add
+        path: /spec/jobTemplate/template/spec/containers/0/env/-
+        value: {name: GITHUB_TRUSTED_USER_IDS, value: "6055622"}
       # Job の timeout より短く。
       - op: add
         path: /spec/jobTemplate/template/spec/containers/0/env/-

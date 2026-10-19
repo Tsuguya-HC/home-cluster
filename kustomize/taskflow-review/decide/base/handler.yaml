@@ -111,6 +111,8 @@ spec:
               - {name: GITHUB_GATEWAY_HOST, value: gh-ro.infra.tgy.io}
               # Job の timeout より短く。
               - {name: PHASE_BUDGET_MS, value: "1500000"}
+              # PR に結果を書く App の数値 ID。ここに無い App のコメントは続きの判断の材料から黙って落ちる。
+              - {name: GITHUB_TRUSTED_APP_IDS, value: "5009499,5085096"}
             securityContext:
               runAsUser: 0
               allowPrivilegeEscalation: false

@@ -33,6 +33,7 @@ data:
     taskflow-implement-parts ro claude-code-build/github-gateway-client-keys/taskflow-implement-parts
     taskflow-investigate ro claude-code-build/github-gateway-client-keys/taskflow-investigate
     taskflow-review ro claude-code-build/github-gateway-client-keys/taskflow-review
+    taskflow-decide-continuation ro claude-code-build/github-gateway-client-keys/taskflow-decide-continuation
     taskflow-review-comment rw claude-code-build/github-gateway-client-keys/taskflow-review-comment
     taskflow-file issues claude-code-build/github-gateway-client-keys/taskflow-file
 ---

@@ -1,5 +1,4 @@
 #!/bin/sh
-# 終わった implement の Task ごとに、続きの判断の Task を 1 本作る（#1399）。
 # 作る Task の名前は decide-<implement の Task 名>。同名が既にあれば作らない（二重起動の防止）。
 set -eu
 

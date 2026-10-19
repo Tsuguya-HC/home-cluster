@@ -1,4 +1,3 @@
-# 続きの判断の Task を起こす（#1399）。
 # Task の spec.flow は RBAC では絞れない。decide 以外の Task を作らせない admission の検査が
 # この SA 名で照合しているので、SA 名を変えるときは揃える。
 apiVersion: v1
@@ -14,7 +13,7 @@ metadata:
 rules:
   - apiGroups: ["flow.tgy.io"]
     resources: ["tasks"]
-    verbs: ["get", "list", "watch", "create"]
+    verbs: ["list", "create"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

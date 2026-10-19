@@ -1,11 +1,11 @@
 #!/bin/sh
 # 作る Task の名前は intake-<issue の id>。同名が既にあれば作らない（二重起動の防止）。
-set -eu
+set -euf
 
 NS=claude-code-build
 OWNER=Tsuguya-HC
 L=decide.tgy.io
-: "${WINDOW_SECONDS:?}" "${NOT_BEFORE:?}" "${MAX_PER_RUN:?}" "${MAX_PER_DAY:?}" "${ISSUER_APP_ID:?}"
+: "${WINDOW_SECONDS:?}" "${NOT_BEFORE:?}" "${MAX_PER_RUN:?}" "${MAX_PER_DAY:?}" "${ISSUER_USER_ID:?}"
 
 KEY=$(cat /github-gateway-key/key)
 [ -n "$KEY" ] || { echo "GitHub の鍵が空だった。" >&2; exit 1; }
@@ -42,25 +42,14 @@ while :; do
   fi
 done
 
-# Bot の login は <App の slug>[bot] で、人の login には [ ] が使えない。slug から App の id を引いて比べる。
-: > /tmp/apps
-for login in $(jq -r 'select(.user.type == "Bot") | .user.login' /tmp/found.jsonl | sort -u); do
-  slug=${login%"[bot]"}
-  case "$slug" in
-    "$login" | '' | *[!a-z0-9-]*) continue ;;
-  esac
-  if ! id=$(gh api "apps/${slug}" --jq '.id'); then
-    echo "App ${slug} を引けなかった。" >&2
-    exit 1
-  fi
-  [ "$id" = "$ISSUER_APP_ID" ] && printf '%s\n' "$login" >> /tmp/apps
-done
-apps=$(jq -Rn '[inputs]' /tmp/apps)
-
 # 非公開の org メンバーは、members の権限を持たない鍵からは author_association が OWNER / MEMBER に見えない。
 # 見えなかった人は、そのリポに write 以上の権限があるかで判定する（public リポは誰でも read が返る）。
 : > /tmp/writers
-jq -r 'select(.user.type == "User" and (.author_association | IN("OWNER", "MEMBER", "COLLABORATOR") | not))
+jq -r --argjson since "$since" --slurpfile tasks /tmp/tasks.json '
+  [$tasks[0].items[].metadata.name] as $have
+  | select(.pull_request == null and (.created_at | fromdateiso8601) >= $since)
+  | select(("intake-" + (.id | tostring)) as $n | any($have[]; . == $n) | not)
+  | select(.user.type == "User" and (.author_association | IN("OWNER", "MEMBER", "COLLABORATOR") | not))
   | "\(.repository_url | capture("/repos/(?<r>[^/]+/[^/]+)$").r) \(.user.login)"' /tmp/found.jsonl | sort -u > /tmp/pairs
 while read -r repo login; do
   case "$repo" in
@@ -69,7 +58,12 @@ while read -r repo login; do
     *) continue ;;
   esac
   case "$login" in '' | *[!-A-Za-z0-9]*) continue ;; esac
-  if ! perm=$(gh api "repos/${repo}/collaborators/${login}/permission" --jq '.permission'); then
+  if ! perm=$(gh api "repos/${repo}/collaborators/${login}/permission" --jq '.permission' 2> /tmp/perm.err); then
+    if grep -q 'HTTP 404' /tmp/perm.err; then
+      echo "${repo} の ${login} の権限は 404 だった。write 以上ではないとして扱う。"
+      continue
+    fi
+    cat /tmp/perm.err >&2
     echo "${repo} の ${login} の権限を引けなかった。" >&2
     exit 1
   fi
@@ -83,31 +77,33 @@ def repo: .repository_url | capture("/repos/(?<r>[^/]+/[^/]+)$").r;
 def permission($writers):
   (repo | ascii_downcase) as $r | .user.login as $u
   | first($writers[] | select((.repo | ascii_downcase) == $r and .login == $u) | .permission) // null;
-def author($apps; $writers):
+def author($issuer; $writers):
   if .user.type == "Bot" then
-    (if (.user.login | endswith("[bot]") and IN($apps[])) then "app" else null end)
+    (if .user.id == $issuer then "app" else null end)
   elif .user.type != "User" then null
   elif (.author_association | IN("OWNER", "MEMBER", "COLLABORATOR")) then "human"
   elif permission($writers) != null then "human"
   else null end;
 EOF
 
-jq -s -c --argjson since "$since" --argjson apps "$apps" --argjson writers "$writers" '
+# 作者を判定するのは、まだ Task が無い issue だけ（権限を引いたのもそれだけ）。
+jq -s -c --argjson since "$since" --argjson issuer "$ISSUER_USER_ID" --argjson writers "$writers" --slurpfile tasks /tmp/tasks.json '
   include "author"; . as $all
+  | [$tasks[0].items[].metadata.name] as $have
   | [.[] | select(.pull_request == null and (.created_at | fromdateiso8601) >= $since)] as $issues
+  | [$issues[] | select(("intake-" + (.id | tostring)) as $n | any($have[]; . == $n) | not)] as $new
   | {
       found: ($all | length),
       prs: ([$all[] | select(.pull_request != null)] | length),
-      authors: ([$issues[] | select(author($apps; $writers) == null) | "\(.user.login)(\(.author_association))"] | group_by(.) | map("\(.[0])×\(length)")),
-      issues: [$issues[] | select(author($apps; $writers) != null)
+      existing: (($issues | length) - ($new | length)),
+      authors: ([$new[] | select(author($issuer; $writers) == null) | "\(.user.login)(\(.author_association))"] | group_by(.) | map("\(.[0])×\(length)")),
+      issues: [$new[] | select(author($issuer; $writers) != null)
         | {id, number, created_at, repo: repo}]
     }' -L /tmp /tmp/found.jsonl > /tmp/summary.json
 
-jq -c --slurpfile tasks /tmp/tasks.json '
-  [$tasks[0].items[].metadata.name] as $have
-  | .issues[] | select(("intake-" + (.id | tostring)) as $n | any($have[]; . == $n) | not)' /tmp/summary.json > /tmp/candidates
+jq -c '.issues[]' /tmp/summary.json > /tmp/candidates
 
-echo "24 時間に作った Task ${today} 本 / 窓 ${since_iso} から検索 $(jq .found /tmp/summary.json) 件（うち PR $(jq .prs /tmp/summary.json) 件は外す）/ 対象 $(jq '.issues | length' /tmp/summary.json) 件 / 未作成 $(wc -l < /tmp/candidates) 件。"
+echo "24 時間に作った Task ${today} 本 / 窓 ${since_iso} から検索 $(jq .found /tmp/summary.json) 件（うち PR $(jq .prs /tmp/summary.json) 件は外す）/ Task 作成済み $(jq .existing /tmp/summary.json) 件 / 未作成で対象 $(wc -l < /tmp/candidates) 件。"
 if [ "$(jq '.authors | length' /tmp/summary.json)" -gt 0 ]; then
   echo "作者で外した: $(jq -r '.authors | join(", ")' /tmp/summary.json)"
 fi
@@ -140,7 +136,7 @@ while read -r line; do
     failed=1
     continue
   fi
-  kind=$(jq -r --argjson apps "$apps" --argjson writers "$writers" -L /tmp 'include "author"; author($apps; $writers) // empty' /tmp/issue.json)
+  kind=$(jq -r --argjson issuer "$ISSUER_USER_ID" --argjson writers "$writers" -L /tmp 'include "author"; author($issuer; $writers) // empty' /tmp/issue.json)
   if [ "$(jq -r '.id' /tmp/issue.json)" != "$id" ] || [ "$(jq '.pull_request != null' /tmp/issue.json)" = true ] || [ -z "$kind" ]; then
     echo "${repo}#${number}: 引き直すと対象から外れた。作らない。"
     continue

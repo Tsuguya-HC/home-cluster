@@ -35,6 +35,7 @@ data:
     taskflow-review ro claude-code-build/github-gateway-client-keys/taskflow-review
     taskflow-decide-continuation ro claude-code-build/github-gateway-client-keys/taskflow-decide-continuation
     taskflow-decide-intake ro claude-code-build/github-gateway-client-keys/taskflow-decide-intake
+    taskflow-decide-flow ro claude-code-build/github-gateway-client-keys/taskflow-decide-flow
     taskflow-review-comment rw claude-code-build/github-gateway-client-keys/taskflow-review-comment
     taskflow-file issues claude-code-build/github-gateway-client-keys/taskflow-file
 ---

@@ -16,6 +16,8 @@ resources:
   - flows/decide
   - decide/continuation
   - decide/intake
+  - decide/flow
+  - decide/lib
 
 # TaskHandler は CRD なので、kustomize は中の ConfigMap 参照を書き換えない。
 # ハッシュを付けると参照が切れる。

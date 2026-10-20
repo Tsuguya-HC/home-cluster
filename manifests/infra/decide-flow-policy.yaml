@@ -1,0 +1,55 @@
+# 入口の判断から implement の Task を作る SA には、implement-intake-<id> の名前で、元の判断の Task を
+# ラベルに持ち、入力が org 配下の {repo, issue} だけで dedupKey の無い implement の Task しか作らせない。
+# ラベルを縛るのは、1 日の上限がこのラベルで数えているため（外した Task は数えられない）。
+# 照合する username は SA 名から組む。SA 名を変えるときは揃える（ずれると検査が黙って外れる）。
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: decide-flow
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: claude-code-build
+    resourceRules:
+      - apiGroups: ["flow.tgy.io"]
+        apiVersions: ["*"]
+        operations: ["CREATE"]
+        resources: ["tasks"]
+  matchConditions:
+    - name: dispatcher
+      expression: request.userInfo.username == "system:serviceaccount:claude-code-build:decide-flow"
+  validations:
+    - expression: object.spec.flow == "implement"
+      message: decide-flow may create only Tasks of flow implement
+    - expression: object.metadata.name.matches("^implement-intake-[0-9]+$")
+      message: decide-flow may create only Tasks named implement-intake-<id>
+    - expression: >-
+        has(object.metadata.labels) &&
+        "decide.tgy.io/stage" in object.metadata.labels &&
+        object.metadata.labels["decide.tgy.io/stage"] == "flow" &&
+        "decide.tgy.io/decision" in object.metadata.labels &&
+        "implement-" + object.metadata.labels["decide.tgy.io/decision"] == object.metadata.name &&
+        "decide.tgy.io/author" in object.metadata.labels &&
+        object.metadata.labels["decide.tgy.io/author"] in ["human", "app"]
+      message: decide-flow must label its Tasks with stage flow, the decision Task they came from and the author kind
+    - expression: "!has(object.spec.dedupKey)"
+      message: decide-flow may not set dedupKey
+    - expression: >-
+        has(object.spec.input) && type(object.spec.input) == map &&
+        object.spec.input.size() == 2 &&
+        "repo" in object.spec.input && "issue" in object.spec.input &&
+        type(object.spec.input.repo) == string &&
+        object.spec.input.repo.matches("^Tsuguya-HC/[A-Za-z0-9._-]+$") &&
+        !(object.spec.input.repo in ["Tsuguya-HC/.", "Tsuguya-HC/.."]) &&
+        type(object.spec.input.issue) == int && object.spec.input.issue > 0
+      message: decide-flow may pass only {repo, issue} of a Tsuguya-HC repository as input
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: decide-flow
+spec:
+  policyName: decide-flow
+  validationActions: [Deny]

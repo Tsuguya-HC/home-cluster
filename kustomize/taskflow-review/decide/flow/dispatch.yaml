@@ -34,6 +34,8 @@ metadata:
 spec:
   schedule: "8-59/10 * * * *"
   # 止めるときはここを true にして push する（kubectl patch は selfHeal が戻す）。
+  # 作った implement の Task を消しても、判断から窓の時間が経つまでは次の回で作り直す。1 本だけ止めるときは
+  # issue にコメントするか本文を直す（updated_at が進む）か、issue を閉じる。
   suspend: false
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 300

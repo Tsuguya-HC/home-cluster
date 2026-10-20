@@ -1,5 +1,5 @@
 # 入口の判断から implement の Task を作る SA には、implement-intake-<id> の名前で、元の判断の Task を
-# ラベルに持ち、入力が org 配下の {repo, issue} だけの implement の Task しか作らせない。
+# ラベルに持ち、入力が org 配下の {repo, issue} だけで dedupKey の無い implement の Task しか作らせない。
 # ラベルを縛るのは、1 日の上限がこのラベルで数えているため（外した Task は数えられない）。
 # 照合する username は SA 名から組む。SA 名を変えるときは揃える（ずれると検査が黙って外れる）。
 apiVersion: admissionregistration.k8s.io/v1
@@ -30,8 +30,12 @@ spec:
         "decide.tgy.io/stage" in object.metadata.labels &&
         object.metadata.labels["decide.tgy.io/stage"] == "flow" &&
         "decide.tgy.io/decision" in object.metadata.labels &&
-        "implement-" + object.metadata.labels["decide.tgy.io/decision"] == object.metadata.name
-      message: decide-flow must label its Tasks with stage flow and the decision Task they came from
+        "implement-" + object.metadata.labels["decide.tgy.io/decision"] == object.metadata.name &&
+        "decide.tgy.io/author" in object.metadata.labels &&
+        object.metadata.labels["decide.tgy.io/author"] in ["human", "app"]
+      message: decide-flow must label its Tasks with stage flow, the decision Task they came from and the author kind
+    - expression: "!has(object.spec.dedupKey)"
+      message: decide-flow may not set dedupKey
     - expression: >-
         has(object.spec.input) && type(object.spec.input) == map &&
         object.spec.input.size() == 2 &&

@@ -94,9 +94,20 @@ while read -r line; do
   case "$number" in '' | 0* | *[!0-9]*) echo "${name}: spec.input.issue が数字ではない。作らない。"; continue ;; esac
   case "$id" in '' | *[!0-9]*) echo "${name}: 名前の id が数字ではない。作らない。"; continue ;; esac
 
-  if ! gh api "repos/${repo}/issues/${number}" > /tmp/issue.json; then
+  # 消えた・移された issue は窓が閉じるまで毎回同じ結果になるので、失敗にせず先へ進む。移された issue は
+  # gh が転送先を追い、gateway の外（api.github.com）へ出ようとして落ちる。
+  if ! gh api "repos/${repo}/issues/${number}" > /tmp/issue.json 2> /tmp/issue.err; then
+    if grep -Eq 'HTTP (301|404|410)|api\.github\.com' /tmp/issue.err; then
+      echo "${name}: ${repo}#${number} は消えたか移された（$(tr '\n' ' ' < /tmp/issue.err | cut -c1-200)）。作らない。"
+      continue
+    fi
+    cat /tmp/issue.err >&2
     echo "${name}: ${repo}#${number} を引けなかった。" >&2
     failed=1
+    continue
+  fi
+  if [ "$(jq -r '.repository_url | capture("/repos/(?<r>[^/]+/[^/]+)$").r | ascii_downcase' /tmp/issue.json)" != "$(printf '%s' "$repo" | tr '[:upper:]' '[:lower:]')" ]; then
+    echo "${name}: ${repo}#${number} は別のリポに移された。作らない。"
     continue
   fi
   if [ "$(jq -r '.id' /tmp/issue.json)" != "$id" ] || [ "$(jq '.pull_request != null' /tmp/issue.json)" = true ]; then
@@ -160,9 +171,10 @@ while read -r line; do
     continue
   fi
 
-  # issue を閉じる・参照する PR。画面から紐付けた PR は connected、題・本文・コメントで触れた PR は
-  # cross-referenced として timeline に残る。cross-referenced は題と本文で触れたものだけ数える
-  # （コメントで触れただけの PR まで数えると、起票の報告を受けた issue が流れない）。
+  # issue を閉じる・参照する PR と commit。画面から紐付けた PR は connected、題・本文・コメントで触れた PR は
+  # cross-referenced、メッセージで触れた commit は referenced として timeline に残る（commit は issue の
+  # updated_at を進めない）。cross-referenced は題と本文で触れたものだけ数える（コメントで触れただけの PR
+  # まで数えると、起票の報告を受けた issue が流れない）。
   if ! fetch_all "repos/${repo}/issues/${number}/timeline" > /tmp/timeline.json; then
     echo "${name}: ${repo}#${number} の timeline を引けなかった。" >&2
     failed=1
@@ -176,11 +188,14 @@ while read -r line; do
           or ($text | test("(^|[^a-z0-9._-])" + ($r | gsub("\\."; "\\.")) + "(#|/issues/)" + $n + "([^0-9]|$)"));
       [.[]
         | select(.event == "connected"
+            or (.event == "referenced" and .commit_id != null)
             or (.event == "cross-referenced" and .source.issue.pull_request != null and (.source.issue | names_issue)))
-        | if .event == "connected" then "connected" else "\(.source.issue.repository.full_name // "")#\(.source.issue.number)" end]
+        | if .event == "connected" then "connected"
+          elif .event == "referenced" then "commit " + .commit_id[0:12]
+          else "\(.source.issue.repository.full_name // "")#\(.source.issue.number)" end]
     | unique | join(" ")' /tmp/timeline.json)
   if [ -n "$refs" ]; then
-    echo "${name}: ${repo}#${number} を閉じる・参照する PR がある（${refs}）。作らない。"
+    echo "${name}: ${repo}#${number} を閉じる・参照する PR か commit がある（${refs}）。作らない。"
     continue
   fi
 

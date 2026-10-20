@@ -38,6 +38,8 @@ spec:
   workspace: {}
   # 完了した Task の棚と workspace は Task と一緒に消える。後から PR の経緯や
   # 提出の記録を調べられるよう、完了も 1 日は残す。
+  # 成功の TTL は decide-flow の窓（6h）より短くしない（消えた Task を作り直す）。decide-flow の 1 日の上限は
+  # 作った Task が作成から 24h 残ることに頼っているので、24h より短くもしない。
   ttl:
     succeeded: 24h
   bindings:

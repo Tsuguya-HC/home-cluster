@@ -117,9 +117,20 @@ while read -r line; do
   case "$id" in '' | *[!0-9]*) echo "${repo}#${number}: id が数字ではない。作らない。"; continue ;; esac
 
   # 記録する state と updated_at は作る時点のもの。検索の索引は遅れるので REST で引き直す。
-  if ! gh api "repos/${repo}/issues/${number}" > /tmp/issue.json; then
+  # 消えた・移された issue は検索の索引から落ちるまで毎回同じ結果になるので、失敗にせず先へ進む。移された
+  # issue は gh が転送先を追い、gateway の外（api.github.com）へ出ようとして落ちる。
+  if ! gh api "repos/${repo}/issues/${number}" > /tmp/issue.json 2> /tmp/issue.err; then
+    if grep -Eq 'HTTP (301|404|410)|api\.github\.com' /tmp/issue.err; then
+      echo "${repo}#${number}: issue は消えたか移された（$(tr '\n' ' ' < /tmp/issue.err | cut -c1-200)）。作らない。"
+      continue
+    fi
+    cat /tmp/issue.err >&2
     echo "${repo}#${number}: issue を引けなかった。" >&2
     failed=1
+    continue
+  fi
+  if [ "$(jq -r '.repository_url | capture("/repos/(?<r>[^/]+/[^/]+)$").r | ascii_downcase' /tmp/issue.json)" != "$(printf '%s' "$repo" | tr '[:upper:]' '[:lower:]')" ]; then
+    echo "${repo}#${number}: issue は別のリポに移された。作らない。"
     continue
   fi
   kind=$(jq -r --argjson issuer "$ISSUER_USER_ID" --argjson writers "$writers" -L /decide-lib 'include "author"; author($issuer; $writers) // empty' /tmp/issue.json)

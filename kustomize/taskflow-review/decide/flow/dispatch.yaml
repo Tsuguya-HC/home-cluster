@@ -1,0 +1,125 @@
+# Task の spec.flow・名前・入力は RBAC では絞れない。implement の決まった名前と {repo, issue} に限る
+# admission の検査がこの SA 名で照合しているので、SA 名を変えるときは揃える。
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: decide-flow
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: decide-flow
+rules:
+  - apiGroups: ["flow.tgy.io"]
+    resources: ["tasks"]
+    verbs: ["list", "create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: decide-flow
+subjects:
+  - kind: ServiceAccount
+    name: decide-flow
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: decide-flow
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: decide-flow
+spec:
+  schedule: "8-59/10 * * * *"
+  # 止めるときはここを true にして push する（kubectl patch は selfHeal が戻す）。
+  suspend: false
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 300
+      template:
+        metadata:
+          labels:
+            decide-flow: "true"
+        spec:
+          serviceAccountName: decide-flow
+          automountServiceAccountToken: true
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            seccompProfile:
+              type: RuntimeDefault
+          volumes:
+            - name: script
+              configMap:
+                name: decide-flow
+            - name: lib
+              configMap:
+                name: decide-lib
+            - name: github-gateway-key
+              secret:
+                secretName: github-gateway-client-keys
+                items:
+                  - key: taskflow-decide-flow
+                    path: key
+            - name: tmp
+              emptyDir: {sizeLimit: 64Mi}
+          containers:
+            - name: dispatch
+              image: registry.infra.tgy.io/tools/argo-tools:latest@sha256:aaf50f2677b5089678e8633d7f749f9d1009321fdc1fa9ae9fb9bceaed7a6bbd
+              command: [sh, /script/dispatch.sh]
+              env:
+                - {name: HOME, value: /tmp}
+                # implement の Task の成功 TTL より十分短く。長いと Task が消えた issue にもう一度作る。
+                - {name: WINDOW_SECONDS, value: "21600"}
+                - {name: MAX_PER_RUN, value: "1"}
+                - {name: MAX_PER_DAY, value: "10"}
+                # 起票 App の issue から作った implement がまた issue を起票する連鎖は、この枠で止まる。
+                - {name: MAX_PER_DAY_APP, value: "5"}
+                # flow の起票 App の bot ユーザーの id（App ID ではない）。
+                - {name: ISSUER_USER_ID, value: "334165112"}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: [ALL]
+              volumeMounts:
+                - {name: script, mountPath: /script, readOnly: true}
+                - {name: lib, mountPath: /decide-lib, readOnly: true}
+                - {name: github-gateway-key, mountPath: /github-gateway-key, readOnly: true}
+                - {name: tmp, mountPath: /tmp}
+              resources:
+                requests: {cpu: 10m, memory: 32Mi}
+                limits: {memory: 128Mi}
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: decide-flow
+spec:
+  endpointSelector:
+    matchLabels:
+      decide-flow: "true"
+  egress:
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "6443"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/managed-by: envoy-gateway
+            io.kubernetes.pod.namespace: llm-gateway
+      toPorts:
+        - ports:
+            - port: "10443"
+              protocol: TCP

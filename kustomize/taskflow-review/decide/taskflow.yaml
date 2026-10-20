@@ -13,9 +13,13 @@ spec:
       handler: decide
       next:
         完了: decided
+        # ディレクトリは判断役のランナーが、名前とディレクトリは判断から implement の Task を作るスクリプトが
+        # 照合している。変えるときは揃える（ずれると黙って flow に流れなくなる）。
+        流す: flow
         TaskFailed: fail
   terminals:
     完了: Success
+    流す: Success
 ---
 apiVersion: flow.tgy.io/v1alpha1
 kind: TaskFlow

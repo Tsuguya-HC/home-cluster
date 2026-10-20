@@ -72,20 +72,6 @@ done < /tmp/pairs
 writers=$(jq -Rn '[inputs | split(" ") | select(.[2] | IN("admin", "maintain", "write")) | {repo: .[0], login: .[1], permission: .[2]}]' /tmp/writers)
 
 # 作者の判定。REST で引き直した issue にも同じものをかける。
-cat > /tmp/author.jq <<'EOF'
-def repo: .repository_url | capture("/repos/(?<r>[^/]+/[^/]+)$").r;
-def permission($writers):
-  (repo | ascii_downcase) as $r | .user.login as $u
-  | first($writers[] | select((.repo | ascii_downcase) == $r and .login == $u) | .permission) // null;
-def author($issuer; $writers):
-  if .user.type == "Bot" then
-    (if .user.id == $issuer then "app" else null end)
-  elif .user.type != "User" then null
-  elif (.author_association | IN("OWNER", "MEMBER", "COLLABORATOR")) then "human"
-  elif permission($writers) != null then "human"
-  else null end;
-EOF
-
 # 作者を判定するのは、まだ Task が無い issue だけ（権限を引いたのもそれだけ）。
 jq -s -c --argjson since "$since" --argjson issuer "$ISSUER_USER_ID" --argjson writers "$writers" --slurpfile tasks /tmp/tasks.json '
   include "author"; . as $all
@@ -99,7 +85,7 @@ jq -s -c --argjson since "$since" --argjson issuer "$ISSUER_USER_ID" --argjson w
       authors: ([$new[] | select(author($issuer; $writers) == null) | "\(.user.login)(\(.author_association))"] | group_by(.) | map("\(.[0])×\(length)")),
       issues: [$new[] | select(author($issuer; $writers) != null)
         | {id, number, created_at, repo: repo}]
-    }' -L /tmp /tmp/found.jsonl > /tmp/summary.json
+    }' -L /decide-lib /tmp/found.jsonl > /tmp/summary.json
 
 jq -c '.issues[]' /tmp/summary.json > /tmp/candidates
 
@@ -136,13 +122,13 @@ while read -r line; do
     failed=1
     continue
   fi
-  kind=$(jq -r --argjson issuer "$ISSUER_USER_ID" --argjson writers "$writers" -L /tmp 'include "author"; author($issuer; $writers) // empty' /tmp/issue.json)
+  kind=$(jq -r --argjson issuer "$ISSUER_USER_ID" --argjson writers "$writers" -L /decide-lib 'include "author"; author($issuer; $writers) // empty' /tmp/issue.json)
   if [ "$(jq -r '.id' /tmp/issue.json)" != "$id" ] || [ "$(jq '.pull_request != null' /tmp/issue.json)" = true ] || [ -z "$kind" ]; then
     echo "${repo}#${number}: 引き直すと対象から外れた。作らない。"
     continue
   fi
 
-  jq -n -L /tmp --slurpfile tasks /tmp/tasks.json --slurpfile issue /tmp/issue.json --argjson writers "$writers" \
+  jq -n -L /decide-lib --slurpfile tasks /tmp/tasks.json --slurpfile issue /tmp/issue.json --argjson writers "$writers" \
     --arg repo "$repo" --argjson number "$number" --arg kind "$kind" --arg l "$L" '
     include "author";
     $issue[0] as $i

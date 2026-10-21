@@ -1,5 +1,6 @@
 {
   "review": {"harness": "claude", "model": "claude-sonnet-5"},
+  "review-opus": {"harness": "claude", "model": "claude-opus-5-5"},
   "implement-claude": {"harness": "claude", "model": "claude-sonnet-5-5"},
   "review-muse": {"harness": "pi", "provider": "anthropic", "api": "anthropic-messages", "reasoning": true, "contextWindow": 1048576, "maxTokens": 131072},
   "implement": {"harness": "pi", "provider": "anthropic", "api": "anthropic-messages", "reasoning": true, "contextWindow": 1048576, "maxTokens": 131072}

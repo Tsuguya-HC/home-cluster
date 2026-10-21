@@ -140,6 +140,37 @@ spec:
       # クライアントは retry を繰り返して何も進まない。
       timeouts:
         request: 600s
+    # 判断役の評価（opus）。
+    - matches:
+        - headers:
+            - type: Exact
+              name: x-ai-eg-model
+              value: review-opus
+            - type: RegularExpression
+              name: x-llm-client
+              value: &review-opus-clients "^(taskflow-review)$"
+        - headers:
+            - type: Exact
+              name: x-llm-alias
+              value: review-opus
+            - type: RegularExpression
+              name: x-ai-eg-model
+              value: "^claude-[a-z0-9.-]+$"
+            - type: RegularExpression
+              name: x-llm-client
+              value: *review-opus-clients
+      modelsOwnedBy: Envoy AI Gateway
+      backendRefs:
+        - name: claude-api
+          modelNameOverride: claude-opus-5-5
+          weight: 1
+          priority: 0
+        - name: claude-max
+          modelNameOverride: claude-opus-5-5
+          weight: 1
+          priority: 1
+      timeouts:
+        request: 600s
     # 障害調査系（alert-investigate 等）。
     - matches:
         - headers:

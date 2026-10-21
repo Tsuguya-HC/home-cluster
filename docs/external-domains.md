@@ -42,7 +42,7 @@ Application が Unknown のまま止まる形で出る。
 
 ## Anthropic
 
-- **用途**: `llm-gateway` の `review` / `investigate` / `implement-claude`（implement flow 本線の作業役）alias（API クレジットを Workload Identity Federation の短命トークンで先に使い、Max の OAuth トークンが予備）と、local-dev 用の `claude-opus-5-5` / `claude-sonnet-5`、ほかのリポジトリで定義する利用者向けのルート（Max の OAuth トークンで Anthropic 直）
+- **用途**: `llm-gateway` の `review` / `review-opus` / `investigate` / `implement-claude`（implement flow 本線の作業役）alias（API クレジットを Workload Identity Federation の短命トークンで先に使い、Max の OAuth トークンが予備）と、local-dev 用の `claude-opus-5-5` / `claude-sonnet-5`、ほかのリポジトリで定義する利用者向けのルート（Max の OAuth トークンで Anthropic 直）
 - **引く側**: Envoy データプレーン（`manifests/llm-gateway/netpol.yaml`）と、Workload Identity
   Federation の交換（`POST /v1/oauth/token`）をする `claude-api-refresher`
   （`manifests/llm-gateway/claude-api-refresher.yaml`）**だけ**。推論を投げるのは Envoy だけ。

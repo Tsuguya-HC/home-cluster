@@ -1,6 +1,6 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-# 判断と評価は同じ models を使う（評価が測るのは、判断が使うのと同じ組み合わせ）。
+# この flow の判断と評価は同じ models を使う（評価が測るのは、判断が使うのと同じ組み合わせ）。
 resources:
   - ../../decide
 components:

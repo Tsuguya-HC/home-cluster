@@ -1,0 +1,19 @@
+# nameSuffix で eval-opus になる。handler の参照は CRD の中なので書き換わらず、suffix 込みで書く。
+apiVersion: flow.tgy.io/v1alpha1
+kind: TaskFlow
+metadata:
+  name: eval
+spec:
+  profile: investigate
+  start: 評価
+  workspace: {}
+  ttl:
+    succeeded: 168h
+  bindings:
+    評価:
+      handler: decide-eval-opus
+      next:
+        完了: evaluated
+        TaskFailed: fail
+  terminals:
+    完了: Success

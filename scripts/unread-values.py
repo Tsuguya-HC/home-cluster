@@ -158,8 +158,15 @@ def pull(src):
     return chart_dir
 
 
+# ArgoCD はクラスタの API を .Capabilities として渡す。ここで渡さないと、CRD の有無で分岐する
+# テンプレート（ServiceMonitor など）のキーがすべて「読まれない」と誤って判定される。
+API_VERSIONS = ["monitoring.coreos.com/v1"]
+
+
 def render(chart_dir, src, files):
     cmd = ["helm", "template", src["release"], chart_dir, "--namespace", src["namespace"]]
+    for api in API_VERSIONS:
+        cmd += ["--api-versions", api]
     for f in files:
         cmd += ["-f", f]
     run = subprocess.run(cmd, capture_output=True, text=True)

@@ -56,3 +56,9 @@ helm-values/nextcloud/values.yaml::externalDatabase.enabled
 # useUnprivilegedImage: true なのでこの値は効かない。特権イメージに戻したときに
 # fsGroup 付け替えを走らせない意思表示として残す。
 helm-values/qdrant/values.yaml::updateVolumeFsOwnership
+
+# monitoring.coreos.com の CRD が見えないとき、cilium の chart は serviceMonitor.enabled を
+# 描画エラーにする。このキーはそれを止めるためだけにあり、CRD が見えている描画（ArgoCD、
+# この検査）では読まれない。空のクラスタから組むときは kube-prometheus-stack より先に cilium を
+# 入れるので、そのとき効く。
+helm-values/cilium/values.yaml::prometheus.serviceMonitor.trustCRDsExist

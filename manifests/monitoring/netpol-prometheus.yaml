@@ -97,6 +97,14 @@ spec:
               protocol: TCP
     - toEndpoints:
         - matchLabels:
+            app.kubernetes.io/name: argocd-application-controller
+            io.kubernetes.pod.namespace: argocd
+      toPorts:
+        - ports:
+            - port: "8082"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
             app.kubernetes.io/name: alertmanager
       toPorts:
         - ports:

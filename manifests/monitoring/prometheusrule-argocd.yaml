@@ -1,0 +1,36 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: argocd
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: argocd
+      rules:
+        - alert: ArgoCDAppNotSynced
+          expr: max by (name, sync_status) (argocd_app_info{sync_status!="Synced"}) == 1
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "ArgoCD の Application {{ $labels.name }} が {{ $labels.sync_status }} のまま 30 分続いている"
+            description: "`kubectl -n argocd get app {{ $labels.name }} -o jsonpath='{.status.conditions}'` で理由を見る。Unknown は ComparisonError（マニフェストを描画できない）。"
+        - alert: ArgoCDAppUnhealthy
+          expr: max by (name, health_status) (argocd_app_info{health_status=~"Degraded|Missing"}) == 1
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "ArgoCD の Application {{ $labels.name }} が {{ $labels.health_status }} のまま 15 分続いている"
+            description: "`kubectl -n argocd get app {{ $labels.name }}` と、Degraded のリソースのイベントを見る。"
+        # metrics が来なくなると上の 2 本は黙るので、来ないこと自体を鳴らす。
+        - alert: ArgoCDMetricsAbsent
+          expr: absent(argocd_app_info)
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "argocd_app_info が 15 分来ていない"
+            description: "application-controller の ServiceMonitor と、monitoring からの CNP（manifests/argocd/netpol-application-controller.yaml）を見る。"

@@ -19,6 +19,9 @@ spec:
               protocol: TCP
   egress:
     - toFQDNs:
+        # GitHub Pages（*.github.io とカスタムドメイン）は IP を共有するので、ここに無い名前も、他の名前を
+        # 引いた直後だけは通ってしまう。chart の repo を足したら必ずここにも足す（漏れは数日おきの
+        # ComparisonError としてしか出ない）。
         - matchName: "github.com"
         - matchName: "api.github.com"
         - matchName: "argoproj.github.io"
@@ -40,6 +43,9 @@ spec:
         - matchName: "charts.external-secrets.io"
         - matchName: "external-secrets.io"
         - matchName: "qdrant.github.io"
+        - matchName: "nextcloud.github.io"
+        - matchName: "valkey.io"
+        - matchName: "1password.github.io"
         - matchName: "helm.otwld.com"
         # Agent Router / Envoy Gateway の OCI チャート（oci://docker.io/envoyproxy）。
         # Docker Hub は 3 ホストに割れる: API は registry-1、トークンは auth、

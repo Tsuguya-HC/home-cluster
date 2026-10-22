@@ -21,14 +21,6 @@ spec:
         - ports:
             - port: "3000"
               protocol: TCP
-    - fromEndpoints:
-        - matchLabels:
-            claude-code: "true"
-            io.kubernetes.pod.namespace: claude-code
-      toPorts:
-        - ports:
-            - port: "3000"
-              protocol: TCP
   egress:
     - toEndpoints:
         - matchLabels:

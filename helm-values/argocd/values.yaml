@@ -12,6 +12,13 @@ global:
     create: false
 
 controller:
+  # argocd_app_info を Prometheus に収集させる（manifests/monitoring/prometheusrule-argocd.yaml が読む）。
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      additionalLabels:
+        release: kube-prometheus-stack
   resources:
     requests:
       cpu: 50m

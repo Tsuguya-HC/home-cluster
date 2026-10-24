@@ -366,7 +366,7 @@ spec:
             limits:
               memory: 64Mi
         - name: setup-registry-auth
-          image: alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+          image: alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
           command: [sh, -c]
           args:
             - |
@@ -423,7 +423,7 @@ spec:
             - name: build
               mountPath: /build
       container:
-        image: alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+        image: alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
         command: [sh, /scripts/push-installer.sh]
         securityContext:
           runAsUser: 65532
@@ -504,7 +504,7 @@ spec:
             limits:
               memory: 64Mi
         - name: setup-registry-auth
-          image: alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+          image: alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
           command: [sh, -c]
           args:
             - |
@@ -600,7 +600,7 @@ spec:
             - name: build-iso
               mountPath: /build-iso
       container:
-        image: alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+        image: alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
         command: [sh, /scripts/push-iso.sh]
         securityContext:
           runAsUser: 65532
@@ -672,7 +672,7 @@ spec:
             limits:
               memory: 64Mi
       container:
-        image: alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+        image: alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
         command: [sh, /scripts/finalize-release.sh]
         securityContext:
           runAsUser: 65532

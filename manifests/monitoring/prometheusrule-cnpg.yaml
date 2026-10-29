@@ -1,0 +1,64 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: cnpg
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: cnpg
+      rules:
+        # base backup は 1 日 1 回。1 回抜けても鳴らさず、2 回目が抜ける前に鳴らす。
+        - alert: SharedPgBackupStale
+          expr: |
+            time() - max(cnpg_collector_last_available_backup_timestamp{namespace="database", pod=~"shared-pg-.*"})
+              > 36 * 3600
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "shared-pg の base backup が 36 時間取れていない"
+            description: "最後の base backup から {{ $value | humanizeDuration }} 経過。Backup CR の status と R2 の鍵（r2-backup-credentials）を見る。"
+        - alert: SharedPgBackupFailed
+          expr: |
+            max(cnpg_collector_last_failed_backup_timestamp{namespace="database", pod=~"shared-pg-.*"})
+              > max(cnpg_collector_last_available_backup_timestamp{namespace="database", pod=~"shared-pg-.*"})
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "shared-pg の直近の base backup が失敗している"
+            description: "最後に失敗したバックアップが最後に成功したものより新しい。"
+        # failed_count は起動からの累積なので増分で見る。
+        - alert: SharedPgWalArchiveFailing
+          expr: |
+            increase(cnpg_pg_stat_archiver_failed_count{namespace="database", pod=~"shared-pg-.*"}[1h]) > 0
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "shared-pg の WAL アーカイブが失敗している ({{ $labels.pod }})"
+            description: "WAL が R2 に送れず PVC に溜まっている。止まっている間の変更は復元できない。"
+        # 系列が無いと上の 3 本は比較相手が無く黙る。
+        - alert: CnpgMetricsAbsent
+          expr: |
+            absent(cnpg_collector_up{namespace="database", pod=~"shared-pg-.*"})
+              or absent(cnpg_collector_up{namespace="rss", pod=~"rss-pg-.*"})
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "shared-pg / rss-pg のメトリクスが届いていない"
+            description: "PodMonitor（database/shared-pg, rss/rss-pg）、各 CNP の 9187、Prometheus の egress を見る。"
+        # 系列があっても 0 だと backup / archiver 系は古い値のまま黙る。
+        - alert: CnpgCollectorDown
+          expr: |
+            cnpg_collector_up{namespace="database", pod=~"shared-pg-.*"} == 0
+              or cnpg_collector_up{namespace="rss", pod=~"rss-pg-.*"} == 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $labels.pod }} のコレクタが PostgreSQL に接続できない"
+            description: "メトリクスは届いているが cnpg_collector_up が 0。backup / WAL アーカイブ系のメトリクスが更新されていない可能性がある。"

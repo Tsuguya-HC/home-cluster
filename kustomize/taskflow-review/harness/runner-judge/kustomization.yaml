@@ -80,7 +80,7 @@ patches:
       # digest で固定する。
       - op: replace
         path: /spec/jobTemplate/template/spec/containers/0/image
-        value: registry.infra.tgy.io/agents/runner:latest@sha256:07efb8b7477818270cfa49ea717e3806e03746fa0fc480849d61d0d9e34261c1
+        value: registry.infra.tgy.io/agents/runner:latest@sha256:c655c77b4e130447ecae64f97289741b28eb3bcbdc7dad4e1b3855193dfb3635
       - op: replace
         path: /spec/jobTemplate/template/spec/containers/0/command
         value: [bash, -c]

@@ -4,7 +4,7 @@ metadata:
   name: shared-pg-backup
   namespace: database
 spec:
-  schedule: "0 18 * * *" # 03:00 JST
+  schedule: "0 0 18 * * *" # 03:00 JST。CNPG の cron は先頭が秒
   backupOwnerReference: self
   cluster:
     name: shared-pg

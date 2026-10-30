@@ -9,9 +9,6 @@ expose:
     name: harbor
     staticClusterIP: "10.107.133.63"
 
-updateStrategy:
-  type: Recreate
-
 externalURL: https://registry.infra.tgy.io
 
 caBundleSecretName: pg-ca-cert
@@ -80,7 +77,21 @@ trivy:
     limits:
       memory: 2Gi
 
+# nginx / core / registry は Kyverno の verify-image-signatures の経路で、registry.infra.tgy.io の
+# イメージは Harbor が応答しないと Pod を作れない。1 つだと乗っているノードの再起動の間それが止まる
+# （2026-10-29 Talos upgrade で taskflow controller が約 15 分 0/2）ので、別ノードに 2 つ置く。
 core:
+  replicas: 2
+  podDisruptionBudget:
+    enabled: true
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchLabels:
+              app: harbor
+              component: core
+          topologyKey: kubernetes.io/hostname
   extraEnvVars:
     - name: OIDC_CLIENT_SECRET
       valueFrom:
@@ -108,6 +119,17 @@ portal:
       memory: 128Mi
 
 registry:
+  replicas: 2
+  podDisruptionBudget:
+    enabled: true
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchLabels:
+              app: harbor
+              component: registry
+          topologyKey: kubernetes.io/hostname
   # `registry.resources` はチャートが読まないため、registry / registryctl の
   # 両コンテナが resources: {} （requests も limits も無し）で動いていた。
   # このチャートはコンテナごとに registry.registry / registry.controller で
@@ -158,6 +180,17 @@ jobservice:
       memory: 256Mi
 
 nginx:
+  replicas: 2
+  podDisruptionBudget:
+    enabled: true
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchLabels:
+              app: harbor
+              component: nginx
+          topologyKey: kubernetes.io/hostname
   # 全 push/pull の経路。大きい blob の並列アップロードでスパイクし、
   # 128Mi では OOMKilled した (2026-08-22)
   resources:

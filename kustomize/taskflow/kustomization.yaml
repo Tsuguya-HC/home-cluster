@@ -49,7 +49,7 @@ resources:
 images:
   - name: controller
     newName: registry.infra.tgy.io/tools/taskflow
-    newTag: latest@sha256:5fe9219eb119c1ebcf6d4be29aee875010fe994922e72433dac4bc91b1371cd9
+    newTag: latest@sha256:26ed2770abe286f03e7f0313f456477c47bc448b1d6b3b65ccb79ded1e581a4f
 
 patches:
   # 全 namespace restricted 運用に合わせる（config/default の Namespace にはラベルが無い）
@@ -93,7 +93,7 @@ patches:
               - name: manager
                 env:
                   - name: SIDECAR_IMAGE
-                    value: registry.infra.tgy.io/tools/agent-sidecar:latest@sha256:23914575dd08743c028c7c86914e6058f7e6da11db01bb401887d85f41ebd8d6
+                    value: registry.infra.tgy.io/tools/agent-sidecar:latest@sha256:d92735437b663eadd064826eba36661bd19d879b4dbd7412fc956afea2b70fa0
 
   # 送り役 Job は Task の namespace で動き、そこに Secret taskflow-archive-s3 と、送り側・filer の
   # 受け側の両方の CNP が要る。欠けた namespace の Task は記録が送られないまま消え、再送されない。

@@ -10,7 +10,7 @@
     // + :maintainLockFilesWeekly. The two presets listed separately before are
     // both inside it now.
     "config:best-practices",
-    "github>aquaproj/aqua-renovate-config#2.13.0"
+    "github>aquaproj/aqua-renovate-config#2.14.0"
   ],
 
   // docker:pinDigests now covers every image, which replaces the two scoped pin

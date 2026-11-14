@@ -97,7 +97,7 @@ spec:
         - name: postgres
           # 本番（CNPG）は PostgreSQL 18。メジャーを揃えてある。
           # Kyverno の署名検証は registry.infra.tgy.io/* のみが対象なので上流イメージで通る
-          image: postgres:18-alpine@sha256:123b17998ccaf47e53b502e8c6a1e79afd8f579c6f3eec83c563da026f957395
+          image: postgres:18-alpine@sha256:1018733457011bf88d81db98cf43aac6d5150afc18787dbe204771fedf80ff95
           # emissary executor はイメージの entrypoint を知る必要があり、
           # 自分の index に無いものは registry へ問い合わせに行く。argo から
           # docker.io への egress は無いので、そこで Pod が Pending のまま止まる。

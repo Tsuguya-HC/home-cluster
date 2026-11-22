@@ -12,6 +12,10 @@ spec:
   image: ghcr.io/tsuguya-hc/home-rss-fetcher:v0.1.7@sha256:8e9a4ee54accf02e305fc3692b40ad01d9a41ea59bb3fedc33ceee513d11b10b
   replicas: 1
   executor: containerd-shim-spin
+  # db_ca_root is read once at pod start, so a CNPG CA rotation (~90 days)
+  # leaves running pods trusting the expired CA until they restart.
+  deploymentAnnotations:
+    secret.reloader.stakater.com/reload: rss-pg-ca
   imagePullSecrets:
     - name: ghcr-pull
   resources:

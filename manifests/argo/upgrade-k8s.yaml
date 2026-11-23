@@ -301,9 +301,12 @@ spec:
               # drain timed out, leaving the node cordoned. If a drain is ever
               # reintroduced, uncordon from a trap so a failure cannot strand a
               # node in SchedulingDisabled.
+              # The kubelet lives in its own KubeletConfig document since home-infra
+              # moved to Talos 1.14 documents; patching v1alpha1 .machine.kubelet is
+              # rejected ("kubelet config is already set"), which failed the 1.37.2 run.
               talosctl -n "$IP" --talosconfig /etc/talos/config \
                 patch machineconfig \
-                -p "{\"machine\":{\"kubelet\":{\"image\":\"ghcr.io/siderolabs/kubelet:v${NEW_VER}\"}}}"
+                -p "{\"apiVersion\":\"v1alpha1\",\"kind\":\"KubeletConfig\",\"image\":\"ghcr.io/siderolabs/kubelet:v${NEW_VER}\"}"
               kubectl wait --for=condition=Ready "node/${SHORT_NAME}" --timeout=300s
               echo "Node ${SHORT_NAME} upgraded to v${NEW_VER}"
             done
@@ -379,7 +382,7 @@ spec:
             # No drain — see the note in the previous step.
             talosctl -n "$IP" --talosconfig /etc/talos/config \
               patch machineconfig \
-              -p "{\"machine\":{\"kubelet\":{\"image\":\"ghcr.io/siderolabs/kubelet:v${NEW_VER}\"}}}"
+              -p "{\"apiVersion\":\"v1alpha1\",\"kind\":\"KubeletConfig\",\"image\":\"ghcr.io/siderolabs/kubelet:v${NEW_VER}\"}"
             kubectl wait --for=condition=Ready "node/${SELF_NODE}" --timeout=300s
             echo "Node ${SELF_NODE} upgraded to v${NEW_VER}"
 

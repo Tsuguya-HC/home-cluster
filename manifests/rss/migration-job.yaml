@@ -22,7 +22,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: dbmate
-          image: ghcr.io/amacneil/dbmate:2@sha256:b0c8a87bfef4f2819fdb0a68ca357a44d12fb90d23eca695fcfc3b7e159cb1c5
+          image: ghcr.io/amacneil/dbmate:2@sha256:fb4fe7cabfe98cf864d63ce083867f3c303a8c1a022fcd69081439425706e909
           command: ["/bin/sh", "-c"]
           args:
             - |
